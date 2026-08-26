@@ -1,5 +1,6 @@
 import Clipboard from "@react-native-clipboard/clipboard"
 import { skipToken } from "@reduxjs/toolkit/query"
+import { useState } from "react"
 import {
   Pressable,
   StyleSheet,
@@ -11,7 +12,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 
 import { useColorTheme } from "@/hooks/useColorTheme"
 import { CopyIcon } from "@/icons/CopyIcon"
-import { TrashIcon } from "@/icons/TrashIcon"
 import { type ReadiumLocator } from "@/modules/readium/src/Readium.types"
 import {
   useCreateHighlightMutation,
@@ -22,6 +22,10 @@ import {
 import { type UUID, randomUUID } from "@/uuid"
 
 import { HighlightColorPicker } from "./HighlightColorPicker"
+import { SelectionLookupMenu } from "./SelectionLookupMenu"
+import { getSelectionToolbarLayout } from "./selectionToolbarLayout"
+
+const COLLAPSED_TOOLBAR_ACTION_COUNT = 7
 
 type Props = {
   bookUuid: UUID
@@ -41,21 +45,30 @@ export function SelectionMenu({
   onClose,
 }: Props) {
   const dimensions = useWindowDimensions()
-  const insets = useSafeAreaInsets()
+  const { top: topInset } = useSafeAreaInsets()
   const { background } = useColorTheme()
   const [createHighlight] = useCreateHighlightMutation()
   const [updateHighlight] = useUpdateHighlightMutation()
   const [deleteHighlight] = useDeleteHighlightMutation()
+  const [lookupExpanded, setLookupExpanded] = useState(false)
   const { data: existingHighlight } = useGetHighlightQuery(
     highlightUuid ? { uuid: highlightUuid } : skipToken,
   )
 
-  const numIcons = existingHighlight ? 7 : 6
-  const panelWidth = numIcons * (24 + 16)
-  const leftOffset = Math.max(
-    16, // Minimum left padding
-    Math.min(x - panelWidth / 2, dimensions.width - panelWidth - 16), // Prevent overflow on the right side
-  )
+  const selectedText = (existingHighlight?.locator ?? locator).text?.highlight
+    ?.toString()
+  const toolbarActionCount =
+    COLLAPSED_TOOLBAR_ACTION_COUNT -
+    1 +
+    (lookupExpanded ? 2 + Number(Boolean(existingHighlight)) : 1)
+  const toolbarLayout = getSelectionToolbarLayout({
+    actionCount: toolbarActionCount,
+    collapsedActionCount: COLLAPSED_TOOLBAR_ACTION_COUNT,
+    topInset,
+    width: dimensions.width,
+    x,
+    y,
+  })
 
   return (
     <>
@@ -64,8 +77,10 @@ export function SelectionMenu({
           styles.menu,
           {
             backgroundColor: background,
-            top: Math.max(y - 40, insets.top),
-            left: leftOffset,
+            height: toolbarLayout.height,
+            left: toolbarLayout.left,
+            top: toolbarLayout.top,
+            width: toolbarLayout.width,
           },
         ]}
       >
@@ -92,29 +107,28 @@ export function SelectionMenu({
           accessibilityRole="button"
           style={styles.copyButton}
           onPress={() => {
-            Clipboard.setString(
-              (
-                existingHighlight?.locator ?? locator
-              ).text?.highlight?.toString() ?? "",
-            )
+            Clipboard.setString(selectedText ?? "")
             onClose()
           }}
         >
           <CopyIcon />
         </Pressable>
-        {existingHighlight && (
-          <Pressable
-            accessibilityLabel="Delete highlight"
-            accessibilityRole="button"
-            style={styles.trashButton}
-            onPress={() => {
-              deleteHighlight({ uuid: existingHighlight.uuid })
-              onClose()
-            }}
-          >
-            <TrashIcon />
-          </Pressable>
-        )}
+        <SelectionLookupMenu
+          expanded={lookupExpanded}
+          selectedText={selectedText}
+          onCloseSelection={onClose}
+          onExpandedChange={setLookupExpanded}
+          {...(existingHighlight
+            ? {
+                deleteHighlightAction: {
+                  onPress: () => {
+                    deleteHighlight({ uuid: existingHighlight.uuid })
+                    onClose()
+                  },
+                },
+              }
+            : {})}
+        />
       </View>
       {existingHighlight && (
         <TouchableOpacity
@@ -133,6 +147,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     zIndex: 1000,
     flexDirection: "row",
+    flexWrap: "wrap",
     borderRadius: 8,
     shadowRadius: 4,
     shadowOpacity: 0.3,
@@ -159,11 +174,6 @@ const styles = StyleSheet.create({
     borderColor: "#AAA",
   },
   copyButton: {
-    width: 24,
-    height: 24,
-    margin: 8,
-  },
-  trashButton: {
     width: 24,
     height: 24,
     margin: 8,

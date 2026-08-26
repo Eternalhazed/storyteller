@@ -50,3 +50,17 @@ of them to your device.
 Be sure to keep the app open and in the foreground during the download (support
 for background downloads is on the roadmap!). Once your book is downloaded,
 you'll find it on your Bookshelf, where you can start reading or listening!
+
+## Looking up selected text
+
+While reading an ebook, select a word or phrase and tap the three-dot button in
+the selection toolbar. It expands in place to show Wikipedia and Google Search
+icons for the selected text.
+
+Storyteller asks your device to open the selected provider. Depending on your
+device, installed apps, and link preferences, the result may open in a supported
+app or your default browser. Storyteller does not force a particular browser.
+
+These lookups require an internet connection. The selected text is sent only to
+the provider you choose and only after you tap that provider; it is not sent to
+the Storyteller server for lookup.

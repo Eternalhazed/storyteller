@@ -11,7 +11,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "rnr": "yarn cli",
-    "test": "tsx --test store/**/*.test.ts"
+    "test": "tsx --test store/**/*.test.ts components/**/*.test.ts"
   },
   "dependencies": {
     "@expo-google-fonts/literata": "^0.2.3",
