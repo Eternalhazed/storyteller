@@ -27,12 +27,14 @@ type Props<Value> = {
   }>[]
   onChange: (value: Value) => void
   value: Value
+  className?: string
 }
 
 export function ButtonGroup<Value>({
   value,
   onChange,
   children,
+  className,
 }: Props<Value>) {
   const contextValue = useMemo(
     () =>
@@ -45,7 +47,7 @@ export function ButtonGroup<Value>({
 
   return (
     <ButtonGroupContext.Provider value={contextValue}>
-      <View className="flex-row">
+      <View className={cn("flex-row", className)}>
         {children.map((child, i) => {
           if (children.length === 1) return child
           if (i === 0 && children.length > 1) {
@@ -83,7 +85,7 @@ export function ButtonGroupButton<Value>({
         ...props.accessibilityState,
         selected: currentValue === value,
       }}
-      className={cn({
+      className={cn(props.className, {
         "bg-transparent": currentValue !== value,
         "rounded-tr-none rounded-br-none":
           neighbors === "right" || neighbors === "both",

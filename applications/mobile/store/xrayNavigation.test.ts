@@ -27,6 +27,7 @@ import {
   getXrayChapterLinks,
   getXrayDetailRows,
   getXrayEntitySummary,
+  splitXrayNames,
 } from "./xrayNavigation"
 
 function entity(
@@ -469,8 +470,22 @@ test("detail rows contain visible facts and mentions, grouped by chapter in eith
     newestFirst: true,
   })
   assert.deepEqual(
-    newest.filter((row) => row.kind === "heading").map((row) => row.title),
-    ["Key facts", "Mentions (7)", "Second chapter", "First chapter"],
+    newest
+      .filter((row) => row.kind === "section")
+      .map((row) => [row.title, row.count]),
+    [
+      ["Key facts", 1],
+      ["Mentions", 7],
+    ],
+  )
+  assert.deepEqual(
+    newest
+      .filter((row) => row.kind === "chapter")
+      .map((row) => [row.title, row.count]),
+    [
+      ["Second chapter", 4],
+      ["First chapter", 3],
+    ],
   )
   assert.deepEqual(
     newest.filter((row) => row.kind === "mention").map((row) => row.ordinal),
@@ -506,8 +521,13 @@ test("detail rows contain visible facts and mentions, grouped by chapter in eith
     newestFirst: false,
   })
   assert.deepEqual(
-    oldest.filter((row) => row.kind === "heading").map((row) => row.title),
-    ["Key facts", "Mentions (7)", "First chapter", "Second chapter"],
+    oldest
+      .filter((row) => row.kind === "chapter")
+      .map((row) => [row.title, row.count]),
+    [
+      ["First chapter", 3],
+      ["Second chapter", 4],
+    ],
   )
   assert.deepEqual(
     oldest.filter((row) => row.kind === "mention").map((row) => row.ordinal),
@@ -547,9 +567,10 @@ test("thousands of mentions remain separate virtualizable rows with stable uniqu
   assert.equal(rows.length, 5002)
   assert.equal(new Set(rows.map((row) => row.key)).size, rows.length)
   assert.deepEqual(rows[1], {
-    kind: "heading",
+    kind: "chapter",
     key: "chapter:0",
     title: "Untitled chapter",
+    count: 5000,
   })
   assert.deepEqual(rows[2], {
     kind: "mention",
@@ -563,6 +584,29 @@ test("thousands of mentions remain separate virtualizable rows with stable uniqu
     ordinal: 0,
     text: "Sentence 0.",
   })
+})
+
+test("a mention is split around the entity's names, whole words only and longest name first", () => {
+  assert.deepEqual(
+    splitXrayNames("Later, Bono. BONO'S hair; Bonobos ignored.", ["Bono"]),
+    [
+      { text: "Later, ", name: false },
+      { text: "Bono", name: true },
+      { text: ". ", name: false },
+      { text: "BONO", name: true },
+      { text: "'S hair; Bonobos ignored.", name: false },
+    ],
+  )
+  assert.deepEqual(splitXrayNames("Dr. Crest waved.", ["Crest", "Dr. Crest"]), [
+    { text: "Dr. Crest", name: true },
+    { text: " waved.", name: false },
+  ])
+  assert.deepEqual(splitXrayNames("No name here.", ["C++ (lang)"]), [
+    { text: "No name here.", name: false },
+  ])
+  assert.deepEqual(splitXrayNames("Plain.", []), [
+    { text: "Plain.", name: false },
+  ])
 })
 
 test("the X-Ray tab and scope persist for the session, with a safe tab fallback for other books", () => {

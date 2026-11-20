@@ -104,6 +104,12 @@ an emulator; the fixes below still need their targeted device checks.
       then scroll a list containing thousands of mentions.
 - [ ] Expected: scrolling stays responsive; sentence text is grouped by chapter
       title, with Untitled chapter only when no TOC title exists.
+- [ ] After scrolling down the entity list or an entity's mentions, swipe down
+      inside the list.
+- [ ] Expected: the list scrolls back up and the sheet stays open.
+- [ ] Expected: Key facts and Mentions are labelled sections with counts; each
+      chapter heading shows how many mentions it groups; each mention shows the
+      entity's name in bold.
 - [ ] Toggle newest/oldest first and use All entries.
 - [ ] Expected: mention and chapter order changes together; All entries returns
       to the in-tab list without closing the sheet.

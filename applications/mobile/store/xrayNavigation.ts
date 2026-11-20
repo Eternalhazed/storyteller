@@ -189,8 +189,22 @@ export function buildXrayJump({
   }
 }
 
+type XrayChapterRow = {
+  kind: "chapter"
+  key: string
+  title: string
+  /** Mentions listed under this chapter. */
+  count: number
+}
+
 export type XrayDetailRow =
-  | { kind: "heading"; key: string; title: string }
+  | {
+      kind: "section"
+      key: "facts" | "mentions"
+      title: string
+      count: number
+    }
+  | XrayChapterRow
   | { kind: "fact"; key: string; ordinal: number; text: string }
   | { kind: "mention"; key: string; ordinal: number; text: string }
 
@@ -208,7 +222,12 @@ export function getXrayDetailRows({
 }): XrayDetailRow[] {
   const rows: XrayDetailRow[] = []
   if (entity.facts.length) {
-    rows.push({ kind: "heading", key: "facts", title: "Key facts" })
+    rows.push({
+      kind: "section",
+      key: "facts",
+      title: "Key facts",
+      count: entity.facts.length,
+    })
     entity.facts.forEach((fact, index) => {
       rows.push({
         kind: "fact",
@@ -219,14 +238,16 @@ export function getXrayDetailRows({
     })
   }
   rows.push({
-    kind: "heading",
+    kind: "section",
     key: "mentions",
-    title: `Mentions (${entity.mentions.length})`,
+    title: "Mentions",
+    count: entity.mentions.length,
   })
 
   const direction = newestFirst ? -1 : 1
   let chapterIndex = newestFirst ? xray.chapters.length - 1 : 0
   let previousChapter = -1
+  let chapterRow: XrayChapterRow | undefined
   for (
     let index = newestFirst ? entity.mentions.length - 1 : 0;
     index >= 0 && index < entity.mentions.length;
@@ -250,14 +271,17 @@ export function getXrayDetailRows({
     ) {
       continue
     }
-    if (previousChapter !== chapterIndex) {
-      rows.push({
-        kind: "heading",
+    if (previousChapter !== chapterIndex || !chapterRow) {
+      chapterRow = {
+        kind: "chapter",
         key: `chapter:${chapterIndex}`,
         title: chapterLinks[chapterIndex]?.title ?? "Untitled chapter",
-      })
+        count: 0,
+      }
+      rows.push(chapterRow)
       previousChapter = chapterIndex
     }
+    chapterRow.count += 1
     rows.push({
       kind: "mention",
       key: `mention:${ordinal}`,
@@ -266,4 +290,34 @@ export function getXrayDetailRows({
     })
   }
   return rows
+}
+
+/**
+ * Splits a sentence around the names it uses for an entity, so the UI can
+ * emphasise them. Matching ignores case and never starts or ends inside a word.
+ */
+export function splitXrayNames(
+  text: string,
+  names: readonly string[],
+): { text: string; name: boolean }[] {
+  const alternatives = names
+    .filter((name) => name.trim())
+    .sort((a, b) => b.length - a.length)
+    .map((name) => name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
+  if (!alternatives.length) return [{ text, name: false }]
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}])(?:${alternatives.join("|")})(?![\\p{L}\\p{N}])`,
+    "giu",
+  )
+  const parts: { text: string; name: boolean }[] = []
+  let last = 0
+  for (const match of text.matchAll(pattern)) {
+    if (match.index > last) {
+      parts.push({ text: text.slice(last, match.index), name: false })
+    }
+    parts.push({ text: match[0], name: true })
+    last = match.index + match[0].length
+  }
+  if (last < text.length) parts.push({ text: text.slice(last), name: false })
+  return parts
 }

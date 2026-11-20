@@ -1,4 +1,4 @@
-import { ListTree } from "lucide-react-native"
+import { ListChecks, ListTree } from "lucide-react-native"
 import { useEffect } from "react"
 import {
   BackHandler,
@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 
 import { type XrayEntityView } from "@storyteller-platform/xray/view"
 
+import { XrayTypeBadge } from "@/components/XrayTypeBadge"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { Text } from "@/components/ui/text"
@@ -74,30 +75,51 @@ export function XrayPopover({ entity, x, y, onClose, onAllMentions }: Props) {
       >
         <ScrollView
           style={styles.body}
-          contentContainerClassName="gap-2 px-4 pt-3 pb-3"
+          contentContainerClassName="gap-3 px-4 pt-4 pb-3"
         >
-          <Text className="text-lg font-semibold" accessibilityRole="header">
-            {entity.name}
-          </Text>
-          <Text className="text-muted-foreground text-xs">
-            {xrayEntityTypeLabels[entity.type]}
-          </Text>
-          {summary && <Text className="text-sm">{summary}</Text>}
+          <View className="flex-row items-center gap-3">
+            <XrayTypeBadge type={entity.type} />
+            <View className="min-w-0 flex-1 gap-0.5">
+              <Text
+                className="text-lg font-semibold"
+                accessibilityRole="header"
+              >
+                {entity.name}
+              </Text>
+              <Text className="text-muted-foreground text-xs">
+                {xrayEntityTypeLabels[entity.type]}
+                {" · "}
+                {entity.mentions.length}{" "}
+                {entity.mentions.length === 1 ? "mention" : "mentions"} so far
+              </Text>
+            </View>
+          </View>
+          {summary && <Text className="text-sm leading-5">{summary}</Text>}
           {!!facts.length && (
-            <View className="gap-2 pt-1">
-              <Text className="text-sm font-bold">Key facts</Text>
+            <View className="border-border gap-2 border-t pt-3">
+              <View className="flex-row items-center gap-1.5">
+                <Icon
+                  as={ListChecks}
+                  size={16}
+                  className="text-muted-foreground"
+                />
+                <Text className="text-muted-foreground text-sm">Key facts</Text>
+              </View>
               {facts.map((fact, index) => (
-                <Text key={`${fact.at}:${index}`} className="text-sm leading-5">
-                  {fact.text}
-                </Text>
+                <View
+                  key={`${fact.at}:${index}`}
+                  className="flex-row items-start gap-3"
+                >
+                  <View className="bg-muted-foreground mt-2 h-1.5 w-1.5 rounded-full" />
+                  <Text className="min-w-0 flex-1 text-sm leading-5">
+                    {fact.text}
+                  </Text>
+                </View>
               ))}
             </View>
           )}
         </ScrollView>
-        <View className="border-border flex-row items-center justify-between gap-2 border-t px-4 py-1">
-          <Text className="text-muted-foreground min-w-0 flex-1 text-xs">
-            {entity.mentions.length} mentions so far
-          </Text>
+        <View className="border-border flex-row items-center justify-end border-t px-2 py-1">
           <Button
             accessibilityLabel={`All mentions of ${entity.name}`}
             className="h-11 sm:h-11"

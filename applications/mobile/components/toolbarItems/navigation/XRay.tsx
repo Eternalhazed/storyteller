@@ -1,7 +1,13 @@
 import { LegendList } from "@legendapp/list/react-native"
 import { skipToken } from "@reduxjs/toolkit/query"
 import { useFocusEffect } from "expo-router"
-import { ArrowLeft, ArrowUpDown } from "lucide-react-native"
+import {
+  ArrowLeft,
+  ArrowUpDown,
+  ChevronRight,
+  ListChecks,
+  TextQuote,
+} from "lucide-react-native"
 import { useCallback, useMemo, useState } from "react"
 import { BackHandler, type ScrollViewProps, View } from "react-native"
 import { ScrollView } from "react-native-gesture-handler"
@@ -15,11 +21,14 @@ import {
 } from "@storyteller-platform/xray/view"
 
 import { LoadingView } from "@/components/LoadingView"
+import { XrayTypeBadge, xrayEntityTypeIcons } from "@/components/XrayTypeBadge"
 import { useReaderFormSheetScrollPaddingBottom } from "@/components/toolbarItems/readerFormSheetLayout"
+import { ButtonGroup, ButtonGroupButton } from "@/components/ui/ButtonGroup"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { Text } from "@/components/ui/text"
 import { useIsFocused } from "@/hooks/useIsFocused"
+import { cn } from "@/lib/utils"
 import { bookmarkPressed } from "@/store/actions"
 import { useAppDispatch, useAppSelector } from "@/store/appState"
 import { useGetBookQuery, useGetBookXrayQuery } from "@/store/localApi"
@@ -38,6 +47,7 @@ import {
   getXrayChapterLinks,
   getXrayDetailRows,
   getXrayEntitySummary,
+  splitXrayNames,
   xrayEntityTypeLabels,
   xrayScopeLabels,
 } from "@/store/xrayNavigation"
@@ -51,10 +61,16 @@ import {
 const EntityList = withUniwind(LegendList<XrayEntityView>)
 const DetailList = withUniwind(LegendList<XrayDetailRow>)
 
-// The same scroll view the other reader menu tabs use.
+// The same scroll view the other reader menu tabs use. Without it, a swipe
+// down inside a scrolled list closes the sheet instead of scrolling back up.
 function renderSheetScrollView(props: ScrollViewProps) {
   return <ScrollView {...props} />
 }
+
+function EntitySeparator() {
+  return <View className="bg-border ml-[60px] h-px" />
+}
+
 const scopes: XrayScope[] = ["now", "chapter", "book"]
 const entityTypes: {
   type: XrayEntityView["type"]
@@ -193,60 +209,84 @@ function XrayContent({
 
   return (
     <View className="flex-1">
-      <View className="border-border gap-2 border-b px-2 py-2">
-        <View className="flex-row gap-1" accessibilityLabel="X-Ray scope">
+      <View className="border-border gap-3 border-b px-3 pt-2 pb-3">
+        <ButtonGroup
+          className="bg-secondary rounded-md"
+          value={scope}
+          onChange={(value: XrayScope) => {
+            setScope(value)
+            setLastXrayScope(value)
+          }}
+        >
           {scopes.map((value) => (
-            <Button
+            <ButtonGroupButton
               key={value}
-              className="h-11 min-w-0 flex-1 px-1 sm:h-11"
-              variant={scope === value ? "secondary" : "ghost"}
+              value={value}
+              className="h-10 min-w-0 flex-1 px-1 sm:h-10"
               accessibilityLabel={`X-Ray scope: ${xrayScopeLabels[value]}`}
-              accessibilityState={{ selected: scope === value }}
-              onPress={() => {
-                setScope(value)
-                setLastXrayScope(value)
-              }}
             >
-              <Text className="text-xs font-bold" numberOfLines={1}>
+              <Text className="text-sm font-medium" numberOfLines={1}>
                 {xrayScopeLabels[value]}
               </Text>
-            </Button>
+            </ButtonGroupButton>
           ))}
-        </View>
+        </ButtonGroup>
         <View
-          className="flex-row gap-1"
+          className="flex-row flex-wrap gap-2"
           accessibilityLabel="X-Ray entity types"
         >
-          {entityTypes.map((entry) => (
-            <Button
-              key={entry.type}
-              className="h-11 min-w-0 flex-1 px-1 sm:h-11"
-              variant={type === entry.type ? "secondary" : "ghost"}
-              accessibilityLabel={`Filter X-Ray: ${entry.label}`}
-              accessibilityHint="Select again to show all types"
-              accessibilityState={{ selected: type === entry.type }}
-              onPress={() => setType(type === entry.type ? null : entry.type)}
-            >
-              <Text className="text-xs" numberOfLines={1}>
-                {entry.label}
-              </Text>
-            </Button>
-          ))}
+          {entityTypes.map((entry) => {
+            const selected = type === entry.type
+            return (
+              <Button
+                key={entry.type}
+                className={cn(
+                  "h-9 flex-row items-center gap-1.5 rounded-full px-3 sm:h-9",
+                  selected && "border-primary bg-primary/10",
+                )}
+                variant="outline"
+                size="sm"
+                hitSlop={{ top: 6, bottom: 6 }}
+                accessibilityLabel={`Filter X-Ray: ${entry.label}`}
+                accessibilityHint="Select again to show all types"
+                accessibilityState={{ selected }}
+                onPress={() => setType(selected ? null : entry.type)}
+              >
+                <Icon
+                  as={xrayEntityTypeIcons[entry.type]}
+                  size={14}
+                  className={
+                    selected ? "text-primary" : "text-muted-foreground"
+                  }
+                />
+                <Text
+                  className={cn(
+                    "text-xs",
+                    selected && "text-primary font-semibold",
+                  )}
+                  numberOfLines={1}
+                >
+                  {entry.label}
+                </Text>
+              </Button>
+            )
+          })}
         </View>
       </View>
       <EntityList
         key={`${scope}:${type ?? "all"}`}
         className="flex-1"
-        contentContainerClassName="px-2 pt-2"
+        contentContainerClassName="pt-1"
         contentContainerStyle={{ paddingBottom }}
         data={scoped.entities}
-        estimatedItemSize={96}
+        estimatedItemSize={84}
+        ItemSeparatorComponent={EntitySeparator}
         recycleItems
         renderScrollComponent={renderSheetScrollView}
         keyExtractor={(item) => String(item.id)}
         ListHeaderComponent={
           scoped.scope !== scope && scoped.entities.length ? (
-            <Text className="text-muted-foreground px-3 pb-2 text-xs">
+            <Text className="text-muted-foreground px-3 pt-2 pb-1 text-xs">
               {scope === "now"
                 ? "No names in the last few pages."
                 : "No names in this chapter yet."}
@@ -265,31 +305,34 @@ function XrayContent({
           const summary = getXrayEntitySummary(item)
           return (
             <Button
-              className="active:bg-secondary my-0.5 h-auto flex-col items-stretch px-3 py-3 sm:h-auto"
+              className="active:bg-secondary h-auto flex-row items-start justify-start gap-3 rounded-none px-3 py-3 sm:h-auto"
               variant="ghost"
               accessibilityLabel={`Open X-Ray for ${item.name}, ${xrayEntityTypeLabels[item.type]}, ${item.mentions.length} mentions`}
               onPress={() => setEntityId(item.id)}
             >
-              <View className="flex-row items-baseline justify-between gap-3">
-                <Text
-                  className="min-w-0 flex-1 text-sm font-bold"
-                  numberOfLines={1}
-                >
-                  {item.name}
-                </Text>
-                <Text className="text-muted-foreground text-xs">
-                  {item.mentions.length}{" "}
-                  {item.mentions.length === 1 ? "mention" : "mentions"}
-                </Text>
+              <XrayTypeBadge type={item.type} />
+              <View className="min-w-0 flex-1 gap-0.5">
+                <View className="flex-row items-baseline justify-between gap-3">
+                  <Text
+                    className="min-w-0 flex-1 text-base font-semibold"
+                    numberOfLines={1}
+                  >
+                    {item.name}
+                  </Text>
+                  <Text className="text-muted-foreground text-xs">
+                    {item.mentions.length}{" "}
+                    {item.mentions.length === 1 ? "mention" : "mentions"}
+                  </Text>
+                </View>
+                {summary && (
+                  <Text
+                    className="text-muted-foreground text-sm leading-5 font-normal"
+                    numberOfLines={2}
+                  >
+                    {summary}
+                  </Text>
+                )}
               </View>
-              <Text className="text-muted-foreground text-xs">
-                {xrayEntityTypeLabels[item.type]}
-              </Text>
-              {summary && (
-                <Text className="text-sm" numberOfLines={1}>
-                  {summary}
-                </Text>
-              )}
             </Button>
           )
         }}
@@ -318,6 +361,10 @@ function XrayDetails({
   const rows = useMemo(
     () => getXrayDetailRows({ xray, entity, chapterLinks, newestFirst }),
     [xray, entity, chapterLinks, newestFirst],
+  )
+  const names = useMemo(
+    () => [entity.name, ...entity.aliases],
+    [entity.name, entity.aliases],
   )
   const otherNames = entity.aliases.filter((alias) => alias !== entity.name)
 
@@ -361,58 +408,124 @@ function XrayDetails({
       <DetailList
         key={newestFirst ? "newest" : "oldest"}
         className="flex-1"
-        contentContainerClassName="px-2 pt-2"
+        contentContainerClassName="pt-1"
         contentContainerStyle={{ paddingBottom }}
         data={rows}
-        estimatedItemSize={88}
+        estimatedItemSize={64}
         recycleItems
         renderScrollComponent={renderSheetScrollView}
         getItemType={(item) => item.kind}
         keyExtractor={(item) => item.key}
         ListHeaderComponent={
-          <View className="gap-2 px-3 pt-2 pb-4">
-            <Text variant="h3">{entity.name}</Text>
-            <Text className="text-muted-foreground text-xs">
-              {xrayEntityTypeLabels[entity.type]}
-            </Text>
+          <View className="gap-3 px-3 pt-3 pb-1">
+            <View className="flex-row items-center gap-3">
+              <XrayTypeBadge type={entity.type} size="header" />
+              <View className="min-w-0 flex-1 gap-0.5">
+                <Text variant="h3">{entity.name}</Text>
+                <Text className="text-muted-foreground text-xs">
+                  {xrayEntityTypeLabels[entity.type]}
+                  {" · "}
+                  {entity.mentions.length}{" "}
+                  {entity.mentions.length === 1 ? "mention" : "mentions"} so far
+                </Text>
+              </View>
+            </View>
             {!!otherNames.length && (
-              <Text className="text-sm">
-                Other names: {otherNames.join(", ")}
+              <Text className="text-muted-foreground text-sm">
+                Also called {otherNames.join(", ")}
               </Text>
             )}
             {entity.description && (
-              <Text className="text-sm">{entity.description}</Text>
+              <Text className="text-base leading-6">{entity.description}</Text>
             )}
           </View>
         }
         renderItem={({ item }) => {
-          if (item.kind === "heading") {
+          if (item.kind === "section") {
             return (
-              <Text
-                className="px-3 pt-4 pb-2 text-sm font-bold"
-                accessibilityRole="header"
-              >
-                {item.title}
-              </Text>
+              <View className="border-border mt-3 flex-row items-center gap-1.5 border-t px-3 pt-4 pb-1">
+                <Icon
+                  as={item.key === "facts" ? ListChecks : TextQuote}
+                  size={16}
+                  className="text-muted-foreground"
+                />
+                <Text
+                  className="text-muted-foreground min-w-0 flex-1 text-sm"
+                  accessibilityRole="header"
+                >
+                  {item.title}
+                </Text>
+                <Text className="text-muted-foreground text-xs">
+                  {item.count}
+                </Text>
+              </View>
+            )
+          }
+          if (item.kind === "chapter") {
+            return (
+              <View className="flex-row items-baseline justify-between gap-3 px-3 pt-4 pb-1">
+                <Text
+                  className="min-w-0 flex-1 text-xs font-semibold"
+                  accessibilityRole="header"
+                  numberOfLines={1}
+                >
+                  {item.title}
+                </Text>
+                <Text className="text-muted-foreground text-xs">
+                  {item.count}
+                </Text>
+              </View>
             )
           }
           const canJump =
             format !== "audiobook" &&
             !!chapterLinks[chapterIndexOf(xray, item.ordinal)]?.type
+          const jumpProps = {
+            variant: "ghost",
+            disabled: !canJump,
+            accessibilityHint: canJump
+              ? "Opens this passage in the book"
+              : "This passage is not available in the open edition",
+            onPress: () => onJump(item.ordinal),
+          } as const
+          if (item.kind === "fact") {
+            return (
+              <Button
+                {...jumpProps}
+                className="active:bg-secondary h-auto flex-row items-start justify-start gap-3 rounded-none px-3 py-2.5 sm:h-auto"
+                accessibilityLabel={`Go to key fact: ${item.text}`}
+              >
+                <View className="bg-muted-foreground mt-2 h-1.5 w-1.5 rounded-full" />
+                <Text className="min-w-0 flex-1 text-sm leading-5 font-normal">
+                  {item.text}
+                </Text>
+                <Icon
+                  as={ChevronRight}
+                  size={16}
+                  className="text-muted-foreground mt-0.5"
+                />
+              </Button>
+            )
+          }
           return (
             <Button
-              className="active:bg-secondary my-0.5 h-auto items-start justify-start px-3 py-3 sm:h-auto"
-              variant="ghost"
-              disabled={!canJump}
-              accessibilityLabel={`Go to ${item.kind === "fact" ? "key fact" : "mention"}: ${item.text}`}
-              accessibilityHint={
-                canJump
-                  ? "Opens this passage in the book"
-                  : "This passage is not available in the open edition"
-              }
-              onPress={() => onJump(item.ordinal)}
+              {...jumpProps}
+              className="active:bg-secondary h-auto items-stretch justify-start rounded-none px-3 py-1.5 sm:h-auto"
+              accessibilityLabel={`Go to mention: ${item.text}`}
             >
-              <Text className="flex-1 text-sm">{item.text}</Text>
+              <View className="border-border min-w-0 flex-1 border-l-2 py-0.5 pl-3">
+                <Text className="text-sm leading-5 font-normal">
+                  {splitXrayNames(item.text, names).map((part, index) =>
+                    part.name ? (
+                      <Text key={index} className="text-sm font-semibold">
+                        {part.text}
+                      </Text>
+                    ) : (
+                      part.text
+                    ),
+                  )}
+                </Text>
+              </View>
             </Button>
           )
         }}
