@@ -548,8 +548,11 @@ export async function deleteBooksFromServer(
       )
       .execute()
 
+    // Only this server's books: local imports and books from other servers
+    // must survive signing out of this one.
     await tr
       .deleteFrom("book")
+      .where("serverUuid", "=", serverUuid)
       .where((eb) =>
         eb(
           "uuid",
