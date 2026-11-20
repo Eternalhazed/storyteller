@@ -1,10 +1,18 @@
 "use client"
 
-import { type ReactNode } from "react"
+import { type ReactNode, useState } from "react"
 import { toast } from "sonner"
 
 import { Badge } from "@v3/_/components/ui/badge"
 import { Button } from "@v3/_/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@v3/_/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,6 +39,7 @@ import {
   useGenerateXrayMutation,
   useGetAlignmentEstimateQuery,
   useGetBookAlignmentReportQuery,
+  useGetBookXrayStatusQuery,
   useGetJobsQuery,
   useGetXrayEnabledQuery,
 } from "@/store/api"
@@ -86,16 +95,35 @@ function ProcessingDropdown({
 export function ProcessingSection({ book }: { book: BookWithRelations }) {
   const [cancelProcessing] = useCancelProcessingMutation()
   const canProcess = usePermission("bookProcess")
+  const [confirmXray, setConfirmXray] = useState(false)
   const { start, dialog, positions } = useProcessingRun([book])
   const tx = useTranslation("Xray")
   const { data: xray } = useGetXrayEnabledQuery(undefined, {
     skip: !canProcess,
   })
   const [generateXray, { isLoading: xrayPending }] = useGenerateXrayMutation()
+  const { data: fileStatus, isError: fileStatusError } =
+    useGetBookXrayStatusQuery(
+      { uuid: book.uuid },
+      { skip: !canProcess, refetchOnMountOrArgChange: true },
+    )
+  const {
+    data: xrayJobs,
+    isLoading: xrayJobsLoading,
+    isError: xrayJobsError,
+  } = useGetJobsQuery(
+    { type: "active", jobType: "book_xray", bookUuid: book.uuid, limit: 1 },
+    { skip: !canProcess },
+  )
 
   const hasEbook = book.ebook !== null
   const hasAudiobook = book.audiobook !== null
-  const canCreateReadaloud = hasEbook && hasAudiobook && !book.readaloud
+  const canCreateReadaloud =
+    hasEbook &&
+    hasAudiobook &&
+    !book.ebook?.missing &&
+    !book.audiobook?.missing &&
+    !book.readaloud
 
   const readaloudStatus = book.readaloud?.status
 
@@ -106,6 +134,57 @@ export function ProcessingSection({ book }: { book: BookWithRelations }) {
 
   const formatDate = useFormatDate()
   const formatDuration = useFormatDuration()
+  const activeXrayJob = xrayJobs?.[0]
+  const hasXray = fileStatus?.ready ?? false
+  const xrayDisabled =
+    !fileStatus ||
+    fileStatusError ||
+    xrayJobsLoading ||
+    xrayJobsError ||
+    !!activeXrayJob
+  let xrayState = tx("checking")
+  if (activeXrayJob?.status === "QUEUED") {
+    xrayState = tx("queued")
+  } else if (activeXrayJob?.status === "RUNNING") {
+    xrayState = tx("running", {
+      progress: Math.max(
+        0,
+        Math.min(100, Math.round(activeXrayJob.progress * 100)),
+      ).toString(),
+    })
+  } else if (activeXrayJob?.status === "PAUSED") {
+    xrayState = tx("paused")
+  } else if (fileStatusError || xrayJobsError) {
+    xrayState = tx("statusFailed")
+  } else if (fileStatus && !xrayJobsLoading) {
+    xrayState = hasXray
+      ? fileStatus.lastModified
+        ? tx("readyAt", {
+            date: formatDate(new Date(fileStatus.lastModified).toISOString()),
+          })
+        : tx("ready")
+      : tx("none")
+  }
+
+  async function requestXray() {
+    try {
+      await generateXray({ uuid: book.uuid }).unwrap()
+      setConfirmXray(false)
+      toast.success(tx("queued"))
+    } catch (error) {
+      const serverMessage =
+        error &&
+        typeof error === "object" &&
+        "data" in error &&
+        error.data &&
+        typeof error.data === "object" &&
+        "message" in error.data &&
+        typeof error.data.message === "string"
+          ? error.data.message
+          : tx("failed")
+      toast.error(serverMessage)
+    }
+  }
 
   const { data: latestFinishedJob } = useGetJobsQuery(
     { type: "finished", jobType: "book_align", bookUuid: book.uuid, limit: 1 },
@@ -271,33 +350,54 @@ export function ProcessingSection({ book }: { book: BookWithRelations }) {
         </span>
       )}
 
-      {canProcess && xray?.configured && book.ebook && !book.ebook.missing && (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={xrayPending}
-          onClick={() => {
-            void generateXray({ uuid: book.uuid })
-              .unwrap()
-              .then(() => toast.success(tx("queued")))
-              .catch((error: unknown) => {
-                const serverMessage =
-                  error &&
-                  typeof error === "object" &&
-                  "data" in error &&
-                  error.data &&
-                  typeof error.data === "object" &&
-                  "message" in error.data &&
-                  typeof error.data.message === "string"
-                    ? error.data.message
-                    : tx("failed")
-                toast.error(serverMessage)
-              })
-          }}
-        >
-          <icon.BookAlt className="mr-1 h-4 w-4" />
-          {tx("generate")}
-        </Button>
+      {canProcess && (
+        <div className="flex flex-col gap-2">
+          <p className="text-muted-foreground text-sm" role="status">
+            {xrayState}
+          </p>
+          {xray?.configured && book.ebook && !book.ebook.missing && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-fit"
+              disabled={xrayPending || xrayDisabled}
+              onClick={() => {
+                if (hasXray) setConfirmXray(true)
+                else void requestXray()
+              }}
+            >
+              <icon.BookAlt className="mr-1 h-4 w-4" />
+              {tx(hasXray ? "regenerate" : "generate")}
+            </Button>
+          )}
+          <Dialog open={confirmXray} onOpenChange={setConfirmXray}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>
+                  {tx("regenerateTitle", { title: book.title })}
+                </DialogTitle>
+                <DialogDescription>{tx("regenerateWarning")}</DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  disabled={xrayPending}
+                  onClick={() => {
+                    setConfirmXray(false)
+                  }}
+                >
+                  {c("actions.cancel")}
+                </Button>
+                <Button
+                  disabled={xrayPending || xrayDisabled || !xray?.configured}
+                  onClick={() => void requestXray()}
+                >
+                  {tx("regenerate")}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       )}
 
       {book.alignmentSummary?.grade && <AlignmentReportSummary book={book} />}

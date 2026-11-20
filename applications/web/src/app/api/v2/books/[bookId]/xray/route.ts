@@ -59,6 +59,9 @@ export const GET = withHasPermission<Params>("bookRead", {
   const etag = `"${stats.size.toString(16)}-${stats.mtimeMs.toString(16)}"`
   const headers = {
     ETag: etag,
+    "Last-Modified": stats.mtime.toUTCString(),
+    "Content-Type": "application/json",
+    "Content-Length": String(stats.size),
     "Cache-Control": "private, no-cache",
   }
   const unchanged = request.headers
@@ -71,6 +74,9 @@ export const GET = withHasPermission<Params>("bookRead", {
 
   if (unchanged) {
     return new Response(null, { status: 304, headers })
+  }
+  if (request.method === "HEAD") {
+    return new Response(null, { headers })
   }
 
   // The response owns the handle until its stream completes or is cancelled.
@@ -91,13 +97,25 @@ export const GET = withHasPermission<Params>("bookRead", {
   stream.once("close", () => void owned.disposeAsync())
 
   return new Response(createReadableStreamFromReadable(stream), {
-    headers: {
-      ...headers,
-      "Content-Type": "application/json",
-      "Content-Length": String(stats.size),
-    },
+    headers,
   })
 })
+
+/**
+ * @description Check whether a book has X-Ray without downloading it. Returns the same ETag and Last-Modified headers as GET, including on a 304 response.
+ * @pathParams BookIdParamsSchemaV2
+ * @auth bearer
+ * @openapi
+ */
+export const HEAD: typeof GET = async (request, context) => {
+  const response = await GET(request, context)
+  if (!response || response.body === null) return response
+  await response.body.cancel()
+  return new Response(null, {
+    status: response.status,
+    headers: response.headers,
+  })
+}
 
 /**
  * @description Queue generation or regeneration of a book's X-Ray file. Requires an ebook and a configured Anthropic API key; book text is sent to Anthropic during generation.

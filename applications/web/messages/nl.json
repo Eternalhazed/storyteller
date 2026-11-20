@@ -1746,7 +1746,17 @@
   },
   "Xray": {
     "title": "X-Ray",
-    "generate": "X-Ray genereren of opnieuw genereren",
+    "generate": "X-Ray genereren",
+    "regenerate": "X-Ray opnieuw genereren",
+    "ready": "X-Ray beschikbaar",
+    "readyAt": "X-Ray beschikbaar · gegenereerd op {date}",
+    "none": "Nog geen X-Ray",
+    "checking": "X-Ray-status controleren…",
+    "statusFailed": "X-Ray-status kon niet worden opgehaald",
+    "running": "X-Ray wordt gegenereerd · {progress}%",
+    "paused": "X-Ray-generatie gepauzeerd",
+    "regenerateTitle": "X-Ray voor “{title}” opnieuw genereren?",
+    "regenerateWarning": "Dit verstuurt het boek opnieuw naar Anthropic en brengt opnieuw API-kosten met zich mee. Wil je doorgaan?",
     "queued": "X-Ray-generatie in wachtrij geplaatst",
     "failed": "X-Ray-generatie kon niet in de wachtrij worden geplaatst"
   },

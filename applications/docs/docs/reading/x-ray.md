@@ -61,20 +61,24 @@ can be missing.
 
 ## Generate or regenerate a book
 
-Open a book's processing actions in either web interface and choose **Generate
-or regenerate X-Ray**. You need permission to process books, an available ebook,
-and a configured Anthropic key. The action works for ebooks without an audiobook
-as well as books with synchronized narration.
+Open a book's processing actions in either web interface. The X-Ray state next
+to the action says **No X-Ray yet**, or **X-Ray ready** with its generation
+date. Choose **Generate X-Ray** to create one. You need permission to process
+books, an available ebook, and a configured Anthropic key. The action works for
+ebooks without an audiobook as well as books with synchronized narration.
 
-Generation runs in the **processing queue**, where it is labelled **X-Ray**. One
+Generation runs in the **processing queue**, where it is labelled **X-Ray**. The
+book page shows when its X-Ray job is queued, running (with progress), or
+paused, and refreshes the ready state automatically when the job finishes. One
 X-Ray job can run alongside one readaloud-alignment job, so it does not wait for
 a long alignment to finish. You can pause, resume, or cancel it from the queue.
 An in-flight passage is allowed to finish and save before a pause or
 cancellation takes effect.
 
 To refresh an existing X-Ray—for example, after changing the model—wait for any
-current X-Ray job to finish, then choose **Generate or regenerate X-Ray** again.
-The existing X-Ray remains available until its replacement is ready. If a job is
+current X-Ray job to finish, then choose **Regenerate X-Ray**. A confirmation
+explains that this sends the book to Anthropic again and costs again. The
+existing X-Ray remains available until its replacement is ready. If a job is
 paused, resume it from the queue; generating again does not unpause it. If you
 have just paused or cancelled a running job, wait for its in-flight passage to
 finish before trying again.

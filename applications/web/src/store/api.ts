@@ -149,6 +149,7 @@ export const api = createApi({
     "Sidebar",
     "Jobs",
     "BookAlignmentReport",
+    "BookXray",
     "Settings",
     "Identifiers",
     "BookIdentifiers",
@@ -2265,7 +2266,7 @@ export const api = createApi({
       onCacheEntryAdded: async (
         _arg,
         /* eslint-disable-next-line @typescript-eslint/unbound-method */
-        { dispatch, cacheDataLoaded, cacheEntryRemoved },
+        { dispatch, cacheDataLoaded, cacheEntryRemoved, getCacheEntry },
       ) => {
         try {
           await cacheDataLoaded
@@ -2273,8 +2274,17 @@ export const api = createApi({
           /* empty */
         }
 
-        const unsubscribe = subscribeToEventStream("job", () => {
+        const unsubscribe = subscribeToEventStream("job", (event) => {
+          // Events contain only ids; resolve the book from this query's cache.
+          const job = getCacheEntry().data?.find(
+            ({ uuid }) => uuid === event.jobUuid,
+          )
           dispatch(api.util.invalidateTags(["Jobs"]))
+          if (job?.type === "book_xray" && job.bookUuid) {
+            dispatch(
+              api.util.invalidateTags([{ type: "BookXray", id: job.bookUuid }]),
+            )
+          }
         })
 
         await cacheEntryRemoved
@@ -2333,12 +2343,38 @@ export const api = createApi({
       query: () => "/settings/xray",
       providesTags: ["Settings"],
     }),
+    getBookXrayStatus: build.query<
+      { ready: boolean; lastModified: string | null },
+      { uuid: UUID }
+    >({
+      query: ({ uuid }) => ({
+        url: `/books/${uuid}/xray`,
+        method: "HEAD",
+        cache: "no-store",
+        responseHandler: (response) =>
+          Promise.resolve({
+            ready: response.status === 200 || response.status === 304,
+            lastModified: response.headers.get("Last-Modified"),
+          }),
+        validateStatus: (response) =>
+          response.status === 200 ||
+          response.status === 304 ||
+          response.status === 404,
+      }),
+      providesTags: (_result, _error, { uuid }) => [
+        { type: "BookXray", id: uuid },
+        { type: "Books", id: uuid },
+      ],
+    }),
     generateXray: build.mutation<void, { uuid: UUID }>({
       query: ({ uuid }) => ({
         url: `/books/${uuid}/xray`,
         method: "POST",
       }),
-      invalidatesTags: ["Jobs"],
+      invalidatesTags: (_result, _error, { uuid }) => [
+        "Jobs",
+        { type: "BookXray", id: uuid },
+      ],
     }),
     getBookAlignmentReport: build.query<
       BookAlignmentReportView,
@@ -2424,6 +2460,7 @@ export const {
   useProcessBookMutation,
   useGetJobsQuery,
   useGetXrayEnabledQuery,
+  useGetBookXrayStatusQuery,
   useGenerateXrayMutation,
   useGetAlignmentEstimateQuery,
   useGetBookAlignmentReportQuery,

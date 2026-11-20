@@ -1895,7 +1895,17 @@
   },
   "Xray": {
     "title": "X-Ray",
-    "generate": "Generate or regenerate X-Ray",
+    "generate": "Generate X-Ray",
+    "regenerate": "Regenerate X-Ray",
+    "ready": "X-Ray ready",
+    "readyAt": "X-Ray ready · generated {date}",
+    "none": "No X-Ray yet",
+    "checking": "Checking X-Ray status…",
+    "statusFailed": "Could not check X-Ray status",
+    "running": "X-Ray generation running · {progress}%",
+    "paused": "X-Ray generation paused",
+    "regenerateTitle": "Regenerate X-Ray for “{title}”?",
+    "regenerateWarning": "This sends the book to Anthropic again and incurs another API charge. Do you want to continue?",
     "queued": "X-Ray generation queued",
     "failed": "Could not queue X-Ray generation"
   },

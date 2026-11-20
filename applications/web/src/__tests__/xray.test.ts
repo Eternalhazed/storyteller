@@ -18,7 +18,7 @@ import { NextRequest } from "next/server"
 
 import { DEFAULT_XRAY_MODEL } from "@storyteller-platform/xray"
 
-import { GET, POST } from "@/app/api/v2/books/[bookId]/xray/route"
+import { GET, HEAD, POST } from "@/app/api/v2/books/[bookId]/xray/route"
 import { setEbookImportHandler } from "@/assets/library/scanner/ebook-import"
 import { canonicalizePath } from "@/assets/library/scanner/folder"
 import { replaceBookAsset } from "@/assets/library/scanner/replaceAsset"
@@ -95,13 +95,13 @@ async function setupXrayBook(
     bookUuid,
     folder,
     async request(
-      method: "GET" | "POST",
+      method: "GET" | "HEAD" | "POST",
       headers: HeadersInit = {},
       bookId: UUID = bookUuid,
     ) {
       const requestHeaders = new Headers(headers)
       requestHeaders.set("Authorization", `Bearer ${token}`)
-      const handler = method === "GET" ? GET : POST
+      const handler = { GET, HEAD, POST }[method]
       const response = await handler(
         new NextRequest(`http://localhost:8001/api/v2/books/${bookId}/xray`, {
           method,
@@ -417,6 +417,10 @@ void describe("GET book X-Ray", () => {
       String(Buffer.byteLength(contents)),
     )
     assert.ok(response.headers.get("ETag"))
+    assert.equal(
+      response.headers.get("Last-Modified"),
+      (await stat(getXrayFilepath(fixture.bookUuid))).mtime.toUTCString(),
+    )
     assert.equal(await response.text(), contents)
     assert.deepEqual(await getJobs(), [])
   })
@@ -498,6 +502,83 @@ void describe("GET book X-Ray", () => {
     await fixture.writeXray()
     fixture.ctx.sqlite.prepare("UPDATE user_permission SET book_read = 0").run()
     assert.equal((await fixture.request("GET")).status, 403)
+  })
+})
+
+void describe("HEAD book X-Ray", () => {
+  void it("returns GET's file metadata without a response body", async () => {
+    await using fixture = await setupXrayBook()
+    await fixture.writeXray()
+    const get = await fixture.request("GET")
+    await get.text()
+    const head = await fixture.request("HEAD")
+    assert.equal(head.status, get.status)
+    assert.equal(head.body, null)
+    assert.equal(await head.text(), "")
+    for (const header of [
+      "ETag",
+      "Last-Modified",
+      "Content-Type",
+      "Content-Length",
+    ]) {
+      assert.ok(head.headers.get(header))
+      assert.equal(head.headers.get(header), get.headers.get(header))
+    }
+  })
+
+  void it("returns 304 with the same ETag and Last-Modified as GET", async () => {
+    await using fixture = await setupXrayBook()
+    await fixture.writeXray()
+    const first = await fixture.request("HEAD")
+    const etag = first.headers.get("ETag")
+    assert.ok(etag)
+    for (const value of [etag, `W/${etag}`, `"other", ${etag}`, "*"]) {
+      const headers = { "If-None-Match": value }
+      const get = await fixture.request("GET", headers)
+      const head = await fixture.request("HEAD", headers)
+      assert.equal(get.status, 304)
+      assert.equal(head.status, get.status)
+      assert.equal(head.headers.get("ETag"), etag)
+      assert.equal(
+        head.headers.get("Last-Modified"),
+        first.headers.get("Last-Modified"),
+      )
+      assert.equal(
+        head.headers.get("Last-Modified"),
+        get.headers.get("Last-Modified"),
+      )
+      assert.equal(head.body, null)
+    }
+  })
+
+  void it("returns a bodyless 404 for missing, unknown, and empty files", async () => {
+    await using fixture = await setupXrayBook()
+    for (const bookId of [fixture.bookUuid, randomUUID()]) {
+      const get = await fixture.request("GET", {}, bookId)
+      const head = await fixture.request("HEAD", {}, bookId)
+      assert.equal(head.status, 404)
+      assert.equal(head.status, get.status)
+      assert.equal(head.body, null)
+      assert.equal(await head.text(), "")
+    }
+    await fixture.writeXray("")
+    const get = await fixture.request("GET", { "If-None-Match": "*" })
+    const head = await fixture.request("HEAD", { "If-None-Match": "*" })
+    assert.equal(head.status, 404)
+    assert.equal(head.status, get.status)
+    assert.equal(head.headers.get("ETag"), null)
+    assert.equal(head.headers.get("Last-Modified"), null)
+    assert.equal(head.body, null)
+  })
+
+  void it("uses GET's read permission checks without returning an error body", async () => {
+    await using fixture = await setupXrayBook()
+    await fixture.writeXray()
+    fixture.ctx.sqlite.prepare("UPDATE user_permission SET book_read = 0").run()
+    const head = await fixture.request("HEAD")
+    assert.equal(head.status, (await fixture.request("GET")).status)
+    assert.equal(head.status, 403)
+    assert.equal(head.body, null)
   })
 })
 
