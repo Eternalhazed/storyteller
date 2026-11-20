@@ -24,7 +24,7 @@ import {
   xraySchema,
 } from "@storyteller/xray"
 
-import { seedBooks, setupTestDb } from "@/__tests__/harness/testDb"
+import { seedBooks, seedUser, setupTestDb } from "@/__tests__/harness/testDb"
 import {
   notifyEbookImported,
   setEbookImportHandler,
@@ -550,6 +550,57 @@ describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
         (await getJobs({ type: "book_xray", statuses: ["QUEUED"] })).length,
         0,
       )
+    } finally {
+      await rm(marker, { force: true })
+      await fixture.ctx.db
+        .deleteFrom("job")
+        .where("bookUuid", "=", fixture.bookUuid)
+        .execute()
+      globalThis.xrayJobControllers.delete(reservation)
+    }
+  })
+
+  it("leaves books everyone has finished out of the startup pass", async () => {
+    await using fixture = await setupBook()
+    const reservation = randomUUID()
+    assert.ok(globalThis.xrayJobControllers)
+    globalThis.xrayJobControllers.set(reservation, new AbortController())
+    const marker = join(XRAY_DIR, "backfill-version")
+    await rm(marker, { force: true })
+    const userId = randomUUID()
+    seedUser(fixture.ctx, userId)
+    const setStatus = (name: string) =>
+      fixture.ctx.sqlite
+        .prepare(
+          `INSERT INTO book_to_status (book_uuid, status_uuid, user_id)
+           VALUES (?, (SELECT uuid FROM status WHERE name = ?), ?)
+           ON CONFLICT DO UPDATE SET status_uuid = excluded.status_uuid`,
+        )
+        .run(fixture.bookUuid, name, userId)
+    try {
+      fixture.ctx.sqlite
+        .prepare(
+          "UPDATE settings SET value = 'true' WHERE name = 'xrayAutoGenerate'",
+        )
+        .run()
+      fixture.ctx.sqlite
+        .prepare(
+          "UPDATE settings SET value = ? WHERE name = 'xrayAnthropicApiKey'",
+        )
+        .run(JSON.stringify(await encryptSecret("test-key")))
+      await writeFile(
+        getXrayFilepath(fixture.bookUuid),
+        JSON.stringify({ generator: { version: XRAY_GENERATOR_VERSION - 1 } }),
+      )
+
+      setStatus("Read")
+      await backfillXray()
+      assert.equal((await getJobs({ type: "book_xray" })).length, 0)
+
+      await rm(marker, { force: true })
+      setStatus("Reading")
+      await backfillXray()
+      assert.equal((await getJobs({ type: "book_xray" })).length, 1)
     } finally {
       await rm(marker, { force: true })
       await fixture.ctx.db

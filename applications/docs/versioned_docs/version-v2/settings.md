@@ -253,7 +253,7 @@ in the v3 interface):
 - **Generate X-Ray automatically** (`xrayAutoGenerate`): disabled by default.
   Enable it to generate X-Ray after import or readaloud creation, and, at each
   server start after an update to the generation rules, for every book whose
-  X-Ray is missing or out of date.
+  X-Ray is missing or out of date, unless everyone has marked it Read.
 
 Generating X-Ray sends book text to Anthropic and uses its paid API. Leaving
 automatic generation disabled does not prevent manually requesting generation.

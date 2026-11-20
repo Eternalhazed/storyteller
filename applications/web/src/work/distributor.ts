@@ -22,7 +22,7 @@ import {
   type Readaloud,
   getBook,
   getBookOrThrow,
-  getBookUuidsWithEbook,
+  getUnfinishedBookUuidsWithEbook,
   updateBook,
 } from "@/database/books"
 import {
@@ -253,7 +253,8 @@ const BACKFILL_MARKER = join(XRAY_DIR, "backfill-version")
 /**
  * Queue X-Ray for every book that lacks a current one: books added before
  * automatic generation was turned on, books that failed, and books built by
- * older generation rules.
+ * older generation rules. Books everyone has finished reading are skipped;
+ * they keep the X-Ray they have, and one can still be requested by hand.
  *
  * Runs once per version of the rules, not at every start, so a book that
  * cannot be read is retried when the rules change rather than on every
@@ -279,7 +280,7 @@ export async function backfillXray(): Promise<void> {
     )
     if (done?.trim() === String(XRAY_GENERATOR_VERSION)) return
 
-    const bookUuids = await getBookUuidsWithEbook()
+    const bookUuids = await getUnfinishedBookUuidsWithEbook()
     let queued = 0
     for (const bookUuid of bookUuids) {
       if (await hasCurrentXray(bookUuid)) continue

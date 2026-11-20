@@ -50,6 +50,7 @@ import {
   buildSortExpression,
   buildSortExpressions,
 } from "./shelfFilter"
+import { STATUS_READ } from "./statusKinds"
 import { getDefaultStatus } from "./statuses"
 import { type NewUserBookRating } from "./userRatings"
 
@@ -1153,12 +1154,37 @@ export async function getBookOrThrow(uuid: UUID) {
   return book
 }
 
-/** Every book with an ebook file that is still on disk. */
-export async function getBookUuidsWithEbook(): Promise<UUID[]> {
+/**
+ * Every book with an ebook file still on disk that somebody may still read:
+ * books that everyone with a reading status for them has marked Read are
+ * left out.
+ */
+export async function getUnfinishedBookUuidsWithEbook(): Promise<UUID[]> {
   const rows = await db
     .selectFrom("ebook")
-    .select("bookUuid")
-    .where("missing", "=", false)
+    .select("ebook.bookUuid")
+    .where("ebook.missing", "=", false)
+    .where((eb) =>
+      eb
+        .not(
+          eb.exists(
+            eb
+              .selectFrom("bookToStatus")
+              .select("bookToStatus.bookUuid")
+              .whereRef("bookToStatus.bookUuid", "=", "ebook.bookUuid"),
+          ),
+        )
+        .or(
+          eb.exists(
+            eb
+              .selectFrom("bookToStatus")
+              .innerJoin("status", "status.uuid", "bookToStatus.statusUuid")
+              .select("bookToStatus.bookUuid")
+              .whereRef("bookToStatus.bookUuid", "=", "ebook.bookUuid")
+              .where("status.name", "!=", STATUS_READ),
+          ),
+        ),
+    )
     .execute()
   return rows.map((row) => row.bookUuid)
 }

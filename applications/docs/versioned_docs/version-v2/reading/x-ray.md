@@ -23,7 +23,8 @@ A server administrator can configure X-Ray on the web **Settings** page: open
    When enabled, Storyteller queues X-Ray for newly imported ebooks and after
    successful readaloud creation, unless the book already has a current X-Ray.
    When the server starts, it also queues every book that has no X-Ray, or one
-   built by older generation rules. That pass runs once per version of the
+   built by older generation rules, except books everyone has marked **Read**;
+   those keep the X-Ray they have. That pass runs once per version of the
    rules, so a book that cannot be read is retried after an update, not at every
    restart. Turning the setting on takes effect for existing books at the next
    server start.
