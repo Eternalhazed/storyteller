@@ -13,5 +13,8 @@
     "tsBuildInfoFile": ".tsbuild/tsconfig.build.tsbuildinfo",
     "outDir": "dist"
   },
-  "exclude": ["**/*.test.ts"]
+  "exclude": ["**/*.test.ts"],
+  // References are not inherited through "extends"; without this, tsc compiles
+  // align's sources under this package's settings instead of using its build.
+  "references": [{ "path": "../align" }]
 }
