@@ -57,6 +57,10 @@ export function getBookExtractedDirectoryUrl() {
   return `${getBooksDirectoryUrl()}extracted/`
 }
 
+export function getLocalBookXrayDirectoryUrl(bookUuid: UUID) {
+  return `${getBooksDirectoryUrl()}xray/${bookUuid}/`
+}
+
 export function getOldLocalBookCoverUrl(bookUuid: UUID) {
   return `${getBookCoversDirectoryUrl()}${bookUuid}`
 }
@@ -124,7 +128,13 @@ export async function readBookFile(
 export async function deleteLocalBookFiles(
   bookUuid: UUID,
   format?: "ebook" | "readaloud" | "audiobook",
+  removeXray = !format,
 ) {
+  if (removeXray) {
+    await FileSystem.deleteAsync(getLocalBookXrayDirectoryUrl(bookUuid), {
+      idempotent: true,
+    })
+  }
   if (!format || format === "readaloud") {
     FileSystem.deleteAsync(getLocalBookExtractedUrl(bookUuid, "readaloud"), {
       idempotent: true,

@@ -1,3 +1,4 @@
+import { type HighlightTint } from "@/colors"
 import { colors } from "@/components/ui/tokens/colors"
 
 export const defaultPreferences: Preferences = {
@@ -51,6 +52,7 @@ export const defaultPreferences: Preferences = {
   floatingToolbar: false,
   readaloudColor: "yellow",
   readaloudDecoratorStyle: "highlight",
+  highlightColor: "yellow",
   customFonts: [],
   automaticRewind: {
     enabled: true,
@@ -134,6 +136,7 @@ export interface Preferences {
   layout: LayoutPreferences
   readaloudColor: string
   readaloudDecoratorStyle: ReadaloudDecoratorStyle
+  highlightColor: HighlightTint
   customFonts: CustomFont[]
   hideStatusbar: HideStatusbarPreferences
   automaticRewind: AutomaticRewindPreferences

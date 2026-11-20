@@ -3,6 +3,8 @@ import deepmerge from "deepmerge"
 import * as SecureStore from "expo-secure-store"
 import { current } from "immer"
 
+import { type Xray } from "@storyteller-platform/xray/view"
+
 import { type HighlightTint } from "@/colors"
 import {
   getBookPreferences,
@@ -71,6 +73,12 @@ import {
 import { type UUID } from "@/uuid"
 
 import { deleteLocalBookFiles } from "./persistence/files"
+import {
+  readLocalBookXray,
+  readLocalBookXrayMetadata,
+  writeLocalBookXray,
+} from "./persistence/xray"
+import { shouldDeleteBookXray } from "./persistence/xrayCache"
 
 export const localApi = createApi({
   reducerPath: "localApi",
@@ -89,6 +97,7 @@ export const localApi = createApi({
     "Creators",
     "Series",
     "Tags",
+    "Xray",
   ],
   endpoints: (build) => ({
     getServerAccessToken: build.query<string | null, { serverUuid: UUID }>({
@@ -185,6 +194,68 @@ export const localApi = createApi({
       providesTags: (result) =>
         result ? [{ type: "Books", id: result.uuid }] : [],
     }),
+    getBookXray: build.query<Xray | null, { bookUuid: UUID }>({
+      async queryFn({ bookUuid }) {
+        return { data: await readLocalBookXray(bookUuid) }
+      },
+      providesTags: (_, _err, { bookUuid }) => [{ type: "Xray", id: bookUuid }],
+    }),
+    refreshBookXray: build.mutation<boolean, { bookUuid: UUID }>({
+      async queryFn({ bookUuid }, { dispatch }) {
+        try {
+          const book = await getBook(bookUuid)
+          if (!book?.serverUuid) return { data: false }
+
+          const server = await getServer(book.serverUuid)
+          const token = await SecureStore.getItemAsync(
+            `server.${server.uuid}.token`,
+          )
+          if (!token) return { data: false }
+
+          const cached = await readLocalBookXrayMetadata(bookUuid)
+          const response = await fetch(
+            new URL(
+              `/api/v2/books/${bookUuid}/xray`,
+              server.baseUrl,
+            ).toString(),
+            {
+              credentials: "omit",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                ...(cached?.etag && { "If-None-Match": cached.etag }),
+              },
+            },
+          )
+          if (response.status !== 200) return { data: false }
+
+          const json = await response.text()
+
+          // A download may have been removed while the request was in flight.
+          const currentBook = await getBook(bookUuid)
+          if (
+            currentBook?.serverUuid !== book.serverUuid ||
+            (currentBook.ebook?.downloadStatus !== "DOWNLOADED" &&
+              currentBook.readaloud?.downloadStatus !== "DOWNLOADED")
+          ) {
+            return { data: false }
+          }
+
+          const xray = await writeLocalBookXray(bookUuid, {
+            json,
+            etag: response.headers.get("ETag"),
+          })
+          // Keep this parsed object in the query cache; a tag invalidation
+          // would immediately read and parse the same new JSON a second time.
+          await dispatch(
+            localApi.util.upsertQueryData("getBookXray", { bookUuid }, xray),
+          )
+          return { data: true }
+        } catch {
+          // X-Ray is optional; retain the last local copy on any failure.
+          return { data: false }
+        }
+      },
+    }),
     getBookOverlayClips: build.query<ReadiumClip[] | null, { bookUuid: UUID }>({
       async queryFn({ bookUuid }) {
         return { data: await getOverlayClipsForBook(bookUuid) }
@@ -213,9 +284,15 @@ export const localApi = createApi({
       null,
       { bookUuid: UUID; format: "ebook" | "audiobook" | "readaloud" }
     >({
-      async queryFn({ bookUuid, format }) {
+      async queryFn({ bookUuid, format }, { dispatch }) {
         await removeBookDownloads(bookUuid, format)
-        await deleteLocalBookFiles(bookUuid, format)
+        const removeXray = shouldDeleteBookXray(format, await getBook(bookUuid))
+        await deleteLocalBookFiles(bookUuid, format, removeXray)
+        if (removeXray) {
+          dispatch(
+            localApi.util.invalidateTags([{ type: "Xray", id: bookUuid }]),
+          )
+        }
         return { data: null }
       },
       invalidatesTags: ["Books"],
@@ -228,14 +305,20 @@ export const localApi = createApi({
         deleteRecord?: boolean
       }
     >({
-      async queryFn({ bookUuid, format, deleteRecord = false }) {
+      async queryFn({ bookUuid, format, deleteRecord = false }, { dispatch }) {
         if (deleteRecord) {
           await deleteBook(bookUuid)
         } else {
           await removeBookDownloads(bookUuid, format)
         }
 
-        await deleteLocalBookFiles(bookUuid, format)
+        const removeXray = shouldDeleteBookXray(format, await getBook(bookUuid))
+        await deleteLocalBookFiles(bookUuid, format, removeXray)
+        if (removeXray) {
+          dispatch(
+            localApi.util.invalidateTags([{ type: "Xray", id: bookUuid }]),
+          )
+        }
 
         return { data: null }
       },
@@ -582,6 +665,7 @@ export const {
   useGetBookPositionsQuery,
   useGetBookQuery,
   useGetBookPreferencesQuery,
+  useGetBookXrayQuery,
   useGetCollectionQuery,
   useGetCreatorQuery,
   useGetGlobalPreferencesQuery,

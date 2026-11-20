@@ -286,6 +286,12 @@ startAppListening({
       listenerApi.dispatch(
         localApi.util.invalidateTags([{ type: "Books", id: bookUuid }]),
       )
+      listenerApi.dispatch(
+        localApi.endpoints.refreshBookXray.initiate(
+          { bookUuid },
+          { track: false },
+        ),
+      )
 
       const next = await db
         .selectFrom("audiobook")

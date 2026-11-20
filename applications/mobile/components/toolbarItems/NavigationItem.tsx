@@ -12,9 +12,10 @@ import {
 
 interface Props {
   mode: "text" | "audio"
+  hasXray: boolean
 }
 
-export function NavigationItem({ mode }: Props) {
+export function NavigationItem({ mode, hasXray }: Props) {
   const bookUuid = useAppSelector(getCurrentlyPlayingBookUuid)
   const format = useAppSelector(getCurrentlyPlayingFormat) ?? "readaloud"
 
@@ -27,7 +28,7 @@ export function NavigationItem({ mode }: Props) {
       onPress={() => {
         if (!bookUuid) return
 
-        const tab = getLastNavigationMenuTab()
+        const tab = getLastNavigationMenuTab(hasXray)
 
         router.push({
           pathname: `/navigation-menu/${tab}`,

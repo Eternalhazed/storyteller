@@ -45,6 +45,10 @@ import {
   down as addReadaloudDecoratorStylePreferencesDown,
   up as addReadaloudDecoratorStylePreferencesUp,
 } from "./1782777600001_add_readaloud_decorator_style_preferences"
+import {
+  down as addHighlightColorPreferenceDown,
+  up as addHighlightColorPreferenceUp,
+} from "./1794600000000_add_highlight_color_preference"
 
 export const migrations = {
   "1757893743063_init": {
@@ -96,5 +100,9 @@ export const migrations = {
   "1782777600001_add_readaloud_decorator_style_preferences": {
     up: addReadaloudDecoratorStylePreferencesUp,
     down: addReadaloudDecoratorStylePreferencesDown,
+  },
+  "1794600000000_add_highlight_color_preference": {
+    up: addHighlightColorPreferenceUp,
+    down: addHighlightColorPreferenceDown,
   },
 }

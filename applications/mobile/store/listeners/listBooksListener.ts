@@ -31,6 +31,7 @@ import {
   getLocalBookArchiveUrl,
   getLocalBookCoverUrl,
   getLocalBookExtractedUrl,
+  getLocalBookXrayDirectoryUrl,
 } from "@/store/persistence/files"
 import { getCoverUrl, serverApi } from "@/store/serverApi"
 import { type UUID } from "@/uuid"
@@ -230,6 +231,11 @@ startAppListening({
         const oldAudioBookCover = new File(getLocalAudioBookCoverUrl(oldUuid))
         if (oldAudioBookCover.exists) {
           oldAudioBookCover.delete()
+        }
+
+        const oldXray = new Directory(getLocalBookXrayDirectoryUrl(oldUuid))
+        if (oldXray.exists) {
+          await oldXray.delete()
         }
 
         const oldReadaloudArchive = new File(

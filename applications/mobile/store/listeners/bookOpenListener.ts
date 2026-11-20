@@ -30,6 +30,13 @@ startAppListening({
     const { bookUuid, format } = action.payload
     logger.debug(`Book opened: ${bookUuid}`)
 
+    listenerApi.dispatch(
+      localApi.endpoints.refreshBookXray.initiate(
+        { bookUuid },
+        { track: false },
+      ),
+    )
+
     const {
       currentlyPlayingBookUuid: previouslyPlayingBookUuid,
       currentlyPlayingFormat: previouslyPlayingFormat,

@@ -1,83 +1,94 @@
-# Selected-Text Lookup Test Plan
+# Selected-Text Toolbar Test Plan
 
-Manual QA for Wikipedia, Google Search, and existing-highlight deletion from
-the EPUB reader's selected-text toolbar.
+Manual QA for the EPUB reader's selection toolbar: remembered-color
+highlighting, Copy, Define (inline Wiktionary card), Wikipedia, Google Search,
+and existing-highlight deletion.
 
 ## Device Matrix
 
-- Android phone and tablet, including a non-Chrome default browser.
+- Fire HD 10/HD 8 class tablet (primary reading device), portrait and
+  landscape, including Silk or another non-Chrome default browser.
+- Android phone.
 - iPhone and iPad, including landscape and narrow iPad split view.
 - VoiceOver on Apple and TalkBack on Android.
-- Paginated and scroll reader layouts.
+- Paginated and scroll reader layouts; Day, Sepia, and Night themes.
 
-## Toolbar And Regression
+## Toolbar And Highlights
 
 - [ ] Select a word, phrase, and multiline text.
-- [ ] Expected: five colors, Copy, and ellipsis appear in one row without
-      covering the selection.
-- [ ] Create and recolor highlights with every existing color.
-- [ ] Expected: highlight behavior is unchanged.
-- [ ] Tap Copy.
-- [ ] Expected: exact original text is copied and the toolbar closes.
-- [ ] Open an existing highlight, then tap the ellipsis.
-- [ ] Expected: Delete is an icon before the Wikipedia and Google actions.
+- [ ] Expected: one row with swatch, Copy, Define, Wikipedia, and Google
+      Search, centered above the selection with a visible shadow.
+- [ ] Tap the swatch.
+- [ ] Expected: a highlight in the remembered color (yellow on first use); the
+      toolbar and the selection handles disappear.
+- [ ] Long press the swatch on a new selection and pick another color.
+- [ ] Expected: the highlight uses that color, and the next new selection's
+      swatch shows it.
+- [ ] Tap an existing highlight.
+- [ ] Expected: swatch (ringed, in the highlight's color), Copy, Define,
+      Wikipedia, Google Search, and a red Delete.
+- [ ] Tap the swatch, then Back; tap the swatch, then a color.
+- [ ] Expected: Back returns to the actions; a color recolors the highlight.
 - [ ] Delete it.
 - [ ] Expected: the highlight is removed and the toolbar closes.
+- [ ] Tap Copy.
+- [ ] Expected: exact original text is copied; toolbar and handles close.
 
-## Placement And Dismissal
+## Definitions
 
-- [ ] Select near the center, left edge, and right edge, then tap the
-      ellipsis.
-- [ ] Expected: it is replaced inline by a Wikipedia icon and search icon; no
-      dropdown or second overlay appears.
-- [ ] Expected: the expanded toolbar grows left from the ellipsis position.
-- [ ] Expected: the toolbar remains inside the 16-point horizontal inset.
-- [ ] Select near the top safe area.
-- [ ] Expected: the toolbar stays above the selection and clamps to the top
-      safe-area inset when it cannot fit above.
-- [ ] Open an existing highlight in a narrow viewport.
-- [ ] Expected: its icon actions may wrap to a second toolbar row, still on the
-      same side of the selection.
+- [ ] Define a lowercase word, a sentence-initial word (`Some`), a word with
+      clinging punctuation (`whale!"`), a possessive (`Ahab's`), a two-word
+      phrase (`sperm whale`), and a nonsense word.
+- [ ] Expected: a compact card floats next to the selection (above it when
+      there is room, otherwise below), capped in width on tablets; English
+      senses win over same-spelled foreign titles; the nonsense word shows
+      "no entry" and **Search Wiktionary**.
+- [ ] Expected: no selection handles float over the card.
+- [ ] Define with six or more words selected.
+- [ ] Expected: `Selection is too long`; nothing is requested.
+- [ ] Dismiss by tapping outside and by Android Back.
+- [ ] Expected: the card closes and the reader page is unchanged.
+- [ ] Tap **Open in Wiktionary**.
+- [ ] Expected: the entry opens in the default browser or app.
+- [ ] Disable connectivity and Define.
+- [ ] Expected: the card shows a connection error and **Try again** works once
+      connectivity returns.
+
+## Placement
+
+- [ ] Select near the center, left edge, right edge, and top of the page.
+- [ ] Expected: the toolbar stays inside the 16-point inset and above the
+      selection, clamping to the top safe area when it cannot fit.
+- [ ] Expected: the definition card stays fully on screen in every case.
 - [ ] Repeat in portrait, landscape, split view, paginated, and scroll layouts.
-- [ ] Expected: the toolbar leaves an 8-point gap above the selection when
-      space permits.
-- [ ] Dismiss by outside tap, Android Back, and accessibility navigation.
-- [ ] Expected: the selection toolbar closes predictably.
 
-## Provider Routing
+## Web Lookups
 
-- [ ] Without Wikipedia installed, tap Wikipedia.
-- [ ] Expected: the default browser opens the Wikipedia search.
-- [ ] Install Wikipedia and repeat.
-- [ ] Expected: record whether `Special:Search` opens the app or browser; either
-      is acceptable because the OS owns routing.
-- [ ] Change the default browser and repeat both lookups.
-- [ ] Expected: fallback follows the user's default; Storyteller forces none.
-- [ ] Return after every action.
-- [ ] Expected: no stale selection toolbar reappears.
-
-## Text, Failure, And Privacy
-
+- [ ] Long press one word, wait for the toolbar, then drag the handles to span
+      a phrase across two lines. Tap Google Search.
+- [ ] Expected: Google's search field contains the whole phrase, including the
+      words added after the toolbar appeared.
+- [ ] Save a phrase as a highlight, tap it again, and repeat Google Search.
+- [ ] Expected: the query contains the saved phrase.
+- [ ] With Wikipedia installed and Chrome set as the default browser on
+      Android, tap Wikipedia on a multiword selection. Repeat on iOS with
+      the Wikipedia app installed.
+- [ ] Expected: Wikipedia opens directly to search with the full phrase.
+- [ ] Repeat with Wikipedia uninstalled or disabled, including on a device
+      whose default browser is Silk.
+- [ ] Expected: the default browser opens Wikipedia's search with the full
+      phrase. Returning to the reader clears the toolbar for both providers.
 - [ ] Test `Saxe-Weimar's wood`, `résumé & café`, `日本語 كتاب`,
       `#hashtag? foo`, and `https://malicious.example/?x=1&y=2#fragment`.
 - [ ] Expected: provider origin stays fixed and query text appears once.
 - [ ] Select more than 500 Unicode code points.
 - [ ] Expected: `Selection is too long`; nothing opens.
-- [ ] Disable connectivity and repeat.
-- [ ] Expected: Storyteller remains responsive; the opened app/browser owns its
-      offline presentation.
-- [ ] Reproduce a device with no web-link handler if possible.
-- [ ] Expected: one launch-error alert and a usable reader.
-- [ ] Inspect logs.
+
+## Privacy And Accessibility
+
+- [ ] Inspect logs after every action.
 - [ ] Expected: no selected text, URL, or provider content is logged.
-
-## Accessibility
-
-- [ ] Use the largest supported text size.
-- [ ] Expected: rows remain readable and on screen or collision-flip.
-- [ ] Navigate colors, Copy, ellipsis, Wikipedia, Google Search, and Delete
-      with VoiceOver and TalkBack.
-- [ ] Expected: meaningful names/roles, visual-order focus, and distinguishable
-      destructive Delete.
-- [ ] Dismiss without choosing.
-- [ ] Expected: focus returns predictably to the trigger or toolbar.
+- [ ] Navigate the toolbar and definition card with TalkBack and VoiceOver.
+- [ ] Expected: meaningful names and roles; the swatch exposes "Choose
+      highlight color"; Delete is distinguishable; the card is announced as a
+      modal with a heading.

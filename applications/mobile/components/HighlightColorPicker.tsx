@@ -1,4 +1,11 @@
-import { Pressable, StyleSheet, View, type ViewStyle } from "react-native"
+import {
+  type AccessibilityActionEvent,
+  type AccessibilityActionInfo,
+  Pressable,
+  StyleSheet,
+  View,
+  type ViewStyle,
+} from "react-native"
 
 import { type HighlightTint, highlightTints } from "@/colors"
 import { useColorTheme } from "@/hooks/useColorTheme"
@@ -10,7 +17,7 @@ type Props = {
 }
 
 export function HighlightColorPicker({ style, value, onChange }: Props) {
-  const { foreground, dark } = useColorTheme()
+  const { dark } = useColorTheme()
   return (
     <View style={[styles.container, style]}>
       {(
@@ -18,28 +25,56 @@ export function HighlightColorPicker({ style, value, onChange }: Props) {
           highlightTints[dark ? "dark" : "light"],
         ) as Array<HighlightTint>
       ).map((color) => (
-        <Pressable
+        <HighlightSwatch
           key={color}
           accessibilityLabel={`Highlight color ${color}`}
-          accessibilityRole="button"
-          accessibilityState={{ selected: value === color }}
+          color={color}
+          selected={value === color}
           onPress={() => onChange(color)}
-        >
-          <View
-            style={[
-              styles.button,
-              {
-                backgroundColor: highlightTints[dark ? "dark" : "light"][color],
-              },
-              value === color && {
-                borderWidth: 2,
-                borderColor: foreground,
-              },
-            ]}
-          ></View>
-        </Pressable>
+        />
       ))}
     </View>
+  )
+}
+
+type HighlightSwatchProps = {
+  accessibilityActions?: AccessibilityActionInfo[]
+  accessibilityHint?: string
+  accessibilityLabel: string
+  color: HighlightTint
+  selected?: boolean
+  testID?: string
+  onAccessibilityAction?: (event: AccessibilityActionEvent) => void
+  onLongPress?: () => void
+  onPress: () => void
+}
+
+export function HighlightSwatch({
+  color,
+  selected = false,
+  ...pressableProps
+}: HighlightSwatchProps) {
+  const { foreground, dark } = useColorTheme()
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      {...pressableProps}
+    >
+      <View
+        style={[
+          styles.button,
+          {
+            backgroundColor: highlightTints[dark ? "dark" : "light"][color],
+          },
+          selected && {
+            borderWidth: 2,
+            borderColor: foreground,
+          },
+        ]}
+      />
+    </Pressable>
   )
 }
 

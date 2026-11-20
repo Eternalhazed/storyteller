@@ -17,6 +17,10 @@ export type ReadiumLocation = {
   progression?: number
   position?: number
   totalProgression?: number
+  /** Non-whitespace body-text offsets of the visible viewport, when measured. */
+  textStart?: number
+  textEnd?: number
+  textLength?: number
   cssSelector?: string
   partialCfi?: string
   domRange?: {
@@ -298,6 +302,8 @@ export type EPUBViewRef = {
   getFragmentPageProportion: (
     fragmentId: string,
   ) => Promise<FragmentPageProportion | null>
+  clearSelection: () => Promise<void>
+  getCurrentSelection: () => Promise<ReadiumLocator | null>
 }
 
 export interface StorytellerTrack {

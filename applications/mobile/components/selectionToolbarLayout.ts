@@ -5,54 +5,43 @@ const SELECTION_GAP = 8
 
 type Input = {
   actionCount: number
-  collapsedActionCount: number
   topInset: number
   width: number
   x: number
   y: number
 }
 
+/**
+ * Centers the toolbar over the selection, keeps it inside the horizontal
+ * inset, and places it above the selection (clamped to the top safe area).
+ * Rows only wrap when the window is too narrow for every action.
+ */
 export function getSelectionToolbarLayout({
   actionCount,
-  collapsedActionCount,
   topInset,
   width,
   x,
   y,
 }: Input) {
-  const availableWidth = width - EDGE_INSET * 2
+  const contentWidth = actionCount * SELECTION_TOOLBAR_ACTION_SIZE
   const toolbarWidth = Math.min(
-    actionCount * SELECTION_TOOLBAR_ACTION_SIZE,
-    availableWidth,
+    contentWidth,
+    Math.max(width - EDGE_INSET * 2, SELECTION_TOOLBAR_ACTION_SIZE),
+  )
+  const actionsPerRow = Math.max(
+    1,
+    Math.floor(toolbarWidth / SELECTION_TOOLBAR_ACTION_SIZE),
   )
   const toolbarHeight =
-    Math.ceil(
-      (actionCount * SELECTION_TOOLBAR_ACTION_SIZE) / toolbarWidth,
-    ) * SELECTION_TOOLBAR_ACTION_SIZE
-  const collapsedWidth = Math.min(
-    collapsedActionCount * SELECTION_TOOLBAR_ACTION_SIZE,
-    availableWidth,
-  )
-  const collapsedLeft = clamp(
-    x - collapsedWidth / 2,
-    EDGE_INSET,
-    width - EDGE_INSET - collapsedWidth,
-  )
-  const left = clamp(
-    collapsedLeft + collapsedWidth - toolbarWidth,
-    EDGE_INSET,
-    width - EDGE_INSET - toolbarWidth,
-  )
-  const topAboveSelection = y - toolbarHeight - SELECTION_GAP
+    Math.ceil(actionCount / actionsPerRow) * SELECTION_TOOLBAR_ACTION_SIZE
 
   return {
     height: toolbarHeight,
-    left,
-    top: Math.max(topAboveSelection, topInset),
+    left: Math.max(
+      EDGE_INSET,
+      Math.min(x - toolbarWidth / 2, width - EDGE_INSET - toolbarWidth),
+    ),
+    top: Math.max(y - toolbarHeight - SELECTION_GAP, topInset),
     width: toolbarWidth,
   }
-}
-
-function clamp(value: number, minimum: number, maximum: number) {
-  return Math.max(minimum, Math.min(value, maximum))
 }

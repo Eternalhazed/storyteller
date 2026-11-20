@@ -1,5 +1,11 @@
+import { skipToken } from "@reduxjs/toolkit/query"
 import { Tabs, router, useGlobalSearchParams, usePathname } from "expo-router"
-import { Bookmark, Highlighter, ListTree } from "lucide-react-native"
+import {
+  Bookmark,
+  Highlighter,
+  ListTree,
+  ScanSearch,
+} from "lucide-react-native"
 import { useEffect } from "react"
 import { View } from "react-native"
 import { useCSSVariable } from "uniwind"
@@ -16,6 +22,8 @@ import {
   useReaderFormSheetHeight,
 } from "@/components/toolbarItems/readerFormSheetLayout"
 import { Icon } from "@/components/ui/icon"
+import { useGetBookXrayQuery } from "@/store/localApi"
+import { canUseXray } from "@/store/xrayBoundary"
 import { type UUID } from "@/uuid"
 
 type NavigationMenuParams = {
@@ -33,6 +41,14 @@ export default function NavigationMenuLayout() {
   const border = useCSSVariable("--color-border") as string
   const primary = useCSSVariable("--color-primary") as string
   const mutedForeground = useCSSVariable("--color-muted-foreground") as string
+  const { data: xray } = useGetBookXrayQuery(
+    params.uuid ? { bookUuid: params.uuid } : skipToken,
+  )
+  const hasXray = canUseXray({
+    xray,
+    format: params.format ?? "readaloud",
+    mode: params.mode ?? "text",
+  })
 
   useEffect(() => {
     const tab = getNavigationMenuTabFromPathname(pathname)
@@ -131,6 +147,23 @@ export default function NavigationMenuLayout() {
               tabBarIcon: ({ color, focused }) => (
                 <Icon
                   as={Highlighter}
+                  color={color}
+                  size={focused ? 20 : 19}
+                  strokeWidth={focused ? 2.5 : 2}
+                />
+              ),
+            }}
+          />
+          <Tabs.Screen
+            name="xray"
+            initialParams={params}
+            options={{
+              title: "X-Ray",
+              ...(hasXray ? {} : { href: null }),
+              tabBarAccessibilityLabel: "X-Ray",
+              tabBarIcon: ({ color, focused }) => (
+                <Icon
+                  as={ScanSearch}
                   color={color}
                   size={focused ? 20 : 19}
                   strokeWidth={focused ? 2.5 : 2}

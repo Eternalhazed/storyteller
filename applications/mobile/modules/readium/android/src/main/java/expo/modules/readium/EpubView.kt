@@ -96,6 +96,13 @@ class EpubView(context: Context, appContext: AppContext) : ExpoView(context, app
 
     companion object {
         var current: EpubView? = null
+
+        // Share of the reader width on each side that turns pages. Readium's
+        // default (30%) left only the middle 40% of a tablet page safe for
+        // taps, so double-taps to move narration often flipped the page.
+        private const val PAGE_TURN_EDGE_PERCENT = 0.15
+        // Readium's default minimum edge, in pixels.
+        private const val MIN_PAGE_TURN_EDGE_SIZE = 80.0
     }
 
     // Required for proper layout! Forces Expo to
@@ -402,7 +409,8 @@ class EpubView(context: Context, appContext: AppContext) : ExpoView(context, app
             directionalNavigationAdapter: DirectionalNavigationAdapter
         ): Boolean {
             val width = view.navigator?.publicationView?.width?.toDouble() ?: return false
-            val horizontalEdgeSize = maxOf(80.0, 0.3 * width)
+            val horizontalEdgeSize =
+                maxOf(MIN_PAGE_TURN_EDGE_SIZE, PAGE_TURN_EDGE_PERCENT * width)
             val x = event.point.x.toDouble()
 
             return when {
@@ -599,6 +607,8 @@ class EpubView(context: Context, appContext: AppContext) : ExpoView(context, app
 
         val directionalNavigationAdapter = DirectionalNavigationAdapter(
             navigator!!,
+            minimumHorizontalEdgeSize = MIN_PAGE_TURN_EDGE_SIZE,
+            horizontalEdgeThresholdPercent = PAGE_TURN_EDGE_PERCENT,
             animatedTransition = true,
         )
 
@@ -702,10 +712,23 @@ class EpubView(context: Context, appContext: AppContext) : ExpoView(context, app
             ),
         )
 
-        // If the locator specified by the prop is still on the page,
-        // we still need to emit if we're adding fragments that we didn't
-        // have initially
-        if (isPropLocatorOnPage && (props?.locator?.locations?.fragments?.size ?: 0) > 0) {
+        if (found.locations.fragments.isEmpty()) {
+            val foundLocations = found.locations.otherLocations
+            val propLocations = propLocator?.locations?.otherLocations
+            // A layout progression can remain "visible" after an overlapping
+            // scroll or a page/spread boundary. Compare measured text bounds
+            // too, so those turns (and the first measurement) still emit.
+            // Bridge numbers can be Int or Double: compare their values.
+            val sameTextBounds = propLocator?.href == currentLocator.href &&
+                (foundLocations["textStart"] as? Number)?.toDouble() ==
+                    (propLocations?.get("textStart") as? Number)?.toDouble() &&
+                (foundLocations["textEnd"] as? Number)?.toDouble() ==
+                    (propLocations?.get("textEnd") as? Number)?.toDouble() &&
+                (foundLocations["textLength"] as? Number)?.toDouble() ==
+                    (propLocations?.get("textLength") as? Number)?.toDouble()
+            if (isPropLocatorOnPage && sameTextBounds) return
+        } else if (isPropLocatorOnPage && (propLocator?.locations?.fragments?.size ?: 0) > 0) {
+            // Keep the existing emission rule for sentence-fragment books.
             return
         }
 
@@ -1195,6 +1218,85 @@ class EpubView(context: Context, appContext: AppContext) : ExpoView(context, app
                     return true;
                 }
 
+                storyteller.measureVisibleText = function measureVisibleText() {
+                    try {
+                        const body = document.body;
+                        const width = window.innerWidth;
+                        const height = window.innerHeight;
+                        if (!body || width <= 2 || height <= 2 ||
+                            typeof document.caretRangeFromPoint !== "function") return null;
+
+                        if (storyteller.measuredTextBody !== body) {
+                            const total = document.createRange();
+                            total.selectNodeContents(body);
+                            storyteller.measuredTextLength = total.toString().replace(/\s+/g, "").length;
+                            storyteller.measuredTextBody = body;
+                        }
+
+                        let first = null;
+                        let last = null;
+                        const character = document.createRange();
+                        function probe(x, y) {
+                            const caret = document.caretRangeFromPoint(x, y);
+                            if (!caret || !body.contains(caret.startContainer) ||
+                                caret.startContainer.nodeType !== Node.TEXT_NODE) return;
+                            const node = caret.startContainer;
+                            const offset = caret.startOffset;
+                            // Test the glyphs on both sides of the caret. A
+                            // margin hit may return an offscreen column's caret.
+                            for (let index = offset - 1; index <= offset; index++) {
+                                if (index < 0 || index >= node.length) continue;
+                                character.setStart(node, index);
+                                character.setEnd(node, index + 1);
+                                const rects = character.getClientRects();
+                                let visible = false;
+                                for (let i = 0; i < rects.length; i++) {
+                                    const rect = rects[i];
+                                    if (rect.width > 0 && rect.height > 0 &&
+                                        rect.right > 0 && rect.left < width &&
+                                        rect.bottom > 0 && rect.top < height) {
+                                        visible = true;
+                                        break;
+                                    }
+                                }
+                                if (!visible) continue;
+                                if (!first || character.compareBoundaryPoints(Range.START_TO_START, first) < 0) {
+                                    first = character.cloneRange();
+                                }
+                                if (!last || character.compareBoundaryPoints(Range.END_TO_END, last) > 0) {
+                                    last = character.cloneRange();
+                                }
+                            }
+                        }
+
+                        // Probe inward from every corner, not just the lower
+                        // right of one column. DOM-order extrema include the
+                        // last visible text in either page of a spread, and
+                        // also work in scrolling or right-to-left layouts.
+                        const xs = [1, width * 0.05, width * 0.15, width * 0.25, width * 0.4, width * 0.5];
+                        const ys = [1, height * 0.02, height * 0.05, height * 0.1, height * 0.2, height * 0.35, height * 0.5];
+                        for (const y of ys) {
+                            for (const x of xs) {
+                                probe(x, y);
+                                probe(width - x, y);
+                                probe(x, height - y);
+                                probe(width - x, height - y);
+                            }
+                        }
+                        if (!first || !last) return null;
+
+                        const prefix = document.createRange();
+                        prefix.selectNodeContents(body);
+                        prefix.setEnd(first.startContainer, first.startOffset);
+                        const textStart = prefix.toString().replace(/\s+/g, "").length;
+                        prefix.setEnd(last.endContainer, last.endOffset);
+                        const textEnd = prefix.toString().replace(/\s+/g, "").length;
+                        return { textStart, textEnd, textLength: storyteller.measuredTextLength };
+                    } catch (_) {
+                        return null;
+                    }
+                }
+
                 readium.findFirstVisibleLocator = function findFirstVisibleLocator() {
                     let firstVisibleFragmentId = null;
 
@@ -1207,12 +1309,20 @@ class EpubView(context: Context, appContext: AppContext) : ExpoView(context, app
                         }
                     }
 
-                    if (firstVisibleFragmentId === null) return null;
+                    const visibleText = storyteller.measureVisibleText();
+                    if (firstVisibleFragmentId === null) {
+                        return visibleText ? {
+                            href: "#",
+                            type: "application/xhtml+xml",
+                            locations: visibleText,
+                        } : null;
+                    }
 
                     return {
                         href: "#",
                         type: "application/xhtml+xml",
                         locations: {
+                            ...(visibleText || {}),
                             cssSelector: "#" + firstVisibleFragmentId,
                             fragments: [firstVisibleFragmentId]
                         },

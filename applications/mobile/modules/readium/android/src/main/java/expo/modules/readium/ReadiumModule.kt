@@ -2,6 +2,8 @@
 
 package expo.modules.readium
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.os.Build
 import androidx.annotation.RequiresApi
 import expo.modules.kotlin.functions.Coroutine
@@ -10,6 +12,8 @@ import expo.modules.kotlin.modules.ModuleDefinition
 import java.net.URI
 import java.net.URL
 import java.util.Base64
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.readium.r2.navigator.preferences.FontFamily
 import org.readium.r2.navigator.preferences.TextAlign
@@ -44,6 +48,26 @@ class ReadiumModule : Module(), Listener {
         Name("Readium")
 
         Events("clipChanged", "isPlayingChanged", "positionChanged", "sleepTimerExpired", "trackChanged")
+
+        AsyncFunction("openWikipediaSearch") Coroutine { query: String ->
+            withContext(Dispatchers.Main) {
+                val activity = appContext.currentActivity ?: return@withContext false
+                val intent = Intent(Intent.ACTION_PROCESS_TEXT)
+                    .setPackage("org.wikipedia")
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_PROCESS_TEXT, query)
+                    .putExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true)
+
+                try {
+                    activity.startActivity(intent)
+                    true
+                } catch (_: ActivityNotFoundException) {
+                    false
+                } catch (_: SecurityException) {
+                    false
+                }
+            }
+        }
 
         AsyncFunction("getIsPlaying") { ->
             player.getIsPlaying()
@@ -253,6 +277,19 @@ class ReadiumModule : Module(), Listener {
 
             AsyncFunction("getFragmentPageProportion") Coroutine { view: EpubView, fragmentId: String ->
                 return@Coroutine view.getFragmentPageProportion(fragmentId)
+            }
+
+            AsyncFunction("clearSelection") Coroutine { view: EpubView ->
+                // Clearing runs JavaScript in the navigator's WebView.
+                withContext(Dispatchers.Main) {
+                    view.navigator?.clearSelection()
+                }
+            }
+
+            AsyncFunction("getCurrentSelection") Coroutine { view: EpubView ->
+                withContext(Dispatchers.Main) {
+                    view.navigator?.currentSelection()?.locator?.toJSON()?.toMap()
+                }
             }
 
             Prop("locator") { view: EpubView, prop: Map<String, Any>? ->

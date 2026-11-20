@@ -209,6 +209,17 @@ public class ReadiumModule: Module {
                 return await view.getFragmentPageProportion(fragmentId: fragmentId)
             }
 
+            AsyncFunction("clearSelection") { (view: EPUBView) in
+                await view.navigator?.clearSelection()
+            }
+
+            AsyncFunction("getCurrentSelection") { (view: EPUBView) -> [String: Any]? in
+                let locator = await MainActor.run {
+                    view.navigator?.currentSelection?.locator
+                }
+                return locator?.json
+            }
+
             Prop("bookUuid") { (view: EPUBView, prop: String) in
                 view.pendingProps.bookId = prop
             }

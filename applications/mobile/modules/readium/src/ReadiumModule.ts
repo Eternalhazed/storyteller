@@ -27,6 +27,7 @@ interface ReadiumEvents extends EventsMap {
 }
 
 declare class ReadiumModule extends NativeModule<ReadiumEvents> {
+  openWikipediaSearch(query: string): Promise<boolean>
   extractArchive(archiveUrl: string, extractedUrl: string): Promise<void>
   openPublication(
     bookUuid: UUID,

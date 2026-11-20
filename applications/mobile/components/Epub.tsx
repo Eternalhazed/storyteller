@@ -2,7 +2,7 @@ import deepmerge from "deepmerge"
 import Constants from "expo-constants"
 import { useKeepAwake } from "expo-keep-awake"
 import { Tabs, useRouter } from "expo-router"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   DeviceEventEmitter,
   StatusBar,
@@ -15,6 +15,7 @@ import { type BookWithRelations } from "@/database/books"
 import { deepEquals } from "@/deepEquals"
 import { useColorTheme } from "@/hooks/useColorTheme"
 import { cn } from "@/lib/utils"
+import { logger } from "@/logger"
 import { EPUBView } from "@/modules/readium"
 import {
   type EPUBViewRef,
@@ -33,13 +34,16 @@ import { getCustomFontUrl } from "@/store/persistence/fonts"
 import { getIsPlaying } from "@/store/selectors/bookshelfSelectors"
 import { getShouldKeepReaderAwake } from "@/store/selectors/sleepTimerSelectors"
 import { bookshelfSlice } from "@/store/slices/bookshelfSlice"
+import { type XraySelection } from "@/store/xraySelection"
 import { type UUID } from "@/uuid"
 
 import { BackButton } from "./BackButton"
+import { DefinitionPopover } from "./DefinitionPopover"
 import { LoadingView } from "./LoadingView"
 import { MiniPlayer } from "./MiniPlayer"
 import { SelectionMenu } from "./SelectionMenu"
 import { Toolbar } from "./Toolbar"
+import { XrayPopover } from "./XrayPopover"
 import { Group } from "./ui/Group"
 import { HideableView } from "./ui/HideableView"
 
@@ -62,7 +66,6 @@ export function Epub({ book, format, locator }: Props) {
 
   const { foreground, background } = useColorTheme()
   const [activeBookmarks, setActiveBookmarks] = useState<Bookmark[]>([])
-  const [activeHighlight, setActiveHighlight] = useState<UUID | null>(null)
 
   const {
     data: bookPreferences,
@@ -105,9 +108,24 @@ export function Epub({ book, format, locator }: Props) {
   const [selection, setSelection] = useState<{
     x: number
     y: number
-    locator: ReadiumLocator
+    highlightUuid?: UUID
   } | null>(null)
+  const [definition, setDefinition] = useState<{
+    term: string
+    x: number
+    y: number
+  } | null>(null)
+  const [xrayCard, setXrayCard] = useState<
+    (XraySelection & { x: number; y: number }) | null
+  >(null)
   const [toolbarHeight, setToolbarHeight] = useState(0)
+
+  const closeSelection = () => {
+    setSelection(null)
+    // Drop the WebView's selection handles too; otherwise they linger after
+    // an action and float above the definition popover.
+    void epubViewRef.current?.clearSelection()
+  }
 
   const dispatch = useAppDispatch()
 
@@ -123,9 +141,25 @@ export function Epub({ book, format, locator }: Props) {
 
   const epubViewRef = useRef<EPUBViewRef | null>(null)
 
+  const getCurrentSelection =
+    useCallback(async (): Promise<ReadiumLocator | null> => {
+      try {
+        // Android opens the toolbar before the reader finishes changing the range.
+        return (await epubViewRef.current?.getCurrentSelection()) ?? null
+      } catch {
+        logger.error("Failed to read the current EPUB selection")
+        return null
+      }
+    }, [])
+
   const isPlaying = useAppSelector(getIsPlaying)
 
   const floatingToolbar = preferences?.floatingToolbar
+  // Selection events are relative to the reader view, which sits below the
+  // toolbar (or the status bar when the toolbar floats).
+  const selectionY =
+    (selection?.y ?? 0) +
+    (floatingToolbar ? Constants.statusBarHeight : toolbarHeight)
 
   const showingFootnote = useAppSelector(
     (state) => state.bookshelf.footnoteContent !== null,
@@ -191,15 +225,47 @@ export function Epub({ book, format, locator }: Props) {
         <SelectionMenu
           bookUuid={book.uuid}
           x={selection.x}
-          y={
-            selection.y +
-            (floatingToolbar ? Constants.statusBarHeight : toolbarHeight)
-          }
-          locator={selection.locator}
-          existingHighlight={activeHighlight}
-          onClose={() => {
-            setSelection(null)
-            setActiveHighlight(null)
+          y={selectionY}
+          getCurrentSelection={getCurrentSelection}
+          existingHighlight={selection.highlightUuid ?? null}
+          onClose={closeSelection}
+          onDefine={(term) => {
+            setDefinition({ term, x: selection.x, y: selectionY })
+            closeSelection()
+          }}
+          onXray={(result) => {
+            setDefinition(null)
+            setXrayCard({ ...result, x: selection.x, y: selectionY })
+            closeSelection()
+          }}
+        />
+      )}
+      {definition && (
+        <DefinitionPopover
+          term={definition.term}
+          x={definition.x}
+          y={definition.y}
+          onClose={() => setDefinition(null)}
+        />
+      )}
+      {xrayCard && (
+        <XrayPopover
+          entity={xrayCard.entity}
+          x={xrayCard.x}
+          y={xrayCard.y}
+          onClose={() => setXrayCard(null)}
+          onAllMentions={() => {
+            router.push({
+              pathname: "/navigation-menu/xray",
+              params: {
+                uuid: book.uuid,
+                format,
+                mode: "text",
+                entityId: String(xrayCard.entity.id),
+                selectionBoundary: String(xrayCard.boundary),
+              },
+            })
+            setXrayCard(null)
           }}
         />
       )}
@@ -238,9 +304,8 @@ export function Epub({ book, format, locator }: Props) {
             setSelection({
               x: event.nativeEvent.x,
               y: event.nativeEvent.y,
-              locator: locator,
+              highlightUuid: event.nativeEvent.decoration,
             })
-            setActiveHighlight(event.nativeEvent.decoration)
           }}
           onBookmarksActivate={(event) => {
             const activeLocators = event.nativeEvent.activeBookmarks
@@ -283,9 +348,12 @@ export function Epub({ book, format, locator }: Props) {
           }}
           onSelection={(event) => {
             if ("cleared" in event.nativeEvent) {
-              setSelection(null)
+              setSelection((current) =>
+                current?.highlightUuid ? current : null,
+              )
             } else {
-              setSelection(event.nativeEvent)
+              const { x, y } = event.nativeEvent
+              setSelection({ x, y })
             }
           }}
           onShowFootnote={(event) => {
