@@ -117,25 +117,24 @@ jobs:
 
       - name: Build the APK
         working-directory: applications/mobile/android
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           # The generated project allows Gradle 2 GB, which is too little here.
           ./gradlew :app:assembleRelease --no-daemon \
             -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g" \
-            -PreactNativeArchitectures=armeabi-v7a,arm64-v8a \
-            -Pandroid.injected.signing.store.file="$KEYSTORE_PATH" \
-            -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
-            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
-            -Pandroid.injected.signing.key.password="$ANDROID_KEYSTORE_PASSWORD"
+            -PreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86_64
 
-      - name: Check the APK is signed with the release key
+      - name: Sign the APK with the release key
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           apk="$RUNNER_TEMP/Storyteller-$APP_VERSION.apk"
-          cp applications/mobile/android/app/build/outputs/apk/release/app-release.apk "$apk"
-          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
-          signed=$("$apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
-          if [ "$signed" != "$KEY_FINGERPRINT" ]; then
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)
+          "${tools}apksigner" sign --ks "$KEYSTORE_PATH" --ks-type PKCS12 \
+            --ks-key-alias "$KEY_ALIAS" --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --out "$apk" \
+            applications/mobile/android/app/build/outputs/apk/release/app-release.apk
+          "${tools}apksigner" verify --print-certs "$apk" | tee "$RUNNER_TEMP/certs.txt"
+          if ! grep -q "SHA-256 digest: $KEY_FINGERPRINT" "$RUNNER_TEMP/certs.txt"; then
             echo "::error::The APK is not signed with the release key"
             exit 1
           fi
