@@ -1,4 +1,4 @@
-import { AliasMatcher } from "./matcher.ts"
+import { AliasMatcher, normalizeText } from "./matcher.ts"
 import {
   XRAY_GENERATOR_VERSION,
   XRAY_SCHEMA_VERSION,
@@ -134,13 +134,22 @@ function findActive(
   return active
 }
 
+/** A capital here can belong to the sentence or speech, rather than the name. */
+function atUtteranceStart(text: string, index: number): boolean {
+  const before = text.slice(0, index)
+  return (
+    !/[\p{L}\p{N}]/u.test(before) ||
+    /(?:[—–:]|(?:^|[\s\p{P}])["'])\s*$/u.test(before)
+  )
+}
+
 /**
  * Turn what was recorded while reading into the entities of the file: decide
  * when each item may be seen, find every sentence that names an entity, and
  * gather the text of every sentence the file cites.
  *
- * `sentences` maps ordinals to sentence text. Only sentences that name an
- * entity or are cited by a fact are needed.
+ * `sentences` maps ordinals to the whole book's text, so ordinary lowercase
+ * words can be distinguished from names.
  */
 export function buildIndex(
   drafts: readonly DraftEntity[],
@@ -151,11 +160,48 @@ export function buildIndex(
     (entity) => ({ ...entity, mentions: [] }),
   )
 
+  // The book itself tells us which names are also ordinary words. A name
+  // such as "Hook" can have a lowercase use without usually being that word.
+  const lowercaseUses = new Map<string, number>()
+  const nameUses = new Map<string, number>()
+  for (const sentence of sentences.values()) {
+    const text = normalizeText(sentence)
+    for (const match of text.matchAll(
+      /[\p{L}\p{M}\p{N}]+(?:'[\p{L}\p{M}\p{N}]+)*/gu,
+    )) {
+      const word = match[0]
+      const key = word.toLowerCase()
+      if (word === key && word !== word.toUpperCase()) {
+        lowercaseUses.set(key, (lowercaseUses.get(key) ?? 0) + 1)
+      } else if (
+        /^\p{Lu}/u.test(word) &&
+        !atUtteranceStart(text, match.index)
+      ) {
+        nameUses.set(key, (nameUses.get(key) ?? 0) + 1)
+      }
+    }
+  }
+  const commonWords = new Set(
+    [...lowercaseUses]
+      .filter(([word, count]) => count >= (nameUses.get(word) ?? 0))
+      .map(([word]) => word),
+  )
   const matcher = new AliasMatcher(
     entities.flatMap((entity) =>
-      entity.aliases.map(
-        (alias, aliasIndex) => [alias.text, { entity, aliasIndex }] as const,
-      ),
+      entity.aliases.map((alias, aliasIndex) => {
+        const name = normalizeText(alias.text).trim()
+        return [
+          name,
+          {
+            entity,
+            aliasIndex,
+            commonWord:
+              /^\p{Lu}[\p{L}\p{M}\p{N}]*(?:'[\p{L}\p{M}\p{N}]+)*$/u.test(
+                name,
+              ) && commonWords.has(name.toLowerCase()),
+          },
+        ] as const
+      }),
     ),
   )
 
@@ -165,7 +211,9 @@ export function buildIndex(
 
   const cited: Record<string, string> = {}
   for (const [ordinal, sentence] of [...sentences].sort(([a], [b]) => a - b)) {
-    for (const { value } of matcher.find(sentence)) {
+    const text = normalizeText(sentence)
+    for (const { value, index } of matcher.find(text)) {
+      if (value.commonWord && atUtteranceStart(text, index)) continue
       const { entity, aliasIndex } = value
       const last = entity.mentions.at(-1)
       if (last?.[0] !== ordinal) {

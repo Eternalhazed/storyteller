@@ -85,6 +85,7 @@ void describe("generateXray", () => {
       assert.match(xray.sentences[ordinal] ?? "", /Ishmael|ISHMAEL/)
     }
     assert.strictEqual(ishmael.mentions[0]?.[0], ishmael.names[0].at)
+    assert.strictEqual(xray.generator.version, 2)
   })
 
   void it("resumes an interrupted run without rereading", async () => {

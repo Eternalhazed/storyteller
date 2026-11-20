@@ -5,6 +5,7 @@ import {
   type DraftEntity,
   type SegmentOutput,
   applySegmentOutput,
+  mergeDuplicates,
   pruneSharedTitles,
 } from "./registry.ts"
 
@@ -120,6 +121,50 @@ void describe("applySegmentOutput", () => {
       entities[0]?.aliases.map((alias) => alias.text),
       ["Macro"],
     )
+  })
+
+  void it("rejects bare honorifics and interjections for every entity type", () => {
+    const words =
+      "Sir Madam Madame Ma’am Mister Miss Mr. Mrs. Ms. Dr. Lord Lady Yes No Oh Ah Well Okay OK Hey Hello".split(
+        " ",
+      )
+    for (const type of ["character", "place", "group", "thing"] as const) {
+      for (const word of words) {
+        const entities: DraftEntity[] = []
+        applySegmentOutput(
+          entities,
+          {
+            summary: "",
+            entities: [entity({ type, name: word, description: "" })],
+          },
+          { start: 0, end: 1 },
+          0,
+          [`“${word},” he said.`],
+        )
+        assert.deepStrictEqual(entities, [], `${type}: ${word}`)
+      }
+    }
+  })
+
+  void it("rejects a bare title alias without discarding the full name", () => {
+    const entities: DraftEntity[] = []
+    applySegmentOutput(
+      entities,
+      {
+        summary: "",
+        entities: [
+          entity({
+            name: "Sir Macro",
+            aliases: ["Sir"],
+            description: "",
+          }),
+        ],
+      },
+      { start: 0, end: 1 },
+      0,
+      ["Sir Macro saluted. “Yes, Sir.”"],
+    )
+    assert.deepStrictEqual(entities[0]?.aliases, [{ text: "Sir Macro", at: 0 }])
   })
 
   void it("folds a repeat of a known name into the known entity", () => {
@@ -297,5 +342,140 @@ void describe("pruneSharedTitles", () => {
       ]),
       [["Tom"], ["Tom Bombadil"]],
     )
+  })
+})
+
+void describe("mergeDuplicates", () => {
+  const draft = (id: number, name: string, at = 0): DraftEntity => ({
+    id,
+    type: "character",
+    names: [{ text: name, at }],
+    aliases: [{ text: name, at }],
+    descriptions: [],
+    facts: [],
+    lastSeen: 0,
+  })
+
+  void it("merges Macro with Centurion Macro and keeps ordered records", () => {
+    const macro = {
+      ...draft(0, "Macro"),
+      descriptions: [{ text: "A soldier.", at: 4 }],
+      facts: [{ text: "Watches the recruits.", at: 2 }],
+    }
+    const centurion = {
+      ...draft(3, "Centurion Macro", 10),
+      aliases: [
+        { text: "Centurion Macro", at: 10 },
+        { text: "MACRO", at: 5 },
+      ],
+      descriptions: [{ text: "A centurion.", at: 14 }],
+      facts: [
+        { text: "Watches the recruits.", at: 2 },
+        { text: "Served for fourteen years.", at: 12 },
+      ],
+      lastSeen: 2,
+    }
+    const merged = mergeDuplicates([centurion, draft(1, "Cato"), macro])
+    assert.deepStrictEqual(
+      merged.map((entity) => entity.id),
+      [0, 1],
+    )
+    assert.deepStrictEqual(merged[0], {
+      ...macro,
+      aliases: [
+        { text: "Macro", at: 0 },
+        { text: "Centurion Macro", at: 10 },
+      ],
+      names: [
+        { text: "Macro", at: 0 },
+        { text: "Centurion Macro", at: 10 },
+      ],
+      descriptions: [
+        { text: "A soldier.", at: 4 },
+        { text: "A centurion.", at: 14 },
+      ],
+      facts: [
+        { text: "Watches the recruits.", at: 2 },
+        { text: "Served for fourteen years.", at: 12 },
+      ],
+      lastSeen: 2,
+    })
+    assert.deepStrictEqual(macro.aliases, [{ text: "Macro", at: 0 }])
+  })
+
+  void it("merges a nested chain of three names until stable", () => {
+    const merged = mergeDuplicates([
+      draft(0, "Macro"),
+      draft(1, "Lucius Macro", 8),
+      draft(2, "Lucius Cornelius Macro", 12),
+    ])
+    assert.strictEqual(merged.length, 1)
+    assert.deepStrictEqual(merged[0]?.aliases, [
+      { text: "Macro", at: 0 },
+      { text: "Lucius Macro", at: 8 },
+      { text: "Lucius Cornelius Macro", at: 12 },
+    ])
+  })
+
+  void it("does not merge non-nested holders of Macro", () => {
+    const drafts = [
+      draft(0, "Macro"),
+      draft(1, "Centurion Macro"),
+      draft(2, "Lucius Cornelius Macro"),
+    ]
+    assert.deepStrictEqual(mergeDuplicates(drafts), drafts)
+  })
+
+  void it("does not merge Baggins when a third entity holds the surname", () => {
+    const drafts = [
+      draft(0, "Baggins"),
+      draft(1, "Bilbo Baggins"),
+      draft(2, "Frodo Baggins"),
+    ]
+    assert.deepStrictEqual(mergeDuplicates(drafts), drafts)
+  })
+
+  void it("never merges across entity types", () => {
+    const drafts = [
+      draft(0, "Macro"),
+      { ...draft(1, "Centurion Macro"), type: "place" as const },
+    ]
+    assert.deepStrictEqual(mergeDuplicates(drafts), drafts)
+  })
+
+  void it("does not use a shared title as a distinctive word", () => {
+    const drafts = [
+      {
+        ...draft(0, "Captain"),
+        aliases: [
+          { text: "Captain", at: 0 },
+          { text: "Captain Hook", at: 1 },
+        ],
+      },
+      draft(1, "Captain Smith"),
+    ]
+    assert.deepStrictEqual(mergeDuplicates(drafts), drafts)
+  })
+
+  void it("merges nested names in unspaced scripts by substring", () => {
+    const merged = mergeDuplicates([
+      draft(0, "太郎"),
+      draft(1, "望月太郎", 8),
+      draft(2, "望月太郎先生", 12),
+    ])
+    assert.strictEqual(merged.length, 1)
+    assert.deepStrictEqual(
+      merged[0]?.aliases.map((alias) => alias.text),
+      ["太郎", "望月太郎", "望月太郎先生"],
+    )
+  })
+
+  void it("does not merge ambiguous substrings in unspaced scripts", () => {
+    const drafts = [
+      draft(0, "太郎"),
+      draft(1, "望月太郎"),
+      draft(2, "田中太郎"),
+    ]
+    assert.deepStrictEqual(mergeDuplicates(drafts), drafts)
   })
 })
