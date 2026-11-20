@@ -1,11 +1,23 @@
+import { type WordEntry } from "@echogarden/text-segmentation"
 import { getCurrency } from "locale-currency"
 import { toWords } from "to-words"
 
-import { slugify as transliterateSlugify } from "@storyteller-platform/transliteration"
+import { type Mapping } from "@storyteller/mapping"
+import { slugify as transliterateSlugify } from "@storyteller/transliteration"
+
+import TSCharacters from "./opencc/TSCharacters.json" with { type: "json" }
+
+const traditionalToSimplified: Record<string, string> = TSCharacters
 
 const replacerMap = new WeakMap<
   Intl.Locale,
   ReturnType<typeof createReplacers>
+>()
+
+// cache the vocab creation
+const vocabCharsMap = new WeakMap<
+  Map<string, number>,
+  { locale: string; chars: string[]; allowedChars: string }
 >()
 
 function getCurrencySymbols(locale: Intl.Locale) {
@@ -72,8 +84,13 @@ function getNumberSymbols(locale: Intl.Locale) {
   )
 }
 
-function createReplacers(locale: Intl.Locale) {
-  const maximizedLocale = locale.maximize()
+export function createReplacers(locale: Intl.Locale) {
+  const maximizedLocale =
+    // "ar".maximize() === "ar-EG", which to-words doesn't support
+    locale.language === "ar" &&
+    !["AE", "LB", "MA"].includes(locale.region ?? "")
+      ? new Intl.Locale("ar-SA")
+      : locale.maximize()
 
   const currencySymbols = getCurrencySymbols(maximizedLocale)
 
@@ -143,15 +160,85 @@ function createReplacers(locale: Intl.Locale) {
   ]
 }
 
-export async function slugify(text: string, locale: Intl.Locale) {
+export async function slugify(
+  text: string,
+  locale: Intl.Locale,
+  separator = "-",
+  useLocale = true,
+  vocab?: Map<string, number>,
+) {
   const replacers = replacerMap.get(locale) ?? createReplacers(locale)
   replacerMap.set(locale, replacers)
 
-  const { result, mapping } = await transliterateSlugify(text, {
-    allowedChars: "a-zA-Z0-9",
-    locale,
+  let vocabChars = vocab ? vocabCharsMap.get(vocab) : undefined
+  if (vocab && vocabChars?.locale !== locale.baseName) {
+    const chars = Array.from(vocab.keys())
+      .filter((c) => c !== "|")
+      .flatMap((c) => [
+        c.toLocaleLowerCase(locale),
+        c.toLocaleUpperCase(locale),
+      ])
+    vocabChars = {
+      locale: locale.baseName,
+      chars,
+      allowedChars: `a-zA-Z${chars.filter((c) => !/[a-zA-Z]/.test(c)).join("")}`,
+    }
+    vocabCharsMap.set(vocab, vocabChars)
+  }
+
+  const folded = vocab
+    ? text.replace(/\p{Script=Han}/gu, (c) => {
+        const simplified = traditionalToSimplified[c]
+        return !vocab.has(c) && simplified && vocab.has(simplified)
+          ? simplified
+          : c
+      })
+    : text
+
+  const chars = new Set(folded)
+  if (vocabChars) {
+    for (const [regex, replacer] of replacers) {
+      for (const match of folded.matchAll(regex)) {
+        for (const c of replacer(match)) {
+          chars.add(c)
+        }
+      }
+    }
+  }
+  const ignores = vocabChars?.chars.filter((c) => chars.has(c)) ?? []
+
+  const { result, mapping } = await transliterateSlugify(folded, {
+    allowedChars: vocabChars?.allowedChars ?? "a-zA-Z",
     replace: replacers,
+    separator,
+    ignore: ignores,
+    ...(useLocale ? { locale } : {}),
   })
 
   return { result, mapping }
+}
+
+/**
+ * Map the offsets of `words` through `mapping` into inclusive character
+ * ranges of the slugified sentence, offset by `slugStart`.
+ */
+export function slugifiedWordRanges(
+  words: WordEntry[],
+  mapping: Mapping,
+  sentenceStart: number,
+  slugStart: number,
+): [number, number][] {
+  const cursor = mapping.cursor()
+
+  return words
+    .filter((word) => !word.isPunctuation)
+    .map<[number, number]>((word) => {
+      const start = cursor.map(word.startOffset - sentenceStart)
+      const end = Math.max(
+        cursor.map(word.endOffset - sentenceStart, "end") - 1,
+        start,
+      )
+
+      return [start + slugStart, end + slugStart]
+    })
 }

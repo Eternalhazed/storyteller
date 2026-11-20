@@ -12,7 +12,7 @@ import {
   STALE_STATE_MESSAGE,
   createAnthropicModel,
   generateXray,
-} from "@storyteller-platform/xray"
+} from "@storyteller/xray"
 
 import { getXrayFilepath, getXrayStateFilepath } from "@/assets/paths"
 import { removeXrayFiles } from "@/assets/xray"

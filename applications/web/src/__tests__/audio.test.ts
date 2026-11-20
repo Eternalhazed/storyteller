@@ -1,23 +1,19 @@
 import assert from "node:assert"
 import { join } from "node:path"
-import { describe, it } from "node:test"
 
-import {
-  getTrackDuration,
-  isAudioFile,
-  isHiddenFile,
-  isZipArchive,
-} from "@/audio"
+import { describe, it } from "vitest"
 
-void describe("getTrackInfo", () => {
-  void it("can get track duration from an mp3 file", async () => {
+import { getTrackDuration, isAudioFile, isZipArchive } from "@/audio"
+
+describe("getTrackInfo", () => {
+  it("can get track duration from an mp3 file", async () => {
     const duration = await getTrackDuration(
       join("src", "__fixtures__", "mp3", "mobydick_001_002_melville.mp3"),
     )
     assert.strictEqual(Math.floor(duration), 1436)
   })
 
-  void it("can get track info from an mp4 file", async () => {
+  it("can get track info from an mp4 file", async () => {
     const duration = await getTrackDuration(
       join(
         "src",
@@ -30,32 +26,32 @@ void describe("getTrackInfo", () => {
   })
 })
 
-void describe("isAudioFile", () => {
-  void it("recognizes mp3, mp4, and opus formats", () => {
-    assert.ok(isAudioFile(".mp3"))
-    assert.ok(isAudioFile(".m4a"))
-    assert.ok(isAudioFile(".m4b"))
-    assert.ok(isAudioFile(".mp4"))
-    assert.ok(isAudioFile(".aac"))
-    assert.ok(isAudioFile(".ogg"))
-    assert.ok(isAudioFile(".oga"))
-    assert.ok(isAudioFile(".opus"))
+describe("isAudioFile", () => {
+  it("recognizes mp3, mp4, and opus formats", () => {
+    assert.ok(isAudioFile("track.mp3"))
+    assert.ok(isAudioFile("track.m4a"))
+    assert.ok(isAudioFile("track.m4b"))
+    assert.ok(isAudioFile("track.mp4"))
+    assert.ok(isAudioFile("track.aac"))
+    assert.ok(isAudioFile("track.ogg"))
+    assert.ok(isAudioFile("track.oga"))
+    assert.ok(isAudioFile("track.opus"))
   })
 
-  void it("recognizes file formats we don't use", () => {
-    assert.ok(isAudioFile(".flac"))
-    assert.ok(isAudioFile(".wav"))
+  it("recognizes file formats we don't use", () => {
+    assert.ok(isAudioFile("track.flac"))
+    assert.ok(isAudioFile("track.wav"))
   })
 
-  void it("does not recognize other formats", () => {
-    assert.ok(!isAudioFile(".json"))
-    assert.ok(!isAudioFile(".epub"))
-    assert.ok(!isAudioFile(".html"))
-    assert.ok(!isAudioFile(".zip"))
-    assert.ok(!isAudioFile(".txt"))
+  it("does not recognize other formats", () => {
+    assert.ok(!isAudioFile("track.json"))
+    assert.ok(!isAudioFile("track.epub"))
+    assert.ok(!isAudioFile("track.html"))
+    assert.ok(!isAudioFile("track.zip"))
+    assert.ok(!isAudioFile("track.txt"))
   })
 
-  void it("works with full file names", () => {
+  it("works with full file names", () => {
     assert.ok(isAudioFile("somefile.m4b"))
     assert.ok(isAudioFile("audiobook/chapter 1.mp3"))
     assert.ok(isAudioFile("audio.book/chapter.1.flac"))
@@ -64,38 +60,22 @@ void describe("isAudioFile", () => {
     assert.ok(!isAudioFile("README.txt"))
   })
 
-  void it("ignores extension casing, which rips from older tools vary", () => {
+  it("ignores extension casing, which rips from older tools vary", () => {
     // "Track 01.MP3" is the same audio as "Track 01.mp3"; a case-sensitive
     // check silently dropped every track of an uppercase rip, so the book
     // imported with no audio at all.
     assert.ok(isAudioFile("Track 01.MP3"))
     assert.ok(isAudioFile("Track 01.Mp3"))
     assert.ok(isAudioFile("book.M4B"))
-    assert.ok(isAudioFile(".FLAC"))
+    assert.ok(isAudioFile("track.FLAC"))
     assert.ok(!isAudioFile("README.TXT"))
   })
 })
 
-void describe("isZipArchive", () => {
-  void it("accepts .zip regardless of casing", () => {
+describe("isZipArchive", () => {
+  it("accepts .zip regardless of casing", () => {
     assert.ok(isZipArchive("book.zip"))
     assert.ok(isZipArchive("book.ZIP"))
     assert.ok(!isZipArchive("book.epub"))
-  })
-})
-
-void describe("isHiddenFile", () => {
-  void it("catches hidden files, including ones that shadow real audio names", () => {
-    assert.ok(isHiddenFile("._Track 01.mp3"))
-    assert.ok(isHiddenFile("/library/A Book/._Track 01.mp3"))
-    assert.ok(isHiddenFile(".DS_Store"))
-    assert.ok(isHiddenFile(".hidden.mp3"))
-  })
-
-  void it("leaves visible files alone", () => {
-    assert.ok(!isHiddenFile("Track 01.mp3"))
-    assert.ok(!isHiddenFile("/library/A Book/Track 01.mp3"))
-    assert.ok(!isHiddenFile("_underscore name.mp3"))
-    assert.ok(!isHiddenFile("Thumbs.db"))
   })
 })

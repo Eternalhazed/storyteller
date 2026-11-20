@@ -19,19 +19,19 @@ import {
 import { IconPicker } from "@v3/_/components/ui/icon-picker"
 import { Input } from "@v3/_/components/ui/input"
 import { Label } from "@v3/_/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@v3/_/components/ui/select"
 import { Textarea } from "@v3/_/components/ui/textarea"
 import { useDebounce } from "@v3/_/hooks/use-debounce"
 import { useCommon, useTranslation } from "@v3/_/hooks/use-translation"
 import { apiErrorMessage } from "@v3/_/lib/api-error"
 import { cn } from "@v3/_/lib/utils"
 
+import {
+  FilterableMenu,
+  FilterableMenuContent,
+  FilterableMenuItem,
+  FilterableMenuTrigger,
+} from "@/app/(v3)/v3/_/components/ui/filterable-menu"
+import { Tabs, TabsList, TabsTrigger } from "@/app/(v3)/v3/_/components/ui/tabs"
 import { type BookWithRelations } from "@/database/books"
 import { type ShelfWithBooks } from "@/database/shelves"
 import * as icon from "@/icons"
@@ -42,18 +42,19 @@ import {
 } from "@/shelves"
 import { SORTABLE_FIELDS } from "@/sort"
 import {
-  getCoverUrl,
   useCreateUserShelfMutation,
   useGetBookQuery,
   useListInfiniteBooksInfiniteQuery,
   usePreviewShelfFilterMutation,
   useUpdateUserShelfMutation,
 } from "@/store/api"
+import { getCoverUrl } from "@/store/urls"
 import { type UUID } from "@/uuid"
 
 import {
   FilterPreview,
   ShelfFilterEditor,
+  hasUnknownFields,
   isFilterValid,
 } from "./ShelfFilterEditor"
 
@@ -257,7 +258,7 @@ export function ShelfEditor({
 
       setPreviewBooks(books)
     } catch (error) {
-      console.error("Failed to preview filter:", error)
+      toast.error(apiErrorMessage(error) ?? "Failed to preview filter")
     }
   }, [filter, filterValid, orderBy, orderDirection, limitCount, previewFilter])
 
@@ -283,16 +284,21 @@ export function ShelfEditor({
   const orderByOptions = useMemo(() => {
     return SORTABLE_FIELDS.map((key) => ({
       value: key,
+      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
       label: c.plain(`fields.label.${key}` as "fields.label.title"),
+
+      icon: <icon.FieldIcon field={key} variant="base" />,
     })) satisfies { value: ShelfOrderBy; label: string }[]
   }, [c])
 
-  const orderDirectionOptions = useMemo(() => {
-    return (["desc", "asc"] as const).map((key) => ({
-      value: key,
-      label: t.plain(`orderDirection.${key}` as "orderDirection.desc"),
-    })) satisfies { value: "asc" | "desc"; label: string }[]
-  }, [t])
+  const currentOrderOption = orderByOptions.find((o) => o.value === orderBy)
+  // const orderDirectionOptions = useMemo(() => {
+  //   return (["desc", "asc"] as const).map((key) => ({
+  //     value: key,
+  //     // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
+  //     label: t.plain(`orderDirection.${key}` as "orderDirection.desc"),
+  //   })) satisfies { value: "asc" | "desc"; label: string }[]
+  // }, [t])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -379,34 +385,38 @@ export function ShelfEditor({
                       </Button>
                     )}
 
-                    <div className="bg-muted flex rounded-md p-0.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleModeChange("filter")
-                        }}
-                        className={`rounded px-2 py-1 text-xs transition-colors ${
-                          selectionMode === "filter"
-                            ? "bg-background shadow-sm"
-                            : "text-muted-foreground"
-                        }`}
-                      >
-                        {t.plain("dynamicFilter")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleModeChange("manual")
-                        }}
-                        className={`rounded px-2 py-1 text-xs transition-colors ${
-                          selectionMode === "manual"
-                            ? "bg-background shadow-sm"
-                            : "text-muted-foreground"
-                        }`}
-                      >
-                        {t.plain("manual")}
-                      </button>
-                    </div>
+                    <Tabs>
+                      <TabsList>
+                        <TabsTrigger
+                          // type="button"
+                          onClick={() => {
+                            handleModeChange("filter")
+                          }}
+                          className={`px-2 py-1 text-xs transition-colors ${
+                            selectionMode === "filter"
+                              ? "bg-background shadow-sm"
+                              : "text-muted-foreground"
+                          }`}
+                          value="filter"
+                        >
+                          {t.plain("dynamicFilter")}
+                        </TabsTrigger>
+                        <TabsTrigger
+                          value="manual"
+                          // type="button"
+                          onClick={() => {
+                            handleModeChange("manual")
+                          }}
+                          className={`px-2 py-1 text-xs transition-colors ${
+                            selectionMode === "manual"
+                              ? "bg-background shadow-sm"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {t.plain("manual")}
+                        </TabsTrigger>
+                      </TabsList>
+                    </Tabs>
                   </div>
                 </div>
 
@@ -469,45 +479,82 @@ export function ShelfEditor({
                     <Label className="text-muted-foreground text-xs">
                       {t.plain("sortBy")}
                     </Label>
-                    <Select
-                      value={orderBy}
-                      onValueChange={(v) => {
-                        if (!v) return
-                        form.setValue("orderBy", v)
-                      }}
-                      items={orderByOptions}
+                    <FilterableMenu
+                    // value={orderBy}
+                    // items={orderByOptions}
+                    // onValueChange={(v) => {
+                    //   if (!v) return
+                    //   form.setValue("orderBy", v as ShelfOrderBy)
+                    // }}
                     >
-                      <SelectTrigger className="h-7 w-[130px] text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
+                      <FilterableMenuTrigger
+                        className="flex h-7 text-xs"
+                        render={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 gap-2 text-xs"
+                          >
+                            {currentOrderOption?.icon}
+                            {currentOrderOption?.label}
+                            {orderDirection === "asc" ? (
+                              <icon.ArrowUp className="size-3" />
+                            ) : (
+                              <icon.ArrowDown className="size-3" />
+                            )}
+                          </Button>
+                        }
+                      />
+                      <FilterableMenuContent>
                         {orderByOptions.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>
+                          <FilterableMenuItem
+                            key={o.value}
+                            icon={o.icon}
+                            closeOnClick={false}
+                            onSelect={() => {
+                              form.setValue("orderBy", o.value)
+                              if (orderBy === o.value) {
+                                if (orderDirection === "asc") {
+                                  form.setValue("orderDirection", "desc")
+                                } else {
+                                  form.setValue("orderDirection", "asc")
+                                }
+                              } else {
+                                form.setValue("orderDirection", "desc")
+                              }
+                            }}
+                          >
                             {o.label}
-                          </SelectItem>
+                            {currentOrderOption?.value === o.value &&
+                              (orderDirection === "asc" ? (
+                                <icon.ArrowUp className="size-3" />
+                              ) : (
+                                <icon.ArrowDown className="size-3" />
+                              ))}
+                          </FilterableMenuItem>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </FilterableMenuContent>
+                    </FilterableMenu>
                   </div>
 
-                  <Select
+                  {/* <Select
                     value={orderDirection}
                     onValueChange={(v) => {
                       form.setValue("orderDirection", v as "asc" | "desc")
                     }}
                     items={orderDirectionOptions}
                   >
-                    <SelectTrigger className="h-7 w-[100px] text-xs">
+                    <SelectTrigger className="h-7 w-fit text-xs">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="w-fit">
                       {orderDirectionOptions.map((o) => (
                         <SelectItem key={o.value} value={o.value}>
                           {o.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
-                  </Select>
+                  </Select> */}
 
                   <div className="flex items-center gap-1.5">
                     <Label className="text-muted-foreground text-xs">
@@ -516,7 +563,7 @@ export function ShelfEditor({
                     <Input
                       type="text"
                       inputMode="numeric"
-                      className="h-7 w-16 text-xs"
+                      className="h-7 w-fit text-xs"
                       value={limitCount ?? ""}
                       onChange={(e) => {
                         const raw = e.target.value
@@ -544,6 +591,7 @@ export function ShelfEditor({
                   books={previewBooks}
                   isLoading={isLoadingPreview}
                   isInvalid={!filterValid}
+                  hasUnknownFields={hasUnknownFields(filter)}
                 />
               </aside>
             )}
@@ -573,14 +621,17 @@ export function ShelfEditor({
 
 type BookSelectorProps = {
   selectedBookUuids: string[]
-  onAdd: (uuid: string) => void
+  onAdd: (uuid: string, book: BookWithRelations) => void
   onRemove: (uuid: string) => void
+  // Hide the built-in selected list when the caller renders its own
+  showSelected?: boolean
 }
 
 export function BookSelector({
   selectedBookUuids,
   onAdd,
   onRemove,
+  showSelected = true,
 }: BookSelectorProps) {
   const t = useTranslation("ShelfEditor")
   const c = useCommon()
@@ -638,7 +689,7 @@ export function BookSelector({
                   variant="ghost"
                   size="icon-xs"
                   onClick={() => {
-                    onAdd(book.uuid)
+                    onAdd(book.uuid, book)
                   }}
                 >
                   <icon.Add className="size-3" />
@@ -649,7 +700,7 @@ export function BookSelector({
         </div>
       )}
 
-      {selectedBookUuids.length > 0 && (
+      {showSelected && selectedBookUuids.length > 0 && (
         <div className="flex flex-col gap-1">
           <Label className="text-muted-foreground text-xs">
             {c.plain("selectedCount", { count: selectedBookUuids.length })}

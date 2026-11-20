@@ -6,6 +6,21 @@ export {
   recognize,
 } from "./api/Recognition.ts"
 export {
+  type EmissionData,
+  type EmissionOptions,
+  type EmissionResult,
+  type EmissionTokenizer,
+  type Emissions,
+  type SentencePieceModel,
+  decodeEmissions,
+  emit,
+  encodeEmissions,
+  encodeUnigram,
+  readSentencePieceModel,
+  unigramText,
+  unigramTokenizer,
+} from "./api/Emission.ts"
+export {
   type AudioFormat,
   type AudioFormatInfo,
   type AudioSource,
@@ -42,6 +57,7 @@ export {
   detectPlatform,
   getConfiguredVariant,
   getInstallDir,
+  getInstalledVariant,
   getModelDir,
   getModelPath,
   getVadModelPath,
@@ -51,6 +67,11 @@ export {
   resolveVariant,
 } from "./cli/config.ts"
 export {
+  type CtcDeviceCapabilities,
+  ctcDeviceCapabilities,
+  resolveCtcDevice,
+} from "./constants.ts"
+export {
   type InstallBinaryOptions,
   type InstallModelOptions,
   type InstallVadModelOptions,
@@ -59,6 +80,69 @@ export {
   installModel,
   installVadModel,
 } from "./cli/install.ts"
+export {
+  type CtcOptions,
+  type CtcResult,
+  emitChunks,
+  readAudioAsFloat32,
+} from "./emission/CtcEmission.ts"
+export {
+  type EmissionsFileHeader,
+  type EmissionsMeta,
+  type GetBytes,
+  decodeEmissionsFrames,
+  decodeEmissionsHeader,
+  frameByteRange,
+} from "./emission/encoding.ts"
+export {
+  type BlockRequest,
+  type Grid,
+  type SampleRange,
+  type SourceInfo,
+  PCM_SAMPLE_RATE,
+  planBlocks,
+} from "./audio/PlanBlocks.ts"
+export {
+  type DecodeOptions,
+  type DecodeRequest,
+  decodePcm,
+  probeSource,
+} from "./audio/DecodePcm.ts"
+export { mapOrdered } from "./utilities/MapOrdered.ts"
+export { Scratch, type ScratchOptions } from "./utilities/Scratch.ts"
+export {
+  type CtcBackend,
+  type CtcRun,
+  type CtcRunOptions,
+  type LoadCtcModelOptions,
+  type LoadedCtcModel,
+  loadCtcModel,
+  resolveCtcRun,
+} from "./emission/CtcModel.ts"
+export {
+  type EmitTracksOptions,
+  type EmittedTrack,
+  blockGrid,
+  emitTracks,
+} from "./emission/EmitTracks.ts"
+export {
+  type CtcServer,
+  type RemoteEmissions,
+  type RemoteEmitOptions,
+  type RemoteRunOptions,
+  emitRemote,
+  fetchEmissionCapabilities,
+  hashFile,
+  resolveRemoteCtcRun,
+  uploadFile,
+} from "./emission/CtcServerClient.ts"
+export {
+  type EmissionCapabilities,
+  type Job,
+  type JobState,
+  type RemoteCtcRun,
+  type RemoteEmissionResult,
+} from "./server/protocol.ts"
 export {
   type ConversionMode,
   getConfig,

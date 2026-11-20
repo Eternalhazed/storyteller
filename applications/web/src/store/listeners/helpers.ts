@@ -1,17 +1,26 @@
 import { type FrameComms, type FrameManager } from "@readium/navigator"
 import { type DecoratorRequest } from "@readium/navigator-html-injectables"
-import { Link, type Locator, type Publication } from "@readium/shared"
+import {
+  Link,
+  Locator,
+  LocatorLocations,
+  type Publication,
+  getTime,
+} from "@readium/shared"
 
 import {
   type AudioClip,
   type TocItem,
+  getAudiobookLocator,
   getClip,
+  getFragmentForClip,
   getFragmentNavigation,
   getLocatorForFragment,
+  getLocatorWithClosestPositionAsync,
   getResourceHrefFromApiUrl,
-} from "@/components/reader/BookService"
-import { withActiveFrame } from "@/components/reader/frameUtils"
-import { AudioPlayer } from "@/services/AudioPlayerService"
+} from "@/reader/BookService"
+import { withActiveFrame } from "@/reader/frameUtils"
+import { readerPlayer } from "@/services/AudioPlayerService"
 import {
   getAudioToTextMap,
   getGuide,
@@ -22,6 +31,16 @@ import {
   registerGuide,
   registerResource,
 } from "@/store/readerRegistry"
+import {
+  type ReadingPreferences,
+  highlightTint,
+  readReaderTokens,
+} from "@/store/slices/preferencesSlice"
+import { type ReadingMode } from "@/store/slices/readingSessionSlice"
+
+const HIGHLIGHT_GROUP = "highlight"
+
+const HIGHLIGHT_TEXT_GROUP = "highlight-text"
 
 export function findSegmentForTime(
   segments: Array<{ startTime: number; endTime: number; textHref: string }>,
@@ -170,9 +189,11 @@ export async function getGuidesForText(
 }
 
 export const clearHighlight = (activeFrame: FrameManager) => {
-  if (activeFrame.msg) {
+  if (!activeFrame.msg) return
+
+  for (const group of [HIGHLIGHT_GROUP, HIGHLIGHT_TEXT_GROUP]) {
     activeFrame.msg.send("decorate", {
-      group: "highlight",
+      group,
       action: "clear",
     })
   }
@@ -181,24 +202,64 @@ export const clearHighlight = (activeFrame: FrameManager) => {
 export const highlightFragment = (
   activeFrame: FrameManager & { msg: FrameComms },
   locator: Locator,
+  preferences: ReadingPreferences,
   clear: boolean = true,
-  _source?: string,
 ) => {
   if (clear) {
     clearHighlight(activeFrame)
   }
 
+  const tokens = readReaderTokens()
+  const style = preferences.highlightStyle
+
+  // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
   activeFrame.msg.send("decorate", {
-    group: "highlight",
+    group: HIGHLIGHT_GROUP,
     action: "add",
     decoration: {
       id: "highlight",
-      locator: locator,
+      locator,
       style: {
-        tint: `var(--reader-highlight-color)`,
+        type: style,
+        tint: highlightTint(tokens, style),
+        enforceContrast: false,
       },
     },
   } as DecoratorRequest)
+
+  if (style !== "textColor") {
+    activeFrame.msg.send("decorate", {
+      group: HIGHLIGHT_TEXT_GROUP,
+      action: "add",
+      decoration: {
+        id: "highlight-text",
+        locator,
+        style: {
+          type: "textColor",
+          tint: tokens.text,
+          enforceContrast: false,
+        },
+      },
+    })
+  }
+}
+
+export async function findNearestGuide(publication: Publication, link: Link) {
+  const items = publication.readingOrder.items
+  const index = items.findIndex((item) => item.href === link.href)
+  if (index === -1) return null
+
+  const candidates = [
+    link,
+    ...items.slice(index + 1),
+    ...items.slice(0, index).reverse(),
+  ]
+  for (const candidate of candidates) {
+    if (!candidate.alternates?.items.length) continue
+    const guide = await publication.guideForLink(candidate).catch(() => null)
+    if (guide?.guided?.length) return { link: candidate, guide }
+  }
+  return null
 }
 
 export const getHrefFromActiveFrame = (frame?: FrameManager) => {
@@ -365,7 +426,7 @@ export async function handleFragmentSkip(
 export function handleChapterSkip(
   direction: "next" | "previous",
   currentTocItem: TocItem | null,
-  requestTextNavigation: (locator: Locator) => void,
+  requestTextNavigation: (locator: Locator, resumePlayback: boolean) => void,
 ) {
   const publication = getPublication()
 
@@ -387,6 +448,74 @@ export function handleChapterSkip(
 
   if (!nextTocItem || !nextTocItem.locator) return
 
-  AudioPlayer.pause()
-  requestTextNavigation(nextTocItem.locator)
+  const wasPlaying = readerPlayer().getState().playing
+  readerPlayer().pause()
+  requestTextNavigation(nextTocItem.locator, wasPlaying)
+}
+
+export async function resolveHrefLocator(
+  href: string,
+  mode: ReadingMode,
+  positions: Locator[],
+): Promise<Locator | null> {
+  const publication = getPublication()
+  if (!publication) return null
+
+  const hashIndex = href.indexOf("#")
+  const normalize = (value: string) =>
+    decodeURIComponent(value).replace(/^\/+/, "")
+  const path = normalize(hashIndex === -1 ? href : href.slice(0, hashIndex))
+  const fragment =
+    hashIndex === -1 ? null : decodeURIComponent(href.slice(hashIndex + 1))
+
+  const link = [
+    ...publication.readingOrder.items,
+    ...(publication.resources?.items ?? []),
+  ].find((candidate) => {
+    const candidateHref = normalize(candidate.href.split("#")[0] ?? "")
+    return (
+      candidateHref === path ||
+      candidateHref.endsWith(`/${path}`) ||
+      path.endsWith(`/${candidateHref}`)
+    )
+  })
+  if (!link) return null
+
+  if (!link.type?.startsWith("audio/")) {
+    return getLocatorWithClosestPositionAsync(
+      new Locator({
+        href: link.href,
+        type: link.type ?? "application/xhtml+xml",
+        locations: new LocatorLocations({
+          fragments: fragment ? [fragment] : [],
+        }),
+      }),
+      positions,
+    )
+  }
+
+  const time =
+    getTime(new LocatorLocations({ fragments: fragment ? [fragment] : [] })) ??
+    0
+
+  if (mode === "audiobook") {
+    const tracks = publication.readingOrder.items
+      .filter((item) => item.type?.startsWith("audio/"))
+      .map((item) => ({
+        duration: item.duration ?? 0,
+        type: item.type ?? "",
+        url: item.href,
+      }))
+    return getAudiobookLocator(
+      time,
+      tracks.findIndex((track) => track.url === link.href),
+      tracks,
+    )
+  }
+
+  const [guide] = (await getGuideForTrack(publication, link.href, time)) ?? []
+  if (!guide) return null
+
+  const textFragment = await getFragmentForClip(guide, link.href, time)
+  return textFragment?.locator ?? null
 }

@@ -13,13 +13,7 @@ export async function generateTracks(
   format: "audiobook" | "readaloud",
 ): Promise<StorytellerTrack[]> {
   const server = book.serverUuid && (await getServer(book.serverUuid))
-  const serverCoverUrl =
-    server &&
-    getCoverUrl(server.baseUrl, book.uuid, {
-      height: 232,
-      width: 232,
-      audio: true,
-    })
+  const serverCoverUrl = server && getCoverUrl(server.baseUrl, book, "audio")
 
   let coverUri = book.audiobookCoverUrl
     ? new URL(book.audiobookCoverUrl, documentDirectory!).toString()
@@ -48,9 +42,7 @@ export async function generateTracks(
   const audioLinks = manifest?.readingOrder ?? []
 
   return audioLinks.map((audioLink) => {
-    const uri = encodeURI(
-      getLocalBookFileUrl(book.uuid, format, audioLink.href),
-    )
+    const uri = getLocalBookFileUrl(book.uuid, format, audioLink.href)
 
     return {
       bookUuid: book.uuid,

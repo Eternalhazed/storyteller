@@ -1,0 +1,16 @@
+npm/
+artifacts/
+node_modules/
+dist/*
+.pack-local/
+
+gen/README.md
+
+build/
+.build/
+.swiftpm/
+*.dylib
+
+_models/
+scripts/.venv
+.build-xcode/

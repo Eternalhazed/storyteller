@@ -34,9 +34,16 @@ export class NodeKitLoadError extends Error {
 const moduleFile =
   typeof __filename === "string" ? __filename : fileURLToPath(import.meta.url)
 
-const require = createRequire(moduleFile)
+const moduleFileIsReal = existsSync(moduleFile)
 
-const packageDir = resolve(dirname(moduleFile), "..")
+const packageDir = moduleFileIsReal ? resolve(dirname(moduleFile), "..") : null
+
+const requireBases = [
+  ...(moduleFileIsReal ? [moduleFile] : []),
+  resolve(process.cwd(), "noop.js"),
+]
+
+const requires = requireBases.map((base) => createRequire(base))
 
 export const ADDON_SOURCES = ["local", "npm"] as const
 
@@ -60,27 +67,27 @@ export type AddonResolution = {
 const PLATFORM_VARIANTS: Record<string, { file: string; package: string }> = {
   "darwin-arm64": {
     file: "nodekit.darwin-arm64.node",
-    package: "@storyteller-platform/nodekit-darwin-arm64",
+    package: "@storyteller/nodekit-darwin-arm64",
   },
   "darwin-x64": {
     file: "nodekit.darwin-x64.node",
-    package: "@storyteller-platform/nodekit-darwin-x64",
+    package: "@storyteller/nodekit-darwin-x64",
   },
   "linux-x64": {
     file: "nodekit.linux-x64-gnu.node",
-    package: "@storyteller-platform/nodekit-linux-x64-gnu",
+    package: "@storyteller/nodekit-linux-x64-gnu",
   },
   "linux-arm64": {
     file: "nodekit.linux-arm64-gnu.node",
-    package: "@storyteller-platform/nodekit-linux-arm64-gnu",
+    package: "@storyteller/nodekit-linux-arm64-gnu",
   },
   "win32-x64": {
     file: "nodekit.win32-x64-msvc.node",
-    package: "@storyteller-platform/nodekit-win32-x64-msvc",
+    package: "@storyteller/nodekit-win32-x64-msvc",
   },
   "win32-arm64": {
     file: "nodekit.win32-arm64-msvc.node",
-    package: "@storyteller-platform/nodekit-win32-arm64-msvc",
+    package: "@storyteller/nodekit-win32-arm64-msvc",
   },
 }
 
@@ -122,7 +129,7 @@ function localPaths(file: string): string[] {
   const cwd = process.cwd()
 
   const paths = [
-    resolve(packageDir, file),
+    ...(packageDir ? [resolve(packageDir, file)] : []),
     resolve(cwd, file),
     resolve(cwd, "StorytellerNodeKit.node"),
   ]
@@ -136,15 +143,19 @@ function localPaths(file: string): string[] {
 }
 
 function npmCandidate(packageName: string): AddonCandidate {
-  try {
-    return {
-      source: "npm",
-      path: require.resolve(packageName),
-      exists: true,
+  for (const candidateRequire of requires) {
+    try {
+      return {
+        source: "npm",
+        path: candidateRequire.resolve(packageName),
+        exists: true,
+      }
+    } catch {
+      continue
     }
-  } catch {
-    return { source: "npm", path: packageName, exists: false }
   }
+
+  return { source: "npm", path: packageName, exists: false }
 }
 
 export function describeAddonResolution(): AddonResolution {
@@ -216,7 +227,7 @@ function notFoundMessage(resolution: AddonResolution): string {
   return (
     `StorytellerNodeKit addon not found for ${resolution.platform} ` +
     `(sources: ${resolution.sources.join(", ")}).\n` +
-    `Run 'yarn workspace @storyteller-platform/nodekit build:native', ` +
+    `Run 'yarn workspace @storyteller/nodekit build:native', ` +
     `install the platform package, or set STORYTELLER_NODEKIT_PATH.\n` +
     `Tried:\n${tried}`
   )
@@ -241,6 +252,7 @@ export function loadAddon(): NodeKitRaw {
 
   try {
     const mod = { exports: {} as NodeKitRaw }
+    // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
     process.dlopen(mod as unknown as NodeJS.Module, resolution.resolved)
     store[ADDON_CACHE] = { path: resolution.resolved, addon: mod.exports }
     return mod.exports

@@ -8,15 +8,18 @@ import {
   useFormatRelativeTime,
 } from "@/app/(v3)/v3/_/lib/formatters"
 import { type BookWithRelations } from "@/database/books"
-import { type DisplayField } from "@/sort"
+import { statusDisplayLabel } from "@/database/statusKinds"
+import { type DisplayField, type SortContext, displaySeriesOf } from "@/sort"
 import { formatFileSize } from "@/utils/formatFileSize"
 
 export function ColumnValue({
   book,
   field,
+  ctx,
 }: {
   book: BookWithRelations
   field: DisplayField
+  ctx?: SortContext | undefined
 }) {
   const formatRelativeTime = useFormatRelativeTime()
   const formatList = useFormatList()
@@ -52,6 +55,12 @@ export function ColumnValue({
         year: "numeric",
         timeZone: "UTC",
       })
+    case "releaseDate":
+      if (!book.releaseDate) return "\u2014"
+      return dateTime(new Date(book.releaseDate), {
+        year: "numeric",
+        timeZone: "UTC",
+      })
     case "createdAt":
       return dateTime(new Date(book.createdAt), {
         dateStyle: "medium",
@@ -82,9 +91,9 @@ export function ColumnValue({
     }
     case "language":
       return book.language ?? "\u2014"
-    case "alignmentScore":
-      return book.alignmentSummary?.score != null
-        ? `${Math.round(book.alignmentSummary.score)}%`
+    case "alignmentConfidence":
+      return book.alignmentSummary?.confidence != null
+        ? `${Math.round(book.alignmentSummary.confidence)}%`
         : "\u2014"
     case "alignmentGrade":
       return book.alignmentSummary?.grade ? (
@@ -92,16 +101,27 @@ export function ColumnValue({
       ) : (
         "\u2014"
       )
-    case "alignmentMissingSentences":
-      return book.alignmentSummary?.missingSentences != null
-        ? `${book.alignmentSummary.missingSentences}`
+    case "alignmentPreviousGrade":
+      return book.alignmentSummary?.previousGrade ? (
+        <GradePill
+          grade={book.alignmentSummary.previousGrade}
+          className="opacity-60"
+        />
+      ) : (
+        "\u2014"
+      )
+    case "alignmentSentenceCoverage":
+      return book.alignmentSummary?.sentenceCoverage != null
+        ? `${Math.round(book.alignmentSummary.sentenceCoverage)}%`
         : "\u2014"
-    case "alignmentMutedChapters":
-      return book.alignmentSummary?.mutedChapters != null
-        ? `${book.alignmentSummary.mutedChapters}`
+    case "alignmentAudioCoverage":
+      return book.alignmentSummary?.audioCoverage != null
+        ? `${Math.round(book.alignmentSummary.audioCoverage)}%`
         : "\u2014"
     case "title":
       return book.title
+    case "status":
+      return book.status ? statusDisplayLabel(book.status) : "\u2014"
     case "alignedAt":
       return book.alignedAt
         ? dateTime(new Date(book.alignedAt), { dateStyle: "medium" })
@@ -124,9 +144,16 @@ export function ColumnValue({
         "\u2014"
       )
     case "seriesPosition": {
-      const s = book.series[0]
-      if (!s || s.position == null) return "\u2014"
-      return `#${s.position}`
+      const s = displaySeriesOf(book, ctx)
+      if (!s) {
+        return "\u2014"
+      }
+
+      if (ctx?.seriesUuid) {
+        return s.position == null ? "\u2014" : `#${s.position}`
+      }
+
+      return s.position == null ? s.name : `${s.name} #${s.position}`
     }
   }
 }
@@ -141,17 +168,20 @@ export const columnWidths: Record<DisplayField, number> = {
   fileSize: 40,
   language: 50,
   publicationDate: 50,
+  releaseDate: 50,
   createdAt: 80,
   updatedAt: 100,
   alignedAt: 80,
   lastRead: 100,
-  seriesPosition: 30,
+  seriesPosition: 80,
+  status: 60,
   title: 100,
   userRating: 50,
-  alignmentScore: 50,
-  alignmentGrade: 40,
-  alignmentMissingSentences: 60,
-  alignmentMutedChapters: 60,
+  alignmentConfidence: 60,
+  alignmentGrade: 60,
+  alignmentPreviousGrade: 60,
+  alignmentSentenceCoverage: 60,
+  alignmentAudioCoverage: 60,
 }
 
 export function getColumnWidth(field: DisplayField, label: string) {

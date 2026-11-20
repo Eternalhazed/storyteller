@@ -1,6 +1,7 @@
-# @storyteller-platform/epub
+# @storyteller/epub
 
-A Node.js library for inspecting, modifying, and creating EPUB 3 publications.
+A Node.js/browser library for inspecting, modifying, and creating EPUB 3
+publications.
 
 <!-- toc -->
 
@@ -13,7 +14,8 @@ A Node.js library for inspecting, modifying, and creating EPUB 3 publications.
   - [Creating from scratch](#creating-from-scratch)
   - [Adding a chapter](#adding-a-chapter)
   - [Writing to disk](#writing-to-disk)
-  - [Writing to a byte array](#writing-to-a-byte-array)
+  - [Upgrading an EPUB 2 to EPUB 3](#upgrading-an-epub-2-to-epub-3)
+  - [Browser support](#browser-support)
 - [Development](#development)
 - [API Docs](#api-docs)
 
@@ -24,19 +26,19 @@ A Node.js library for inspecting, modifying, and creating EPUB 3 publications.
 npm:
 
 ```sh
-npm install @storyteller-platform/epub
+npm install @storyteller/epub
 ```
 
 yarn:
 
 ```sh
-yarn add @storyteller-platform/epub
+yarn add @storyteller/epub
 ```
 
 deno:
 
 ```sh
-deno install npm:@storyteller-platform/epub
+deno install npm:@storyteller/epub
 ```
 
 ## About
@@ -73,9 +75,9 @@ readers will encounter the manifest items by simply turning pages one at a time.
 
 ### What this library does
 
-`@storyteller-platform/epub` provides an API to interact with the metadata,
-manifest, and spine of the EPUB publication. There are higher level APIs that
-mostly abstract away the implementation details of the EPUB specification, like
+`@storyteller/epub` provides an API to interact with the metadata, manifest, and
+spine of the EPUB publication. There are higher level APIs that mostly abstract
+away the implementation details of the EPUB specification, like
 `epub.setTitle(title: string)` and `epub.getCreators()`, as well as lower level
 APIs like `epub.writeItemContents(path: string, contents: Uint8Array)` and
 `epub.addMetadata(entry: MetadataEntry)`, which require some understanding of
@@ -95,11 +97,23 @@ scratch.
 ### Reading from a file
 
 ```ts
-// If you want to read or write to disk, import from the `/node`
-// export
-import { Epub } from "@storyteller-platform/epub/node"
+import { Epub } from "@storyteller/epub"
 
-const epub = await Epub.from("path/to/book.epub")
+using epub = await Epub.from("path/to/book.epub")
+// equivalent to
+// using epub = await Epub.using(TmpFsAdapter).from("path/to/book.epub")
+console.log(await epub.getTitle())
+```
+
+If you want to be a little more efficient and not unpack the entire EPUB file
+into disk (which can take some time when dealing with EPUBs with Media
+Overlays/audio contents), you can instead lazily read the contents of the EPUB
+file into memory.
+
+```ts
+import { Epub, MemoryAdapter } from "@storyteller/epub"
+
+using epub = await Epub.using(MemoryAdapter).from("path/to/book.epub")
 console.log(await epub.getTitle())
 ```
 
@@ -116,9 +130,10 @@ incrementally after creation.
 ```ts
 import { randomUUID } from "node:crypto"
 
-import { Epub } from "@storyteller-platform/epub"
+import { Epub } from "@storyteller/epub"
 
-const epub = await Epub.create({
+// Implicitly uses the TmpFsAdapter
+const epub = await Epub.create("/path/to/book.epub", {
   title: "S'mores For Everyone",
   // This should be the primary language of the publication.
   // Individual content resources may specify their own languages.
@@ -130,8 +145,8 @@ const epub = await Epub.create({
 
 ### Adding a chapter
 
-```ts
-import { Epub, ManifestItem } from "@storyteller-platform/epub"
+```tsx
+import { Epub, type ManifestItem, x } from "@storyteller/epub"
 
 const epub = await Epub.from("path/to/book.epub")
 
@@ -158,11 +173,16 @@ const contents = `<?xml version="1.0" encoding="UTF-8"?>
 </html>`
 
 // Or you can specify the contents as an XML structure
-const xmlContents = epub.createXhtmlDocument([
-  Epub.createXmlElement("h1", {}, [Epub.createXmlTextNode("Chapter 1")]),
-  Epub.createXmlElement("p", {}, [
-    Epub.createXmlTextNode("At first, there were s'mores."),
-  ]),
+const xmlContents = await epub.createXhtmlDocument([
+  x("h1", null, "Chapter 1"),
+  x("p", null, "At first, there were s'mores."),
+])
+
+// Or, using JSX
+/** @jsxImportSource @storyteller/epub */
+const xmlContents = await epub.createXhtmlDocument([
+  <h1>Chapter 1</h1>,
+  <p>At first, there were s'mores.</p>,
 ])
 
 // First, add the new item to the manifest, and add
@@ -179,38 +199,92 @@ await epub.addSpineItem(manifestItem.id)
 ### Writing to disk
 
 ```ts
-import { Epub } from "@storyteller-platform/epub/node"
+import { Epub } from "@storyteller/epub"
 
 const epub = await Epub.from("path/to/book.epub")
 await epub.setTitle("S'mores for Everyone")
 
-await epub.writeToFile("path/to/updated.epub")
-```
-
-### Writing to a byte array
-
-```ts
-import { randomUUID } from "node:crypto"
-
-import { Epub } from "@storyteller-platform/epub"
-
-const epub = await Epub.create({
-  title: "S'mores For Everyone",
-  language: new Intl.Locale("en-US"),
-  identifier: randomUUID(),
-})
-
-const data: Uint8Array = await epub.writeToArray()
+await epub.saveAndClose()
 ```
 
 For more details about using the API, see the [API documentation](#epub).
+
+### Upgrading an EPUB 2 to EPUB 3
+
+This library only supports operations on EPUB 3 files and will throw an error if
+you attempt to load an EPUB 2 file.
+
+However, it does support upgrading an EPUB 2 file to EPUB 3, after which you can
+use the library like normal.
+
+```ts
+import { Epub } from "@storyteller/epub"
+
+using epub = await Epub.upgrade("path/to/epub2.epub", {
+  // optional. if omitted the Epub
+  outputPath: "path/to/epub3.epub",
+})
+
+// if .saveAndClose() is not called and `outputPath` isn't provided, the Epub will return to it's unupgraded state
+await epub.saveAndClose()
+
+// Do Epub stuff
+```
+
+### Browser support
+
+This library is designed to be used in both Node.js and browser environments.
+
+In the browser, currently you can only use the `MemoryAdapter` to read EPUB
+files.
+
+```tsx
+import { useState, useEffect } from "react"
+
+import { Epub, type EpubReader, MemoryAdapter } from "@storyteller/epub"
+
+export function BookCover(file: File) {
+  const [cover, setCover] = useState<string | null>(null)
+
+  useEffect(() => {
+    let epub: EpubReader | null = null
+    let coverUrl: string | null = null
+
+    async function loadCover() {
+      // unfortunately Safari does not support `using` syntax yet
+      try {
+        epub = await Epub.using(MemoryAdapter).from(file)
+        const cover = await epub.getCoverImage()
+        if (cover) {
+          coverUrl = URL.createObjectURL(new Blob([new Uint8Array(cover)]))
+          setCover(coverUrl)
+        }
+      } finally {
+        epub?.discardAndClose()
+      }
+    }
+
+    loadCover()
+
+    return () => {
+      if (coverUrl) {
+        URL.revokeObjectURL(coverUrl)
+      }
+    }
+  }, [file])
+
+  return cover ? <img src={cover} alt="Cover" /> : null
+}
+```
+
+Note that doing a bare `Epub.from` will result in an error.
 
 ## Development
 
 This package lives in the
 [Storyteller monorepo](https://gitlab.com/storyteller-platform/storyteller), and
 is developed alongside the
-[Storyteller platform](https://storyteller-platform.gitlab.io/storyteller).
+[Storyteller platform](https://storyteller-platform.dev).
 
 To get started with developing in the Storyteller monorepo, check out the
-[development guides in the docs](https://storyteller-platform.gitlab.io/storyteller/docs/category/development).
+[development guides in the docs](https://storyteller-platform.dev/docs/category/development).

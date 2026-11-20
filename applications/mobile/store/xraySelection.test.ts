@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
-import test from "node:test"
+import { test } from "vitest"
 
-import { XRAY_SCHEMA_VERSION, type Xray } from "@storyteller-platform/xray/view"
+import { XRAY_SCHEMA_VERSION, type Xray } from "@storyteller/xray/view"
 
 import { type ReadiumLocator } from "@/modules/readium/src/Readium.types"
 

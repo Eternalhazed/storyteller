@@ -7,7 +7,7 @@ import {
 } from "lucide-react-native"
 import { View } from "react-native"
 
-import { type XrayEntityView } from "@storyteller-platform/xray/view"
+import { type XrayEntityView } from "@storyteller/xray/view"
 
 import { Icon } from "@/components/ui/icon"
 import { cn } from "@/lib/utils"

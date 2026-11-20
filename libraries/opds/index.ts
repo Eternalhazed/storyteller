@@ -1,6 +1,10 @@
 export { type DeserializeOptions, Feed } from "./model/Feed.ts"
 export { FeedMetadata } from "./model/FeedMetadata.ts"
-export { AcquisitionLink, OPDSPublication } from "./model/OPDSPublication.ts"
+export {
+  AcquisitionLink,
+  ProgressionLink,
+  OPDSPublication,
+} from "./model/OPDSPublication.ts"
 export { Facet } from "./model/Facet.ts"
 export { Group } from "./model/Group.ts"
 export {
@@ -44,7 +48,9 @@ export {
   ACQUISITION_RELS_ARRAY,
   ATOM_ACQ,
   ATOM_NAV,
+  OPDS_AUTHENTICATION_JSON,
   OPDS_JSON,
   OPDS_PUBLICATION_JSON,
+  OPENSEARCH_XML,
   THUMBNAIL_REL,
 } from "./model/constants.ts"

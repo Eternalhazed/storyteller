@@ -8,7 +8,9 @@ import { Button } from "@v3/_/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@v3/_/components/ui/dropdown-menu"
 import { Input } from "@v3/_/components/ui/input"
@@ -29,11 +31,14 @@ import {
 } from "@/app/(v3)/v3/_/components/books/RolePicker"
 import {
   DurationInput,
+  EditorInput,
   FileSizeInput,
   MultiCombobox,
   NumericInput,
 } from "@/app/(v3)/v3/_/components/books/filter-ui"
 import { RelationSelectList } from "@/app/(v3)/v3/_/components/books/relation-picker/RelationSelectList"
+import { FieldChip } from "@/app/(v3)/v3/_/components/field-chip"
+import { useFilterIssueText } from "@/app/(v3)/v3/_/components/shelves/filter-issues"
 import {
   FilterableMenu,
   FilterableMenuContent,
@@ -49,12 +54,16 @@ import { statusDisplayLabel } from "@/database/statusKinds"
 import {
   FIELDS,
   type FacetSource,
+  type Field,
   type FieldGroupKey,
   type QualifierKind,
+  RETIRED_FIELDS,
   getFieldDef,
+  isField,
+  isRetiredField,
 } from "@/fields"
-import { FieldIcon } from "@/icons"
 import * as icon from "@/icons"
+import { FieldIcon } from "@/icons"
 import {
   NUMBER_COMPARE_OPERATORS,
   RANGE_OPERATORS,
@@ -76,10 +85,11 @@ import {
   shelfValueText,
 } from "@/shelves"
 import {
-  getCoverUrl,
   useListIdentifierTypesQuery,
+  useListSeriesQuery,
   useListStatusesQuery,
 } from "@/store/api"
+import { getCoverUrl } from "@/store/urls"
 
 const FIELD_GROUP_ORDER: FieldGroupKey[] = [
   "text",
@@ -93,9 +103,10 @@ const FIELD_GROUP_ORDER: FieldGroupKey[] = [
 
 const FIELD_GROUPS = FIELD_GROUP_ORDER.map((key) => ({
   key,
-  fields: FIELDS.filter(
-    (field) => field !== "search" && getFieldDef(field).group === key,
-  ),
+  fields: FIELDS.filter((field) => {
+    const def = getFieldDef(field)
+    return field !== "search" && !def.filterUnder && def.group === key
+  }),
 })).filter((group) => group.fields.length > 0)
 
 type FilterPreset = {
@@ -167,16 +178,17 @@ const FILTER_PRESETS: FilterPreset[] = [
       value: 300,
     },
   },
-  {
-    key: "authorIsNarrator",
-    node: {
-      type: "condition",
-      field: "creators",
-      qualifier: "aut",
-      operator: "intersects",
-      value: { ref: { qualifier: "nrt" } },
-    },
-  },
+  // not ready
+  // {
+  //   key: "authorIsNarrator",
+  //   node: {
+  //     type: "condition",
+  //     field: "creators",
+  //     qualifier: "aut",
+  //     operator: "intersects",
+  //     value: { ref: { qualifier: "nrt" } },
+  //   },
+  // },
 ]
 
 type ShelfFilterEditorProps = {
@@ -184,10 +196,18 @@ type ShelfFilterEditorProps = {
   onChange: (filter: ShelfFilterNode | null) => void
 }
 
+export function hasUnknownFields(node: ShelfFilterNode | null): boolean {
+  if (!node) return false
+  if (node.type === "condition") return !isField(node.field)
+  if (node.type === "not") return hasUnknownFields(node.child)
+  return node.children.some((child) => hasUnknownFields(child))
+}
+
 export function isFilterValid(node: ShelfFilterNode | null): boolean {
   if (!node) return false
 
   if (node.type === "condition") {
+    if (!isField(node.field)) return false
     if (!operatorRequiresValue(node.operator)) return true
 
     const isMissingValue =
@@ -220,17 +240,6 @@ export function ShelfFilterEditor({
     }
   }, [root, filter, onChange])
 
-  const handleApplyPreset = (preset: FilterPreset) => {
-    const currentRoot = normalizeRootFilter(filter)
-
-    if (currentRoot.type === "and" || currentRoot.type === "or") {
-      onChange({
-        ...currentRoot,
-        children: [...currentRoot.children, structuredClone(preset.node)],
-      })
-    }
-  }
-
   return (
     <div>
       <FilterNodeEditor
@@ -241,54 +250,14 @@ export function ShelfFilterEditor({
         }}
         isRoot
       />
-
-      <div className="mt-1">
-        <FilterPresetsDropdown onApply={handleApplyPreset} />
-      </div>
     </div>
-  )
-}
-
-function FilterPresetsDropdown({
-  onApply,
-}: {
-  onApply: (preset: FilterPreset) => void
-}) {
-  const t = useTranslation("ShelfFilterEditor")
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 w-fit gap-1 text-xs"
-          >
-            {t.plain("presets")}
-          </Button>
-        }
-      />
-      <DropdownMenuContent align="start">
-        {FILTER_PRESETS.map((preset) => (
-          <DropdownMenuItem
-            key={preset.key}
-            onClick={() => {
-              onApply(preset)
-            }}
-          >
-            {t.plain(`preset.${preset.key}` as "preset.highlyRated")}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
   )
 }
 
 function AddNodeDropdown({
   onAdd,
 }: {
-  onAdd: (node: ShelfFilterNode) => void
+  onAdd: (node: ShelfFilterNode | FilterPreset) => void
 }) {
   const t = useTranslation("ShelfFilterEditor")
   const c = useCommon()
@@ -297,34 +266,53 @@ function AddNodeDropdown({
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button variant="ghost" size="sm" className="h-7 w-fit gap-1 text-xs">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 min-w-fit gap-1 text-xs"
+          >
             <icon.Add className="size-3" />
             {c.plain("actions.add")}
           </Button>
         }
       />
       <DropdownMenuContent align="start">
-        <DropdownMenuItem
-          onClick={() => {
-            onAdd(createAndBlock())
-          }}
-        >
-          {t.plain("andGroup")}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => {
-            onAdd(createOrBlock())
-          }}
-        >
-          {t.plain("orGroup")}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => {
-            onAdd(createNotBlock())
-          }}
-        >
-          {t.plain("not")}
-        </DropdownMenuItem>
+        <DropdownMenuGroup>
+          <DropdownMenuItem
+            onClick={() => {
+              onAdd(createAndBlock())
+            }}
+          >
+            {t.plain("andGroup")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => {
+              onAdd(createOrBlock())
+            }}
+          >
+            {t.plain("orGroup")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => {
+              onAdd(createNotBlock())
+            }}
+          >
+            {t.plain("not")}
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>{t.plain("presets")}</DropdownMenuLabel>
+          {FILTER_PRESETS.map((preset) => (
+            <DropdownMenuItem
+              key={preset.key}
+              onClick={() => {
+                onAdd(preset)
+              }}
+            >
+              {t.plain(`preset.${preset.key}` as "preset.highlyRated")}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -334,14 +322,17 @@ export type FilterPreviewProps = {
   books: BookWithRelations[]
   isLoading: boolean
   isInvalid?: boolean
+  hasUnknownFields?: boolean
 }
 
 export function FilterPreview({
   books,
   isLoading,
   isInvalid,
+  hasUnknownFields,
 }: FilterPreviewProps) {
   const t = useTranslation("ShelfFilterEditor")
+  const tIssues = useTranslation("ShelfFilterIssues")
 
   if (isLoading) {
     return (
@@ -355,7 +346,9 @@ export function FilterPreview({
   if (isInvalid) {
     return (
       <div className="text-muted-foreground py-2 text-xs">
-        {t.plain("completeFilter")}
+        {hasUnknownFields
+          ? tIssues.plain("fixConditions")
+          : t.plain("completeFilter")}
       </div>
     )
   }
@@ -476,7 +469,7 @@ function DraggableFilterItem({
       transition={{ layout: { duration: 0 } }}
       className="list-none"
     >
-      <div className="flex items-start gap-1">
+      <div className="flex items-baseline gap-1">
         {showHandle && (
           <motion.button
             type="button"
@@ -558,7 +551,19 @@ function LogicalBlockEditor({
     onChange({ ...block, children: newChildren })
   }
 
-  const handleAddNode = (node: ShelfFilterNode) => {
+  const handleAdd = (node: ShelfFilterNode | FilterPreset) => {
+    const currentRoot = normalizeRootFilter(block)
+
+    if ("key" in node) {
+      if (currentRoot.type === "and" || currentRoot.type === "or") {
+        onChange({
+          ...currentRoot,
+          children: [...currentRoot.children, structuredClone(node.node)],
+        })
+      }
+      return
+    }
+
     idsRef.current = [...idsRef.current, uuidv4()]
     onChange({ ...block, children: [...block.children, node] })
   }
@@ -575,8 +580,8 @@ function LogicalBlockEditor({
   }
 
   const items = [
-    { value: "and", label: "AND" },
-    { value: "or", label: "OR" },
+    { value: "and" as const, label: t.plain("and") },
+    { value: "or" as const, label: t.plain("or") },
   ]
 
   const showDragHandles = block.children.length > 1
@@ -591,7 +596,7 @@ function LogicalBlockEditor({
           }}
           items={items}
         >
-          <SelectTrigger className="h-6 w-16 text-xs font-medium">
+          <SelectTrigger className="h-6 w-fit border-0 bg-transparent text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -666,7 +671,7 @@ function LogicalBlockEditor({
           variant="ghost"
           size="sm"
           onClick={() => {
-            handleAddNode({
+            handleAdd({
               type: "condition",
               field: "title",
               operator: "contains",
@@ -674,9 +679,10 @@ function LogicalBlockEditor({
           }}
         >
           <icon.Plus className="size-3" />
-          Add condition
+          {t.plain("addCondition")}
+          {/* Add condition */}
         </Button>
-        <AddNodeDropdown onAdd={handleAddNode} />
+        <AddNodeDropdown onAdd={handleAdd} />
       </div>
     </div>
   )
@@ -754,17 +760,42 @@ function ConditionEditor({
   const t = useTranslation("ShelfFilterEditor")
   const c = useCommon()
 
+  if (!isField(condition.field)) {
+    return (
+      <RetiredConditionRow
+        field={condition.field}
+        onReplace={(field) => {
+          onChange({
+            type: "condition",
+            field,
+            operator:
+              getFieldDef(field).defaultOperator ??
+              getOperatorsForField(field)[0] ??
+              "is",
+            value: undefined,
+          })
+        }}
+        onRemove={onRemove}
+      />
+    )
+  }
+
   const def = getFieldDef(condition.field)
+  const rowField = (def.filterUnder ?? condition.field) as ShelfFilterField
+  const subFields = FIELDS.filter(
+    (field) => getFieldDef(field).filterUnder === rowField,
+  )
   const qualifierKind = def.qualifier?.kind
-  const isCountable = !!def.countable
+  const isCountable = !!getFieldDef(rowField).countable
 
   const countOperators = [...NUMBER_COMPARE_OPERATORS, ...RANGE_OPERATORS]
   const isCountableOperator = countOperators.some(
     (op) => op === condition.operator,
   )
-  const isCount = isCountable && isCountableOperator
+  const isCount =
+    isCountable && condition.field === rowField && isCountableOperator
 
-  const operators: ShelfFilterOperator[] = getOperatorsForField(condition.field)
+  const operators: ShelfFilterOperator[] = getOperatorsForField(rowField)
   const needsValue = operatorRequiresValue(condition.operator)
   const needsArrayValue = operatorRequiresArrayValue(condition.operator)
   const needsRangeValue = operatorRequiresRangeValue(condition.operator)
@@ -783,7 +814,7 @@ function ConditionEditor({
       fieldDef.defaultOperator ??
       (newOperators.includes(condition.operator)
         ? condition.operator
-        : newOperators[0] ?? "is")
+        : (newOperators[0] ?? "is"))
 
     onChange({
       type: "condition",
@@ -797,7 +828,38 @@ function ConditionEditor({
     onChange({ ...condition, qualifier })
   }
 
+  const handleSubFieldOperatorChange = (
+    field: ShelfFilterField,
+    operator: ShelfFilterOperator,
+  ) => {
+    onChange({
+      type: "condition",
+      field,
+      operator,
+      ...(condition.field === field && condition.qualifier !== undefined
+        ? { qualifier: condition.qualifier }
+        : {}),
+      value:
+        condition.field === field && operatorRequiresValue(operator)
+          ? condition.value
+          : undefined,
+    })
+  }
+
   const handleOperatorChange = (operator: ShelfFilterOperator) => {
+    if (condition.field !== rowField) {
+      onChange({
+        type: "condition",
+        field: rowField,
+        operator,
+        ...(countOperators.some((op) => op === operator)
+          ? { aggregate: "count" as const }
+          : {}),
+        value: undefined,
+      })
+      return
+    }
+
     if (countOperators.some((op) => op === operator)) {
       onChange({
         ...condition,
@@ -827,10 +889,10 @@ function ConditionEditor({
   }))
 
   return (
-    <div className="flex flex-col">
+    <div className="relative flex w-full flex-col">
       <div
         className={cn(
-          "flex flex-wrap items-center gap-1.5 py-1",
+          "flex scroll-x w-full items-center gap-0.5 py-1",
           !hasValidValue && "opacity-60",
         )}
       >
@@ -838,12 +900,12 @@ function ConditionEditor({
           <FilterableMenuTrigger
             render={
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
-                className="bg-input/20 dark:bg-input/30 border-input rounded-md font-normal"
+                className="rounded-md font-normal"
               >
-                <FieldIcon field={condition.field} className="size-3" />
-                {c(`fields.label.${condition.field}`)}
+                <FieldIcon field={rowField} className="size-3" />
+                {c(`fields.label.${rowField}`)}
                 <icon.ChevronDown className="size-3" />
               </Button>
             }
@@ -852,7 +914,10 @@ function ConditionEditor({
             {FIELD_GROUPS.map((group) => (
               <FilterableMenuGroup key={group.key}>
                 <FilterableMenuLabel>
-                  {t.plain(`fieldGroups.${group.key}` as "fieldGroups.text")}
+                  {
+                    // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
+                    t.plain(`fieldGroups.${group.key}` as "fieldGroups.text")
+                  }
                 </FilterableMenuLabel>
                 {group.fields.map((field) => (
                   <FilterableMenuItem
@@ -900,11 +965,9 @@ function ConditionEditor({
         <FilterableMenu>
           <FilterableMenuTrigger
             render={
-              <Button
-                variant="outline"
-                size="sm"
-                className="bg-input/20 dark:bg-input/30 border-input rounded-md font-normal"
-              >
+              <Button variant="ghost" size="sm" className="font-normal">
+                {condition.field !== rowField &&
+                  `${c(`fields.short.${condition.field}` as "fields.short.seriesPosition")} `}
                 {t.plain(`operators.${condition.operator}` as "operators.is")}
                 <icon.ChevronDown className="size-3" />
               </Button>
@@ -930,16 +993,46 @@ function ConditionEditor({
                 {countOperators.map((op) => (
                   <FilterableMenuItem
                     key={op}
-                    textValue={t.plain(`operators.${op}` as "operators.is")}
+                    textValue={
+                      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
+                      t.plain(`operators.${op}` as "operators.is")
+                    }
                     onSelect={() => {
                       handleOperatorChange(op)
                     }}
                   >
-                    {t.plain(`operators.${op}` as "operators.is")}
+                    {
+                      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
+                      t.plain(`operators.${op}` as "operators.is")
+                    }
                   </FilterableMenuItem>
                 ))}
               </FilterableMenuGroup>
             )}
+            {subFields.map((field) => (
+              <FilterableMenuGroup key={field}>
+                <FilterableMenuLabel>
+                  {c(`fields.label.${field}`)}
+                </FilterableMenuLabel>
+                {getOperatorsForField(field).map((op) => (
+                  <FilterableMenuItem
+                    key={op}
+                    textValue={`${c(`fields.short.${field}` as "fields.short.seriesPosition")} ${t.plain(
+                      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
+                      `operators.${op}` as "operators.is",
+                    )}`}
+                    onSelect={() => {
+                      handleSubFieldOperatorChange(field, op)
+                    }}
+                  >
+                    {
+                      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
+                      t.plain(`operators.${op}` as "operators.is")
+                    }
+                  </FilterableMenuItem>
+                ))}
+              </FilterableMenuGroup>
+            ))}
           </FilterableMenuContent>
         </FilterableMenu>
 
@@ -955,23 +1048,22 @@ function ConditionEditor({
             />
           </div>
         )}
-
-        <div className="flex shrink-0 items-center gap-0.5">
-          {onDuplicate && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={onDuplicate}
-              title={t.plain("duplicate")}
-            >
-              <icon.Copy className="size-3" />
-            </Button>
-          )}
-
-          <Button variant="ghost" size="icon-sm" onClick={onRemove}>
-            <icon.Trash className="size-3" />
+      </div>
+      <div className="from-background via-background absolute top-1/2 right-0 flex shrink-0 -translate-y-1/2 items-center bg-linear-to-l via-90% to-transparent">
+        {onDuplicate && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onDuplicate}
+            title={t.plain("duplicate")}
+          >
+            <icon.Copy className="size-3" />
           </Button>
-        </div>
+        )}
+
+        <Button variant="ghost" size="icon-sm" onClick={onRemove}>
+          <icon.Trash className="size-3" />
+        </Button>
       </div>
 
       {needsValue && !hasValidValue && (
@@ -979,6 +1071,49 @@ function ConditionEditor({
           {t.plain("pickValue")}
         </span>
       )}
+    </div>
+  )
+}
+
+function RetiredConditionRow({
+  field,
+  onReplace,
+  onRemove,
+}: {
+  field: string
+  onReplace: (field: Field) => void
+  onRemove: () => void
+}) {
+  const { t } = useFilterIssueText()
+  const replacement = isRetiredField(field)
+    ? RETIRED_FIELDS[field].replacedBy
+    : null
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 py-1">
+      <FieldChip
+        field={field}
+        className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs"
+      />
+      <span className="text-muted-foreground min-w-0 flex-1 text-xs">
+        {t(isRetiredField(field) ? "retiredFieldShort" : "unknownFieldShort")}
+      </span>
+      <div className="flex shrink-0 items-center gap-0.5">
+        {replacement && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              onReplace(replacement)
+            }}
+          >
+            {t("useReplacement", { new: replacement })}
+          </Button>
+        )}
+        <Button variant="ghost" size="icon-sm" onClick={onRemove}>
+          <icon.Trash className="size-3" />
+        </Button>
+      </div>
     </div>
   )
 }
@@ -998,13 +1133,18 @@ function QualifierPicker({
     undefined,
     { skip: kind !== "identifierScheme" },
   )
+  const { data: series = [] } = useListSeriesQuery(undefined, {
+    skip: kind !== "series",
+  })
 
   const anyLabel =
     kind === "ratingAxis"
       ? t.plain("qualifier.overall")
       : kind === "identifierScheme"
         ? t.plain("qualifier.anyType")
-        : t.plain("qualifier.anyRole")
+        : kind === "series"
+          ? t.plain("qualifier.mainSeries")
+          : t.plain("qualifier.anyRole")
 
   const isRole = kind === "role"
 
@@ -1015,7 +1155,9 @@ function QualifierPicker({
           ? ratingDimensions
           : DEFAULT_RATING_DIMENSIONS
         ).map((d) => ({ id: d.id, label: d.label }))
-      : identifierTypes.map((i) => ({ id: i.uuid, label: i.name }))
+      : kind === "series"
+        ? series.map((s) => ({ id: s.uuid, label: s.name }))
+        : identifierTypes.map((i) => ({ id: i.uuid, label: i.name }))
 
   const current = isRole
     ? value
@@ -1027,11 +1169,7 @@ function QualifierPicker({
     <FilterableMenu>
       <FilterableMenuTrigger
         render={
-          <Button
-            variant="outline"
-            size="sm"
-            className="bg-input/20 dark:bg-input/30 border-input rounded-md font-normal"
-          >
+          <Button variant="ghost" size="sm" className="rounded-md font-normal">
             {current?.label ?? anyLabel}
             <icon.ChevronDown className="size-3" />
           </Button>
@@ -1104,9 +1242,9 @@ function FacetValueMenu({
       <FilterableMenuTrigger
         render={
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className="bg-input/20 dark:bg-input/30 border-input h-7 w-full justify-between gap-1 rounded-md text-xs font-normal"
+            className="h-7 w-full justify-between gap-1 rounded-md text-xs font-normal"
           >
             <span className="truncate">
               {selectedNames.length ? selectedNames.join(", ") : placeholder}
@@ -1374,7 +1512,7 @@ function ConditionValueInput({
       return (
         <div className="flex items-center gap-2">
           <NumericInput
-            className="h-7 w-20 text-xs"
+            className="w-20"
             value={rangeStart}
             onChange={(n) => {
               onChange([n, rangeEnd])
@@ -1384,7 +1522,7 @@ function ConditionValueInput({
           <span className="text-muted-foreground text-xs">{t.plain("to")}</span>
 
           <NumericInput
-            className="h-7 w-20 text-xs"
+            className="w-20"
             value={rangeEnd}
             onChange={(n) => {
               onChange([rangeStart, n])
@@ -1396,7 +1534,7 @@ function ConditionValueInput({
 
     return (
       <NumericInput
-        className="h-7 w-20 text-xs"
+        className="w-20"
         value={typeof value === "number" ? value : ""}
         onChange={onChange}
         placeholder={t.plain("numericPlaceholders.default")}
@@ -1410,9 +1548,8 @@ function ConditionValueInput({
 
       return (
         <div className="flex items-center gap-2">
-          <Input
+          <EditorInput
             type="date"
-            className="h-7 text-xs"
             value={typeof rangeValue[0] === "string" ? rangeValue[0] : ""}
             onChange={(e) => {
               onChange([
@@ -1424,9 +1561,8 @@ function ConditionValueInput({
 
           <span className="text-muted-foreground text-xs">{t.plain("to")}</span>
 
-          <Input
+          <EditorInput
             type="date"
-            className="h-7 text-xs"
             value={typeof rangeValue[1] === "string" ? rangeValue[1] : ""}
             onChange={(e) => {
               onChange([
@@ -1440,9 +1576,8 @@ function ConditionValueInput({
     }
 
     return (
-      <Input
+      <EditorInput
         type="date"
-        className="h-7 text-xs"
         value={typeof value === "string" ? value : ""}
         onChange={(e) => {
           onChange(e.target.value)
@@ -1474,8 +1609,7 @@ function ConditionValueInput({
   }
 
   return (
-    <Input
-      className="h-7 text-xs"
+    <EditorInput
       value={typeof value === "string" ? value : ""}
       onChange={(e) => {
         onChange(e.target.value || null)

@@ -49,6 +49,10 @@ import {
   down as addHighlightColorPreferenceDown,
   up as addHighlightColorPreferenceUp,
 } from "./1794600000000_add_highlight_color_preference"
+import {
+  down as addBookCoverShasDown,
+  up as addBookCoverShasUp,
+} from "./1794600000001_add_book_cover_shas"
 
 export const migrations = {
   "1757893743063_init": {
@@ -104,5 +108,10 @@ export const migrations = {
   "1794600000000_add_highlight_color_preference": {
     up: addHighlightColorPreferenceUp,
     down: addHighlightColorPreferenceDown,
+  },
+  // Re-keyed from upstream's 1792504252170 to follow the deployed fork migration.
+  "1794600000001_add_book_cover_shas": {
+    up: addBookCoverShasUp,
+    down: addBookCoverShasDown,
   },
 }

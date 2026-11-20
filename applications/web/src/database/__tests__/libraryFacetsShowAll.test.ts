@@ -1,28 +1,18 @@
 import assert from "node:assert"
-import { describe, it } from "node:test"
 
-import { seedBooks, setupTestDb } from "@/__tests__/harness/testDb"
+import { describe, it } from "vitest"
+
+import { seedBooks, seedUser, setupTestDb } from "@/__tests__/harness/testDb"
 import { countBooks } from "@/database/books"
 import { getLibraryCounts, getSectionFacets } from "@/database/libraryCounts"
 import { type UUID } from "@/uuid"
 
 const userId = "11111111-1111-1111-1111-111111111111" as UUID
 
-function seedUser(sqlite: import("better-sqlite3").Database) {
-  sqlite
-    .prepare(`INSERT INTO user_permission (uuid, book_list) VALUES (?, 1)`)
-    .run("22222222-2222-2222-2222-222222222222")
-  sqlite
-    .prepare(
-      `INSERT INTO "user" (id, user_permission_uuid, email) VALUES (?, ?, ?)`,
-    )
-    .run(userId, "22222222-2222-2222-2222-222222222222", "t@example.com")
-}
-
-void describe("getSectionFacets show-all", () => {
-  void it("ratings: shows all 6 buckets, empty ones at 0", async () => {
+describe("getSectionFacets show-all", () => {
+  it("ratings: shows all 6 buckets, empty ones at 0", async () => {
     using ctx = setupTestDb()
-    seedUser(ctx.sqlite)
+    seedUser(ctx, userId)
 
     const [b1, b2, b3] = seedBooks(ctx, [
       { title: "one" },
@@ -37,7 +27,10 @@ void describe("getSectionFacets show-all", () => {
     rate.run(userId, b2, 5) // 4.5-5
     rate.run(userId, b3, 0.5) // 0.5-1.49
 
-    const facets = await getSectionFacets(userId, "ratings")
+    const facets = await getSectionFacets(
+      { id: userId, permissions: null },
+      "ratings",
+    )
     const byKey = Object.fromEntries(facets.map((f) => [f.key, f.bookCount]))
 
     assert.strictEqual(facets.length, 6)
@@ -49,15 +42,19 @@ void describe("getSectionFacets show-all", () => {
     assert.strictEqual(byKey["3.5-4.49"], 0)
   })
 
-  void it("formats: shows all canonical buckets even when empty", async () => {
+  it("formats: shows all canonical buckets even when empty", async () => {
     using ctx = setupTestDb()
+    seedUser(ctx, userId)
 
     seedBooks(ctx, [
       { title: "a", ebook: "a.epub" },
       { title: "b", ebook: "b.epub" },
     ])
 
-    const facets = await getSectionFacets(userId, "formats")
+    const facets = await getSectionFacets(
+      { id: userId, permissions: null },
+      "formats",
+    )
     const byKey = Object.fromEntries(facets.map((f) => [f.key, f.bookCount]))
 
     assert.strictEqual(facets.length, 9)
@@ -72,9 +69,9 @@ void describe("getSectionFacets show-all", () => {
     assert.strictEqual(byKey["no-media"], 0)
   })
 
-  void it("grades: shows all 8 grades in A+…F order, empty ones at 0", async () => {
+  it("grades: shows all 6 grades in A+…F order, empty ones at 0", async () => {
     using ctx = setupTestDb()
-    seedUser(ctx.sqlite)
+    seedUser(ctx, userId)
 
     const [b1, b2, b3] = seedBooks(ctx, [
       { title: "one" },
@@ -85,27 +82,31 @@ void describe("getSectionFacets show-all", () => {
     const report = ctx.sqlite.prepare(
       `INSERT INTO alignment_report (uuid, book_uuid, report, grade) VALUES (?, ?, ?, ?)`,
     )
-    report.run("aaaaaaaa-0000-0000-0000-000000000001", b1, "{}", "A+")
-    report.run("aaaaaaaa-0000-0000-0000-000000000002", b2, "{}", "A+")
+    report.run("aaaaaaaa-0000-0000-0000-000000000001", b1, "{}", "S")
+    report.run("aaaaaaaa-0000-0000-0000-000000000002", b2, "{}", "S")
     report.run("aaaaaaaa-0000-0000-0000-000000000003", b3, "{}", "C")
 
-    const facets = await getSectionFacets(userId, "grades")
+    const facets = await getSectionFacets(
+      { id: userId, permissions: null },
+      "grades",
+    )
     const byKey = Object.fromEntries(facets.map((f) => [f.key, f.bookCount]))
 
-    assert.strictEqual(facets.length, 8)
-    assert.strictEqual(byKey["A+"], 2)
-    assert.strictEqual(byKey["C"], 1)
+    assert.strictEqual(facets.length, 6)
+    assert.strictEqual(byKey["S"], 2)
     assert.strictEqual(byKey["A"], 0)
+    assert.strictEqual(byKey["B"], 0)
+    assert.strictEqual(byKey["C"], 1)
     assert.strictEqual(byKey["F"], 0)
     assert.deepStrictEqual(
       facets.map((f) => f.key),
-      ["A+", "A", "A-", "B", "B-", "C", "D", "F"],
+      ["S", "A", "B", "C", "D", "F"],
     )
   })
 
-  void it("statuses: shows every status even with zero books", async () => {
+  it("statuses: shows every status even with zero books", async () => {
     using ctx = setupTestDb()
-    seedUser(ctx.sqlite)
+    seedUser(ctx, userId)
 
     const [b1] = seedBooks(ctx, [{ title: "one" }])
     const status = ctx.sqlite
@@ -117,7 +118,10 @@ void describe("getSectionFacets show-all", () => {
       )
       .run(b1, status.uuid, userId)
 
-    const facets = await getSectionFacets(userId, "statuses")
+    const facets = await getSectionFacets(
+      { id: userId, permissions: null },
+      "statuses",
+    )
     const byName = Object.fromEntries(facets.map((f) => [f.name, f.bookCount]))
 
     assert.strictEqual(facets.length, 3)
@@ -126,9 +130,9 @@ void describe("getSectionFacets show-all", () => {
     assert.strictEqual(byName["Read"], 0)
   })
 
-  void it("shelves: counts manual and smart shelves", async () => {
+  it("shelves: counts manual and smart shelves", async () => {
     using ctx = setupTestDb()
-    seedUser(ctx.sqlite)
+    seedUser(ctx, userId)
 
     const [b1, b2] = seedBooks(ctx, [
       { title: "e", ebook: "e.epub" },
@@ -159,7 +163,10 @@ void describe("getSectionFacets show-all", () => {
       )
       .run("44444444-4444-4444-4444-444444444444", userId, "Smart", filter)
 
-    const facets = await getSectionFacets(userId, "shelves")
+    const facets = await getSectionFacets(
+      { id: userId, permissions: null },
+      "shelves",
+    )
     const byName = Object.fromEntries(facets.map((f) => [f.name, f.bookCount]))
 
     assert.strictEqual(byName["Manual"], 1)
@@ -169,10 +176,10 @@ void describe("getSectionFacets show-all", () => {
   })
 })
 
-void describe("book totals", () => {
-  void it("getLibraryCounts.books and countBooks agree with the catalog", async () => {
+describe("book totals", () => {
+  it("getLibraryCounts.books and countBooks agree with the catalog", async () => {
     using ctx = setupTestDb()
-    seedUser(ctx.sqlite)
+    seedUser(ctx, userId)
 
     const [b1, b2, b3, hidden] = seedBooks(ctx, [
       { title: "one" },
@@ -192,7 +199,7 @@ void describe("book totals", () => {
       )
       .run(hidden, "55555555-5555-5555-5555-555555555555")
 
-    const counts = await getLibraryCounts(userId)
+    const counts = await getLibraryCounts({ id: userId, permissions: null })
     assert.strictEqual(counts.books, 3)
 
     const all = await countBooks(userId, {})

@@ -4,7 +4,6 @@ import { extname } from "node:path"
 import { type NextRequest, after } from "next/server"
 
 import { assertHasPermission } from "@/auth/auth"
-import { isReadiumServiceError } from "@/components/reader/BookService"
 import {
   type BookFormat,
   type BookWithRelations,
@@ -14,6 +13,7 @@ import {
 import { getSettings } from "@/database/settings"
 import type { UserWithPermissions } from "@/database/users"
 import { logger } from "@/logging"
+import { isReadiumServiceError } from "@/reader/BookService"
 import { getReadiumService } from "@/services/readiumService"
 import { getContentTimestamp } from "@/utils/cacheBustingFetch"
 import type { UUID } from "@/uuid"
@@ -24,7 +24,15 @@ type Params = {
   path: string[]
 }
 
-const ONE_SECOND = 1_000
+const FORWARDED_REQUEST_HEADERS = [
+  "accept",
+  "accept-language",
+  "range",
+  "if-range",
+]
+
+// Cache-Control max-age is expressed in seconds.
+const ONE_SECOND = 1
 const ONE_MINUTE = 60 * ONE_SECOND
 const ONE_HOUR = 60 * ONE_MINUTE
 const ONE_WEEK = 7 * 24 * ONE_HOUR
@@ -203,7 +211,11 @@ export const GET = async (
 
   const cacheRule = getCacheRule(path)
 
-  const newHeaders = new Headers(request.headers)
+  const newHeaders = new Headers()
+  for (const name of FORWARDED_REQUEST_HEADERS) {
+    const value = request.headers.get(name)
+    if (value) newHeaders.set(name, value)
+  }
   // we don't want readium to compress the response
   newHeaders.set("Accept-Encoding", "identity")
 

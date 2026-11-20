@@ -1,16 +1,25 @@
-import { type RawBuilder, sql } from "kysely"
+import {
+  type ExpressionBuilder,
+  type RawBuilder,
+  type ReferenceExpression,
+  sql,
+} from "kysely"
 
+import { type DB } from "@/database/schema.ts"
 import {
   ALIGNMENT_GRADES,
   FIELD_REGISTRY,
   type Field,
   type FilterEntityType,
+  RETIRED_FIELDS,
   getFieldDef,
+  isRetiredField,
   resolveFieldAlias,
 } from "@/fields"
 import {
   type ShelfFilter,
   type ShelfFilterCondition,
+  ShelfFilterInvalidError,
   type ShelfFilterNode,
   type ShelfFilterValue,
   isFieldRefValue,
@@ -26,14 +35,20 @@ import {
   type FilterExpression,
   assetNumericExpr,
   buildBookSearchExpression,
+  buildBookSearchRelevance,
   formatPredicate,
+  mainSeriesNameExpr,
   numericExprComparison,
+  seriesPositionExpr,
+  statusLabelExpr,
+  statusRankExpr,
 } from "./fieldSql"
 
 export {
   type EB,
   type FilterExpression,
   buildBookSearchExpression,
+  buildBookSearchRelevance,
   formatPredicate,
 }
 
@@ -50,15 +65,26 @@ export function normalizeCondition(
   let value = condition.value
   let qualifier = condition.qualifier ?? legacy.role ?? legacy.dimension
 
-  if (field === "rating") field = "userRating"
-  if (field === "ratingDimension") field = "userRating"
-  if (field === "identifierName" || field === "identifierValue") {
-    field = "identifiers"
-    if (operator !== "isEmpty") operator = "isNotEmpty"
-    value = undefined
+  switch (field) {
+    case "rating":
+    case "ratingDimension": {
+      field = "userRating"
+      break
+    }
+    case "identifierName":
+    case "identifierValue": {
+      field = "identifiers"
+      if (operator !== "isEmpty") {
+        operator = "isNotEmpty"
+      }
+      value = undefined
+      break
+    }
   }
 
-  if (!(field in FIELD_REGISTRY)) return null
+  if (!(field in FIELD_REGISTRY)) {
+    return null
+  }
 
   const resolved = resolveFieldAlias(field as Field)
   qualifier = resolved.qualifier ?? qualifier
@@ -96,8 +122,12 @@ export function extractEntityReferences(filter: ShelfFilter): Array<{
         })
       }
 
-      if (!def.entity) return
-      if (normalized.value === undefined || normalized.value === null) return
+      if (!def.entity) {
+        return
+      }
+      if (normalized.value === undefined || normalized.value === null) {
+        return
+      }
 
       const values = Array.isArray(normalized.value)
         ? normalized.value
@@ -230,46 +260,21 @@ export async function cleanShelfFiltersForDeletedEntity(
   }
 }
 
-export function bookVisibleTo(eb: EB, userId: UUID): FilterExpression {
-  return eb.or([
-    eb.not(
-      eb.exists(
-        eb
-          .selectFrom("bookToCollection")
-          .select(sql.lit(1).as("one"))
-          .whereRef("bookToCollection.bookUuid", "=", "book.uuid"),
-      ),
-    ),
-    eb.exists(
-      eb
-        .selectFrom("bookToCollection")
-        .innerJoin(
-          "collection",
-          "collection.uuid",
-          "bookToCollection.collectionUuid",
-        )
-        .select(sql.lit(1).as("one"))
-        .whereRef("bookToCollection.bookUuid", "=", "book.uuid")
-        .where((e) =>
-          e.or([
-            e("collection.public", "=", true),
-            e("collection.public", "is", null),
-          ]),
-        ),
-    ),
-    eb.exists(
-      eb
-        .selectFrom("bookToCollection")
-        .innerJoin(
-          "collectionToUser",
-          "collectionToUser.collectionUuid",
-          "bookToCollection.collectionUuid",
-        )
-        .select(sql.lit(1).as("one"))
-        .whereRef("bookToCollection.bookUuid", "=", "book.uuid")
-        .where("collectionToUser.userId", "=", userId),
-    ),
-  ])
+export function bookVisibleTo(
+  eb: ExpressionBuilder<DB, keyof DB>,
+  bookUuidRef: ReferenceExpression<
+    DB,
+    "book" | "bookToCreator" | "bookToSeries" | "bookToTag" | "bookToStatus"
+  >,
+  userId: UUID,
+): FilterExpression {
+  return eb.exists(
+    eb
+      .selectFrom("bookAccess")
+      .select(sql.lit(1).as("one"))
+      .whereRef("bookAccess.bookUuid", "=", bookUuidRef)
+      .where("bookAccess.userId", "=", userId),
+  )
 }
 
 export function buildFilterExpression(
@@ -304,7 +309,7 @@ function buildConditionExpression(
   userId?: UUID,
 ): FilterExpression {
   const normalized = normalizeCondition(condition)
-  if (!normalized) return eb.lit(true)
+  if (!normalized) throw unknownFieldError(condition.field)
 
   const impl = FIELD_SQL[normalized.field as keyof typeof FIELD_SQL]
   const ctx: FieldSqlCtx = {
@@ -358,11 +363,15 @@ function refOperand(
   operand: unknown,
   userId?: UUID,
 ): RawBuilder<number> | null {
-  if (typeof operand === "number") return sql<number>`${operand}`
-  if (!isFieldRefValue(operand)) return null
+  if (typeof operand === "number") {
+    return sql<number>`${operand}`
+  }
+  if (!isFieldRefValue(operand)) {
+    return null
+  }
 
   const targetName = operand.ref.field ?? baseField
-  if (!(targetName in FIELD_REGISTRY)) return null
+  if (!(targetName in FIELD_REGISTRY)) throw unknownFieldError(targetName)
 
   const resolved = resolveFieldAlias(targetName as Field)
   const impl = FIELD_SQL[resolved.field as keyof typeof FIELD_SQL]
@@ -434,6 +443,8 @@ export function buildSortExpression(
       return sql`book.updated_at`
     case "publicationDate":
       return sql`book.publication_date`
+    case "releaseDate":
+      return sql`book.release_date`
     case "alignedAt":
       return sql`book.aligned_at`
     case "lastRead":
@@ -442,12 +453,12 @@ export function buildSortExpression(
         : sql`(select updated_at from position where book_uuid = book.uuid limit 1)`
     case "language":
       return sql`book.language collate nocase`
-    case "alignmentScore":
-      return latestReportColumn("score")
-    case "alignmentMissingSentences":
-      return latestReportColumn("missing_sentences")
-    case "alignmentMutedChapters":
-      return latestReportColumn("muted_chapters")
+    case "alignmentConfidence":
+      return latestReportColumn("confidence")
+    case "alignmentSentenceCoverage":
+      return latestReportColumn("sentence_coverage")
+    case "alignmentAudioCoverage":
+      return latestReportColumn("audio_coverage")
     case "alignmentGrade":
       return sql`case ${latestReportColumn("grade")} ${sql.join(
         ALIGNMENT_GRADES.map(
@@ -466,12 +477,42 @@ export function buildSortExpression(
         ? sql`(select rating from user_book_rating where book_uuid = book.uuid and user_id = ${ctx.userId} limit 1)`
         : sql`(select rating from user_book_rating where book_uuid = book.uuid limit 1)`
     case "seriesPosition":
-      return ctx?.seriesContext
-        ? sql`(select position from book_to_series where book_uuid = book.uuid and series_uuid = ${ctx.seriesContext} limit 1)`
-        : sql`null`
+      return seriesPositionExpr(ctx?.seriesContext ?? undefined)
+    case "status":
+      return statusRankExpr(ctx?.userId)
     default: {
       const _exhaustive: never = field
       return sql.lit(true)
     }
   }
+}
+
+export function buildSortExpressions(
+  field: SortField,
+  ctx?: { userId?: UUID; seriesContext?: UUID | null },
+) {
+  if (field === "seriesPosition" && !ctx?.seriesContext) {
+    return [
+      sql`${mainSeriesNameExpr()} collate nocase`,
+      seriesPositionExpr(undefined),
+    ]
+  }
+
+  if (field === "status") {
+    return [statusRankExpr(ctx?.userId), statusLabelExpr(ctx?.userId)]
+  }
+
+  return [buildSortExpression(field, ctx)]
+}
+
+function unknownFieldError(field: string) {
+  return new ShelfFilterInvalidError([
+    isRetiredField(field)
+      ? {
+          kind: "retiredField",
+          field,
+          replacedBy: RETIRED_FIELDS[field].replacedBy,
+        }
+      : { kind: "unknownField", field },
+  ])
 }

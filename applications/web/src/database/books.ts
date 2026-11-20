@@ -9,14 +9,14 @@ import {
 } from "kysely"
 import { jsonArrayFrom, jsonObjectFrom } from "kysely/helpers/sqlite"
 
-import type { Audiobook as AudiobookAsset } from "@storyteller-platform/audiobook"
-import type { EpubReader } from "@storyteller-platform/epub"
+import type { Audiobook as AudiobookAsset } from "@storyteller/audiobooks"
+import type { EpubReader } from "@storyteller/epub"
 
 import type {
   ProcessingTaskStatus,
   ProcessingTaskType,
 } from "@/apiModels/models/ProcessingStatus"
-import { pathBelongsTo } from "@/assets/library/scanner/folder"
+import { pathBelongsTo } from "@/assets/library/paths"
 import {
   getMetadataFromAudiobook,
   getMetadataFromEpub,
@@ -37,6 +37,7 @@ import {
   type ExtractedIdentifiers,
   type NewIdentifier,
   linkExtractedIdentifiers,
+  mergeBookIdentifiers,
 } from "./identifiers"
 import { IMAGE_COLUMNS } from "./images"
 import type { DB } from "./schema"
@@ -44,9 +45,12 @@ import type { NewSeries } from "./series"
 import {
   bookVisibleTo,
   buildBookSearchExpression,
+  buildBookSearchRelevance,
   buildFilterExpression,
   buildSortExpression,
+  buildSortExpressions,
 } from "./shelfFilter"
+import { STATUS_READ } from "./statusKinds"
 import { getDefaultStatus } from "./statuses"
 import { type NewUserBookRating } from "./userRatings"
 
@@ -561,10 +565,17 @@ const externalDataQuery = <EB extends ExpressionBuilder<DB, any>>(eb: EB) => {
         "externalSource.uuid",
         "externalData.externalSourceUuid",
       )
+      .innerJoin(
+        "identifierType",
+        "identifierType.uuid",
+        "identifier.identifierTypeUuid",
+      )
       .select([
         "externalData.uuid",
         "externalData.rating",
         "externalData.fetchedAt",
+        "identifier.value as identifierValue",
+        "identifierType.kind as identifierKind",
         "externalSource.uuid as sourceUuid",
         "externalSource.name as sourceName",
         "externalSource.color as sourceColor",
@@ -646,7 +657,9 @@ export function booksQuery(userId?: UUID, options?: BooksQueryOptions) {
             "series.createdAt",
             "series.updatedAt",
           ])
-          .whereRef("bookToSeries.bookUuid", "=", "book.uuid"),
+          .whereRef("bookToSeries.bookUuid", "=", "book.uuid")
+          .orderBy("bookToSeries.featured", "desc")
+          .orderBy(sql`book_to_series.rowid`),
       ).as("series"),
       jsonArrayFrom(
         eb
@@ -730,16 +743,27 @@ export function booksQuery(userId?: UUID, options?: BooksQueryOptions) {
       jsonObjectFrom(
         eb
           .selectFrom("alignmentReport")
-          .select([
+          .select((eb) => [
             "alignmentReport.grade",
             "alignmentReport.score",
-            "alignmentReport.missingSentences",
-            "alignmentReport.mutedChapters",
+            "alignmentReport.confidence",
+            "alignmentReport.sentenceCoverage",
+            "alignmentReport.audioCoverage",
             "alignmentReport.failedChapters",
             "alignmentReport.unalignedAudio",
+            eb
+              .selectFrom("alignmentReport as previousReport")
+              .select("previousReport.grade")
+              .whereRef("previousReport.bookUuid", "=", "book.uuid")
+              .orderBy("previousReport.createdAt", "desc")
+              .orderBy(sql`rowid`, "desc")
+              .limit(1)
+              .offset(1)
+              .as("previousGrade"),
           ])
           .whereRef("alignmentReport.bookUuid", "=", "book.uuid")
           .orderBy("alignmentReport.createdAt", "desc")
+          .orderBy(sql`rowid`, "desc")
           .limit(1),
       ).as("alignmentSummary"),
 
@@ -849,9 +873,39 @@ export function booksQuery(userId?: UUID, options?: BooksQueryOptions) {
     ])
     .$if(!!userId, (qb) =>
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      qb.where((eb) => bookVisibleTo(eb, userId!)),
+      qb.where((eb) => bookVisibleTo(eb, "book.uuid", userId!)),
     )
     .groupBy("book.uuid")
+}
+
+// optimization for big libraries:
+// rather than creating one big query that does a ton of selects and subqueris
+// and only then filters (slow)
+// we first do a very basic ass query for just the ids
+// and then "hydrate" the books, fetching the big stuff
+// this is MUCH MUCH faster even on modest libraries
+// the loss of needing to do the query in two steps is neglible
+// to the penalty the "normal" way has
+export async function hydrateBooks(
+  page: SelectQueryBuilder<DB, "book", { uuid: UUID }>,
+  userId?: UUID,
+  options?: BooksQueryOptions,
+) {
+  const queryResult = await page.execute()
+  const uuids = queryResult.map((row) => row.uuid)
+
+  const rows = await booksQuery(userId, options)
+    // needs to be like this rather than where("book.uuid", "in", [...])
+    // bc a: faster
+    // b: where in has a 36k limit, not inconceivable
+    .where(
+      sql<boolean>`book.uuid in (select value from json_each(${JSON.stringify(uuids)}))`,
+    )
+    .execute()
+
+  // need to do this bc the uuids are in the correct order
+  const byUuid = new Map(rows.map((row) => [row.uuid, row]))
+  return uuids.flatMap((uuid) => byUuid.get(uuid) ?? [])
 }
 
 export async function getAlignedReadaloudBooks(userId?: UUID) {
@@ -1018,8 +1072,10 @@ export async function countBooks(
     userId,
     opts,
   )
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    .$if(!!userId, (qb) => qb.where((eb) => bookVisibleTo(eb, userId!)))
+    .$if(!!userId, (qb) =>
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      qb.where((eb) => bookVisibleTo(eb, "book.uuid", userId!)),
+    )
     .select((eb) => eb.fn.count<number>("book.uuid").distinct().as("count"))
     .executeTakeFirst()
 
@@ -1031,8 +1087,8 @@ export async function getBooks(
   userId?: UUID,
   opts?: GetBooksOptions,
 ) {
-  let query = applyBookFilters(
-    booksQuery(userId, opts),
+  let page = applyBookFilters(
+    db.selectFrom("book").select("book.uuid"),
     bookUuids,
     userId,
     opts,
@@ -1040,28 +1096,48 @@ export async function getBooks(
     .$if(!!opts?.limit, (qb) => qb.limit(opts?.limit ?? 10))
     .$if(!!opts?.offset, (qb) => qb.offset(opts?.offset ?? 0))
 
+  if (userId) {
+    page = page.where((eb) => bookVisibleTo(eb, "book.uuid", userId))
+  }
+
   const sort: BookSort =
     opts?.sort ??
     (opts?.orderBy
       ? [{ field: opts.orderBy, direction: opts.orderDirection ?? "desc" }]
       : [])
 
-  for (const { field, direction } of sort) {
-    query = query.orderBy(
-      buildSortExpression(field, { userId, seriesContext: opts?.series }),
-      direction,
-    )
+  if (opts?.search) {
+    page = page.orderBy(buildBookSearchRelevance(opts.search), "asc")
+  } else {
+    for (const { field, direction } of sort) {
+      for (const expr of buildSortExpressions(field, {
+        userId,
+        seriesContext: opts?.series,
+      })) {
+        page = page.orderBy(expr, direction)
+      }
+    }
+
+    // Books sharing a series number (e.g. editions) are ordered oldest added
+    // first, then by title, matching the series edit dialog. Always in that
+    // direction, even when the series is sorted in reverse.
+    if (sort.some(({ field }) => field === "seriesPosition")) {
+      page = page
+        .orderBy(sql`book.created_at`, "asc")
+        .orderBy(buildSortExpression("title"), "asc")
+    }
+
+    if (sort.length > 0 && sort[sort.length - 1]?.field !== "createdAt") {
+      page = page.orderBy(sql`book.created_at`, "desc")
+    }
   }
 
-  if (sort.length > 0 && sort[sort.length - 1]?.field !== "createdAt") {
-    query = query.orderBy(sql`book.created_at`, "desc")
-  }
-
-  const rows = await query.execute()
+  const rows = await hydrateBooks(page, userId, opts)
 
   return rows.map((row) => ({
     ...row,
     publicationDate: toIsoDateString(row.publicationDate),
+    releaseDate: toIsoDateString(row.releaseDate),
   }))
 }
 
@@ -1076,6 +1152,41 @@ export async function getBookOrThrow(uuid: UUID) {
   const book = await getBook(uuid)
   if (!book) throw new Error(`No book found with uuid ${uuid}`)
   return book
+}
+
+/**
+ * Every book with an ebook file still on disk that somebody may still read:
+ * books that everyone with a reading status for them has marked Read are
+ * left out.
+ */
+export async function getUnfinishedBookUuidsWithEbook(): Promise<UUID[]> {
+  const rows = await db
+    .selectFrom("ebook")
+    .select("ebook.bookUuid")
+    .where("ebook.missing", "=", false)
+    .where((eb) =>
+      eb
+        .not(
+          eb.exists(
+            eb
+              .selectFrom("bookToStatus")
+              .select("bookToStatus.bookUuid")
+              .whereRef("bookToStatus.bookUuid", "=", "ebook.bookUuid"),
+          ),
+        )
+        .or(
+          eb.exists(
+            eb
+              .selectFrom("bookToStatus")
+              .innerJoin("status", "status.uuid", "bookToStatus.statusUuid")
+              .select("bookToStatus.bookUuid")
+              .whereRef("bookToStatus.bookUuid", "=", "ebook.bookUuid")
+              .where("status.name", "!=", STATUS_READ),
+          ),
+        ),
+    )
+    .execute()
+  return rows.map((row) => row.bookUuid)
 }
 
 export async function getBookByAudiobookFilepathPrefix(
@@ -1250,6 +1361,7 @@ export async function removeBookFormat(
   BookEvents.emit("message", {
     type: "bookUpdated",
     bookUuid,
+    // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
     payload: { [format]: null } as BookUpdatePayload,
   })
 
@@ -1670,6 +1782,7 @@ export async function updateBook(
         .where("bookUuid", "in", relations.books)
         .execute()
 
+      await mergeBookIdentifiers(tr, uuid, relations.books)
       const allBookUuids = [uuid, ...relations.books]
 
       // find the most recent position per user

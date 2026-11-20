@@ -8,6 +8,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react"
 import {
@@ -23,11 +24,12 @@ import {
   resolveCoverColors,
 } from "@v3/_/components/books/coverSwatches"
 import { useTranslation } from "@v3/_/hooks/use-translation"
+import { useUnsavedChangesGuard } from "@v3/_/hooks/use-unsaved-changes"
 import { apiErrorMessage } from "@v3/_/lib/api-error"
 
-import { type Role } from "@/components/books/edit/marcRelators"
 import { type BookWithRelations } from "@/database/books"
 import { usePermission } from "@/hooks/usePermission"
+import { type Role } from "@/metadata/marcRelators"
 import { useUpdateBookMutation } from "@/store/api"
 import { type UUID } from "@/uuid"
 
@@ -48,6 +50,7 @@ function bookToFormValues(book: BookWithRelations): BookFormValues {
     description: book.description,
     language: book.language,
     publicationDate: book.publicationDate,
+    releaseDate: book.releaseDate,
     pageCount: book.pageCount,
     duration: book.duration,
     authors: book.authors.map((a) => a.name),
@@ -145,6 +148,7 @@ export function BookFormProvider({
           description: values.description,
           language: values.language,
           publicationDate: values.publicationDate,
+          releaseDate: values.releaseDate,
           pageCount: values.pageCount,
           duration: values.duration,
           authors: values.authors,
@@ -309,6 +313,28 @@ export function BookFormProvider({
       })
     }
   }, [errors])
+
+  const c = useTranslation("Common.actions")
+  const guardRef = useRef({ isDirty, saveAndClose, discard, t, c })
+  guardRef.current = { isDirty, saveAndClose, discard, t, c }
+
+  const guard = useMemo(
+    () => ({
+      isDirty: () => guardRef.current.isDirty,
+      save: () => guardRef.current.saveAndClose(),
+      discard: () => {
+        guardRef.current.discard()
+      },
+      labels: () => ({
+        title: guardRef.current.t("unsavedChanges.title"),
+        description: guardRef.current.t("unsavedChanges.description"),
+        save: guardRef.current.c("save"),
+        discard: guardRef.current.c("discard"),
+      }),
+    }),
+    [],
+  )
+  useUnsavedChangesGuard(guard)
 
   const contextValue = useMemo(
     () => ({

@@ -25,6 +25,7 @@ export const documentedServerEnvVars = {
     .describe("Port for the Readium server."),
   STORYTELLER_DATA_DIR: z
     .string()
+    .min(1, "STORYTELLER_DATA_DIR must not be empty")
     .default(() => process.cwd())
     .describe(
       "Directory where Storyteller will store its data. | Current Directory (`/data` in container)",
@@ -129,6 +130,12 @@ export const documentedServerEnvVars = {
     .optional()
     .describe(
       "[Path to a JSON configuration file.](#declarative-configuration) Settings in this file override database settings and cannot be changed via the UI.",
+    ),
+  HARDCOVER_API_TOKEN: z
+    .string()
+    .optional()
+    .describe(
+      "Hardcover API token used when none has been saved through the settings UI.",
     ),
   PUID: z.coerce
     .number()

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict"
-import test from "node:test"
+import { test } from "vitest"
 
 import {
   XRAY_SCHEMA_VERSION,
   type Xray,
   viewXray,
-} from "@storyteller-platform/xray/view"
+} from "@storyteller/xray/view"
 
 import {
   getLastNavigationMenuTab,

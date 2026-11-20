@@ -38,9 +38,9 @@ import { ReviewSection } from "./sections/ReviewSection"
 
 const DynamicAlignmentReport = dynamic(
   () =>
-    import(
-      "@v3/_/components/books/AlignmentReport/AlignmentReportContent"
-    ).then((mod) => mod.AlignmentReportContent),
+    import("@v3/_/components/books/AlignmentReport/AlignmentReportContent").then(
+      (mod) => mod.AlignmentReportContent,
+    ),
   { ssr: false },
 )
 
@@ -239,13 +239,13 @@ function BookDetailsContentInner({
           <div
             className={cn(
               "flex flex-col gap-4 transition-[height]",
-              !compact && "mx-auto max-w-3xl",
+              !compact && (showReport ? "px-8" : "mx-auto max-w-3xl"),
             )}
           >
             {showReport ? (
               <DynamicAlignmentReport
                 uuid={book.uuid}
-                compact
+                compact={compact}
                 embedded
                 onBack={() => void setReportMode(false)}
               />

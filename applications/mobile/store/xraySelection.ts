@@ -3,7 +3,7 @@ import {
   type XrayEntityView,
   findEntity,
   viewXray,
-} from "@storyteller-platform/xray/view"
+} from "@storyteller/xray/view"
 
 import { type ReadiumLocator } from "@/modules/readium/src/Readium.types"
 

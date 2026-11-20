@@ -1,5 +1,6 @@
 import assert from "node:assert"
-import { describe, it } from "node:test"
+
+import { describe, it } from "vitest"
 
 import { AliasMatcher } from "./matcher.ts"
 import { XRAY_SCHEMA_VERSION, type Xray, xraySchema } from "./model.ts"
@@ -70,21 +71,21 @@ const xray: Xray = {
   sentences: {},
 }
 
-void describe("viewXray", () => {
-  void it("reads generator-version-1 files without changing them", () => {
+describe("viewXray", () => {
+  it("reads generator-version-1 files without changing them", () => {
     const loaded = xraySchema.parse(JSON.parse(JSON.stringify(xray)))
     assert.deepStrictEqual(loaded, xray)
     assert.deepStrictEqual(viewXray(loaded, 5), viewXray(xray, 5))
   })
 
-  void it("hides an entity until the text names it", () => {
+  it("hides an entity until the text names it", () => {
     assert.deepStrictEqual(
       viewXray(xray, 1).map((view) => view.name),
       ["Bree"],
     )
   })
 
-  void it("shows only what is stamped at or before the position", () => {
+  it("shows only what is stamped at or before the position", () => {
     const strider = viewXray(xray, 5).find((view) => view.id === 0)
 
     assert.deepStrictEqual(strider, {
@@ -99,11 +100,11 @@ void describe("viewXray", () => {
     })
   })
 
-  void it("withholds a description until its passage is finished", () => {
+  it("withholds a description until its passage is finished", () => {
     assert.strictEqual(viewXray(xray, 2)[0]?.description, null)
   })
 
-  void it("lists an entity under a name the reader has met", () => {
+  it("lists an entity under a name the reader has met", () => {
     const early: Xray = {
       ...xray,
       entities: [
@@ -129,7 +130,7 @@ void describe("viewXray", () => {
     assert.strictEqual(viewXray(early, 3)[0]?.name, "Aragorn")
   })
 
-  void it("adds earlier mentions once a name is revealed", () => {
+  it("adds earlier mentions once a name is revealed", () => {
     const aragorn = viewXray(xray, 7)[0]
 
     assert.strictEqual(aragorn?.name, "Aragorn")
@@ -137,13 +138,13 @@ void describe("viewXray", () => {
   })
 })
 
-void describe("findEntity", () => {
-  void it("does not resolve a name the reader has not seen tied", () => {
+describe("findEntity", () => {
+  it("does not resolve a name the reader has not seen tied", () => {
     assert.strictEqual(findEntity(viewXray(xray, 5), "Aragorn"), null)
     assert.strictEqual(findEntity(viewXray(xray, 7), "Aragorn")?.id, 0)
   })
 
-  void it("does not take a common word for a capitalised name", () => {
+  it("does not take a common word for a capitalised name", () => {
     const views = viewXray(
       {
         ...xray,
@@ -166,7 +167,7 @@ void describe("findEntity", () => {
     assert.strictEqual(findEntity(views, " Will ")?.id, 0)
   })
 
-  void it("resolves a selection that surrounds a name", () => {
+  it("resolves a selection that surrounds a name", () => {
     assert.strictEqual(
       findEntity(viewXray(xray, 5), "said Strider’s voice")?.id,
       0,
@@ -174,13 +175,13 @@ void describe("findEntity", () => {
   })
 })
 
-void describe("storySoFar", () => {
-  void it("leaves out the passage being read", () => {
+describe("storySoFar", () => {
+  it("leaves out the passage being read", () => {
     assert.deepStrictEqual(storySoFar(xray, 6), ["The hobbits meet a ranger."])
   })
 })
 
-void describe("chapterIndexForHref", () => {
+describe("chapterIndexForHref", () => {
   const encoded: Xray = {
     ...xray,
     chapters: [
@@ -189,7 +190,7 @@ void describe("chapterIndexForHref", () => {
     ],
   }
 
-  void it("matches hrefs whichever side is percent-encoded or rooted", () => {
+  it("matches hrefs whichever side is percent-encoded or rooted", () => {
     assert.strictEqual(
       chapterIndexForHref(encoded, "/OEBPS/Text/chapter 1.xhtml#x"),
       0,
@@ -197,14 +198,14 @@ void describe("chapterIndexForHref", () => {
     assert.strictEqual(chapterIndexForHref(encoded, "chapter%2011.xhtml"), 1)
   })
 
-  void it("does not match a file whose name merely ends the same", () => {
+  it("does not match a file whose name merely ends the same", () => {
     assert.strictEqual(chapterIndexForHref(encoded, "1.xhtml"), -1)
     assert.strictEqual(chapterIndexForHref(encoded, ""), -1)
   })
 })
 
-void describe("sentence locations", () => {
-  void it("round-trips an ordinal through its element id", () => {
+describe("sentence locations", () => {
+  it("round-trips an ordinal through its element id", () => {
     const location = locateSentence(xray, 6)
 
     assert.deepStrictEqual(location, {
@@ -219,7 +220,7 @@ void describe("sentence locations", () => {
     assert.strictEqual(ordinalOfFragment(xray, "c2-s9"), null)
   })
 
-  void it("finds the sentence holding an exact amount of text", () => {
+  it("finds the sentence holding an exact amount of text", () => {
     // Chapter c1 has sentences of 10, 10, 20 and 10 characters.
     assert.strictEqual(ordinalAtTextOffset(xray, 0, 0), 0)
     assert.strictEqual(ordinalAtTextOffset(xray, 0, 9), 0)
@@ -229,14 +230,14 @@ void describe("sentence locations", () => {
     assert.strictEqual(ordinalAtTextOffset(xray, 1, 10), 5)
   })
 
-  void it("finds the sentence under a point in a chapter", () => {
+  it("finds the sentence under a point in a chapter", () => {
     assert.strictEqual(ordinalAtProgression(xray, 0, 0), 0)
     assert.strictEqual(ordinalAtProgression(xray, 0, 0.5), 2)
     assert.strictEqual(ordinalAtProgression(xray, 0, 1), 3)
   })
 })
 
-void describe("AliasMatcher", () => {
+describe("AliasMatcher", () => {
   const matcher = new AliasMatcher([
     ["Hook", "hook"],
     ["Mr. Darling", "father"],
@@ -245,17 +246,17 @@ void describe("AliasMatcher", () => {
   ])
   const found = (text: string) => matcher.find(text).map((m) => m.value)
 
-  void it("prefers the longest name at a position", () => {
+  it("prefers the longest name at a position", () => {
     assert.deepStrictEqual(found("Mr. Darling sat down."), ["father"])
     assert.deepStrictEqual(found("The Darling children slept."), ["family"])
   })
 
-  void it("keeps a capitalised name apart from the common word", () => {
+  it("keeps a capitalised name apart from the common word", () => {
     assert.deepStrictEqual(found("Hook raised his hook."), ["hook"])
     assert.deepStrictEqual(found("HOOK OR ME THIS TIME"), ["hook"])
   })
 
-  void it("finds a Korean name before its particle", () => {
+  it("finds a Korean name before its particle", () => {
     const korean = new AliasMatcher([["철수", "cheolsu"]])
     assert.strictEqual(
       korean.find("철수는 학교에 갔다. 철수가 웃었다.").length,
@@ -263,12 +264,12 @@ void describe("AliasMatcher", () => {
     )
   })
 
-  void it("finds an accented name however the text encodes it", () => {
+  it("finds an accented name however the text encodes it", () => {
     const zoe = new AliasMatcher([["Zoë".normalize("NFC"), "zoe"]])
     assert.strictEqual(zoe.find("Then Zoë laughed.".normalize("NFD")).length, 1)
   })
 
-  void it("matches whole words, through possessives and quotes", () => {
+  it("matches whole words, through possessives and quotes", () => {
     assert.deepStrictEqual(found("Hooks and Hooked"), [])
     assert.deepStrictEqual(found("Hook’s ship. Pixie dust!"), ["hook", "dust"])
   })

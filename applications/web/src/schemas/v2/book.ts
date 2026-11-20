@@ -1,12 +1,12 @@
 import z from "zod"
 
-import { marcRelators } from "@/components/books/edit/marcRelators"
 import { IDENTIFIER_KINDS } from "@/database/identifiers"
 import { COVER_ORIGINS } from "@/database/images"
-import { JOB_STATUSES } from "@/database/jobs"
 import { toIsoDateString } from "@/dates"
 import { ALIGNMENT_GRADES } from "@/fields"
 import { ICON_IDS } from "@/icons/icon-registry"
+import { JOB_STATUSES } from "@/jobStatuses"
+import { marcRelators } from "@/metadata/marcRelators"
 import { uuidv4 } from "@/schemas/uuid"
 
 import { ImageSchemaV2 } from "./image"
@@ -194,6 +194,11 @@ export const BookSchemaV2 = z.object({
       description: "The date that this book was first published.",
     }),
   ),
+  releaseDate: z.nullish(
+    z.coerce.date().meta({
+      description: "The date that this book's audio recording was released.",
+    }),
+  ),
   rating: z.nullish(
     z.number().meta({
       deprecated: true,
@@ -246,10 +251,12 @@ export const BookSchemaV2 = z.object({
     z.object({
       grade: z.enum(ALIGNMENT_GRADES),
       score: z.nullish(z.number()),
-      missingSentences: z.nullish(z.number()),
-      mutedChapters: z.nullish(z.number()),
+      confidence: z.nullish(z.number()),
+      sentenceCoverage: z.nullish(z.number()),
+      audioCoverage: z.nullish(z.number()),
       failedChapters: z.nullish(z.number()),
       unalignedAudio: z.nullish(z.number()),
+      previousGrade: z.nullish(z.enum(ALIGNMENT_GRADES)),
     }),
   ),
   ebook: z.nullish(
@@ -391,6 +398,9 @@ const BookUpdateValuesSchemaV2 = z.object({
   publicationDate: z.string().nullable().optional().meta({
     description: "The date that this book was first published.",
   }),
+  releaseDate: z.string().nullable().optional().meta({
+    description: "The date that this book's audio recording was released.",
+  }),
   coverColorsOverride: z.array(JsColorSchemaV2).nullable().optional(),
   status: uuidv4.optional().meta({
     description: "The current user's reading status for this book.",
@@ -463,6 +473,18 @@ export const BookUpdateRequestSchemaV2 = z
         message: `"${data.publicationDate}" is not a valid publication date. Use a year, YYYY-MM-DD, or a full ISO timestamp.`,
       })
     }
+
+    if (
+      mask.has("releaseDate") &&
+      data.releaseDate &&
+      !toIsoDateString(data.releaseDate)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["releaseDate"],
+        message: `"${data.releaseDate}" is not a valid release date. Use a year, YYYY-MM-DD, or a full ISO timestamp.`,
+      })
+    }
   })
   .transform((data) => {
     const mask = new Set(data.fields)
@@ -497,6 +519,11 @@ export const BookUpdateRequestSchemaV2 = z
         ...(mask.has("publicationDate") && {
           publicationDate: data.publicationDate
             ? toIsoDateString(data.publicationDate)
+            : null,
+        }),
+        ...(mask.has("releaseDate") && {
+          releaseDate: data.releaseDate
+            ? toIsoDateString(data.releaseDate)
             : null,
         }),
         ...(mask.has("pageCount") && { pageCount: data.pageCount }),

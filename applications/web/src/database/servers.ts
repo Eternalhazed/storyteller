@@ -29,7 +29,7 @@ export async function signAsServer(challenge: Buffer): Promise<string> {
     .where("id", "=", 1)
     .executeTakeFirstOrThrow()
 
-  const decrypted = await decryptSecret(privateKey)
+  const decrypted = await decryptSecret(privateKey, "Server private key")
   if (!decrypted) {
     throw new Error(
       "Could not decrypt this server's private key. STORYTELLER_SECRET_KEY has likely changed since the key was generated.",
@@ -52,6 +52,7 @@ export type ServerCapability =
   | "opds"
   | "progress-sync"
   | "readaloud-process"
+  | "progress-sync/v3"
 
 export type ServerIconInfo = {
   sha256: string
@@ -95,6 +96,7 @@ function getCapabilities(opdsEnabled: boolean | null): ServerCapability[] {
     "metadata-edit",
     "progress-sync",
     "readaloud-process",
+    "progress-sync/v3",
   ]
 
   if (opdsEnabled) capabilities.push("opds")

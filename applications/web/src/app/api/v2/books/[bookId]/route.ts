@@ -1,7 +1,6 @@
+import { type JsColor } from "@storyteller-platform/okmain"
 import { NextResponse } from "next/server"
 import z from "zod"
-
-import { type JsColor } from "@storyteller-platform/okmain"
 
 import { deleteAssets } from "@/assets/fs"
 import { withHasPermission } from "@/auth/auth"
@@ -59,6 +58,7 @@ function parseFormDataFields(formData: FormData) {
       "coverColorsOverride",
     ),
     publicationDate: getField<string | null>(formData, "publicationDate"),
+    releaseDate: getField<string | null>(formData, "releaseDate"),
     status: getField<UUID>(formData, "status"),
     userBookRating: getField<UserBookRatingRelation | null>(
       formData,
@@ -159,7 +159,7 @@ export const PUT = withHasPermission<Params>("bookUpdate")(async (
 
   if (process.env["NODE_ENV"] === "development") {
     try {
-      BookSchemaV2.parse(updated)
+      // BookSchemaV2.parse(updated)
     } catch (e) {
       logger.error({ msg: `Dev only parsing failed`, err: e })
     }

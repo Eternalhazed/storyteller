@@ -1,14 +1,7 @@
 "use client"
 
 import { parseAsString, useQueryState } from "nuqs"
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import {
   BookListPage,
@@ -31,12 +24,13 @@ import {
 import { Dialog, DialogContent } from "@v3/_/components/ui/dialog"
 import { TooltipButton } from "@v3/_/components/ui/tooltip-button"
 import { type BookFiltersController } from "@v3/_/hooks/use-book-filters"
+import { DocumentTitle } from "@v3/_/hooks/use-document-title"
 import { useIsMobile } from "@v3/_/hooks/use-mobile"
 import { useBookInSidePanel } from "@v3/_/hooks/use-open-book"
 import { useCommon, useTranslation } from "@v3/_/hooks/use-translation"
 
 import * as icon from "@/icons"
-import { type DisplayField, type SortField } from "@/sort"
+import { type DisplayField } from "@/sort"
 import {
   api,
   useGetSectionFacetsQuery,
@@ -54,9 +48,6 @@ type LibraryPageProps = {
   initialSelectedItem?: string
   noneLabel?: string
   itemLabels?: Record<string, string>
-
-  beforeFilters?: ReactNode
-  afterFilters?: ReactNode
   bookClickMode?: "panel" | "report"
   contentClassName?: string
   emptyMessage?: string
@@ -72,8 +63,6 @@ export function LibraryPage({
   initialSelectedItem,
   noneLabel,
   itemLabels,
-  beforeFilters,
-  afterFilters,
   bookClickMode,
   contentClassName,
   emptyMessage,
@@ -128,6 +117,7 @@ export function LibraryPage({
           icon: facet.icon,
           color: section.itemColor?.(facet.key) ?? facet.color,
           kind: facet.kind,
+          ...(facet.filterIssues ? { filterIssues: facet.filterIssues } : {}),
         },
       ]
     })
@@ -181,6 +171,7 @@ export function LibraryPage({
     }
 
     return items
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [
     allItems,
     sidebarSearch,
@@ -215,6 +206,10 @@ export function LibraryPage({
 
   const selectedFacet = allItems.find((i) => i.key === selectedItem)
   const selectedItemName = selectedFacet?.name
+  const documentTitle =
+    selectedItem && selectedItem !== ALL_KEY && selectedItem !== NONE_KEY
+      ? (selectedItemName ?? title)
+      : title
 
   const handleItemClick = useCallback(
     (key: string) => {
@@ -274,10 +269,10 @@ export function LibraryPage({
   })
   const selectedDescription =
     selectedItem && selectedItem !== NONE_KEY && selectedItem !== ALL_KEY
-      ? selectedShelf?.description ??
+      ? (selectedShelf?.description ??
         describableCollections.find((c) => c.uuid === selectedItem)
           ?.description ??
-        describableSeries.find((s) => s.uuid === selectedItem)?.description
+        describableSeries.find((s) => s.uuid === selectedItem)?.description)
       : undefined
 
   const source = useMemo<BookListSource>(() => {
@@ -306,7 +301,7 @@ export function LibraryPage({
       return undefined
     }
     return {
-      field: selectedShelf.orderBy as SortField,
+      field: selectedShelf.orderBy,
       direction:
         selectedShelf.orderDirection === "asc"
           ? ("asc" as const)
@@ -347,13 +342,13 @@ export function LibraryPage({
 
   return (
     <>
+      <DocumentTitle parts={[documentTitle]} />
       <BookListPage
         forceDisplayMode={forceDisplayMode}
         source={source}
         skip={!selectedItem}
         seedLabel={selectedItemName}
         defaultSort={shelfDefaultSort ?? section.sort}
-        {...(isSeriesSection ? { extraSortFields: ["seriesPosition"] } : {})}
         breadcrumbs={
           isMobile
             ? [
@@ -381,8 +376,6 @@ export function LibraryPage({
         }
         sidebar={sidebar}
         description={selectedDescription}
-        beforeFilters={beforeFilters}
-        afterFilters={afterFilters}
         bookClickMode={bookClickMode}
         contentClassName={contentClassName}
         listDisplayFields={listDisplayFields}

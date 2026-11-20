@@ -1,0 +1,13 @@
+{
+  "sidebar": [
+    "welcome",
+    "new-page",
+    "offloading-processing",
+    {
+      "type": "category",
+      "label": "API",
+      "collapsed": false,
+      "items": ["api/progress"]
+    }
+  ]
+}

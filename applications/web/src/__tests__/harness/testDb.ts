@@ -6,7 +6,7 @@ import { cwd } from "node:process"
 import Db, { type Database } from "better-sqlite3"
 import type { Kysely } from "kysely"
 
-import { DEFAULT_XRAY_MODEL } from "@storyteller-platform/xray"
+import { DEFAULT_XRAY_MODEL } from "@storyteller/xray"
 
 import { getSafeFilepathSegment } from "@/assets/paths"
 import { replaceDatabase } from "@/database/connection"
@@ -16,6 +16,7 @@ import {
   DEFAULT_EPUB_SUFFIX_TEMPLATE,
   type Settings,
 } from "@/database/settingsTypes"
+import { type UUID } from "@/uuid"
 
 const SCHEMA_PATH = join(cwd(), "schema.sql")
 
@@ -32,6 +33,16 @@ const DEFAULT_SETTINGS: Settings = {
   codec: null,
   bitrate: null,
   maxTrackLength: null,
+  aligner: "whisper",
+  ctcEngine: "ctc-local" as const,
+  ctcDevice: null,
+  ctcModel: null,
+  ctcDtype: null,
+  ctcBatchSize: null,
+  ctcServerUrl: null,
+  ctcServerApiKey: null,
+  alignmentGranularity: "sentence",
+  alignmentAutoExclude: null,
   transcriptionEngine: null,
   whisperModel: null,
   whisperThreads: 4,
@@ -64,7 +75,9 @@ const DEFAULT_SETTINGS: Settings = {
   maxUploadChunkSize: null,
   opdsEnabled: null,
   opdsPageSize: null,
-  opdsFormat: null,
+  opdsFormats: ["readaloud", "ebook", "audiobook"],
+  opdsSortField: null,
+  opdsSortDirection: null,
   scanCronExpression: null,
   backupCronExpression: null,
   backupRetentionCount: null,
@@ -72,6 +85,7 @@ const DEFAULT_SETTINGS: Settings = {
   epub2ImportStrategy: "backup-and-convert",
   epub2BackupSuffix: DEFAULT_EPUB_SUFFIX_TEMPLATE,
   cleanCacheAfterReadaloud: true,
+  metadataAutoImportThresholds: { audnexus: "high", hardcover: "high" },
   metadataFieldOverrides: {
     cover: "merge",
     title: "merge",
@@ -215,4 +229,36 @@ export function seedBooks(
   )
 
   return run(books)
+}
+
+export function seedUser(ctx: TestDbContext, userId: UUID) {
+  const permissionUuid = randomUUID()
+
+  ctx.sqlite
+    .prepare(`INSERT INTO user_permission (uuid, book_list) VALUES (?, 1)`)
+    .run(permissionUuid)
+
+  ctx.sqlite
+    .prepare(
+      `INSERT INTO "user" (id, user_permission_uuid, email) VALUES (?, ?, ?)`,
+    )
+    .run(userId, permissionUuid, `${userId}@example.com`)
+}
+
+export function seedSeries(
+  ctx: TestDbContext,
+  name: string,
+  members: [bookUuid: string, position: number][],
+): string {
+  const seriesUuid = randomUUID()
+  ctx.sqlite
+    .prepare(`INSERT INTO series (uuid, name) VALUES (?, ?)`)
+    .run(seriesUuid, name)
+  const insert = ctx.sqlite.prepare(
+    `INSERT INTO book_to_series (series_uuid, book_uuid, position) VALUES (?, ?, ?)`,
+  )
+  for (const [bookUuid, position] of members) {
+    insert.run(seriesUuid, bookUuid, position)
+  }
+  return seriesUuid
 }

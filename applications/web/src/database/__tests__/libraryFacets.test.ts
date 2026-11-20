@@ -1,15 +1,17 @@
 import assert from "node:assert"
-import { describe, it } from "node:test"
 
-import { seedBooks, setupTestDb } from "@/__tests__/harness/testDb"
+import { describe, it } from "vitest"
+
+import { seedBooks, seedUser, setupTestDb } from "@/__tests__/harness/testDb"
 import { getSectionFacets } from "@/database/libraryCounts"
 import { type UUID } from "@/uuid"
 
 const userId = "11111111-1111-1111-1111-111111111111" as UUID
 
-void describe("getSectionFacets formats", () => {
-  void it("counts every canonical format value, overlapping", async () => {
+describe("getSectionFacets formats", () => {
+  it("counts every canonical format value, overlapping", async () => {
     using ctx = setupTestDb()
+    seedUser(ctx, userId)
 
     seedBooks(ctx, [
       { title: "synced", ebook: "e.epub", audiobook: "a.mp3", readaloud: "r" },
@@ -20,7 +22,10 @@ void describe("getSectionFacets formats", () => {
       { title: "empty" },
     ])
 
-    const facets = await getSectionFacets(userId, "formats")
+    const facets = await getSectionFacets(
+      { id: userId, permissions: null },
+      "formats",
+    )
     const byKey = Object.fromEntries(facets.map((f) => [f.key, f.bookCount]))
 
     assert.strictEqual(byKey["ebook"], 3)
@@ -34,8 +39,9 @@ void describe("getSectionFacets formats", () => {
     assert.strictEqual(byKey["no-media"], 1)
   })
 
-  void it("treats a non-aligned readaloud as missing-readaloud, not no-media", async () => {
+  it("treats a non-aligned readaloud as missing-readaloud, not no-media", async () => {
     using ctx = setupTestDb()
+    seedUser(ctx, userId)
 
     const [uuid] = seedBooks(ctx, [
       {
@@ -49,7 +55,10 @@ void describe("getSectionFacets formats", () => {
       .prepare(`UPDATE readaloud SET status = 'PROCESSING' WHERE book_uuid = ?`)
       .run(uuid)
 
-    const facets = await getSectionFacets(userId, "formats")
+    const facets = await getSectionFacets(
+      { id: userId, permissions: null },
+      "formats",
+    )
     const byKey = Object.fromEntries(facets.map((f) => [f.key, f.bookCount]))
 
     assert.strictEqual(byKey["readaloud"], 0)
@@ -57,8 +66,9 @@ void describe("getSectionFacets formats", () => {
     assert.strictEqual(byKey["no-media"], 0)
   })
 
-  void it("counts a book with any missing asset file under missing-files", async () => {
+  it("counts a book with any missing asset file under missing-files", async () => {
     using ctx = setupTestDb()
+    seedUser(ctx, userId)
 
     const [gone] = seedBooks(ctx, [
       { title: "gone", ebook: "e.epub" },
@@ -68,7 +78,10 @@ void describe("getSectionFacets formats", () => {
       .prepare(`UPDATE ebook SET missing = 1 WHERE book_uuid = ?`)
       .run(gone)
 
-    const facets = await getSectionFacets(userId, "formats")
+    const facets = await getSectionFacets(
+      { id: userId, permissions: null },
+      "formats",
+    )
     const byKey = Object.fromEntries(facets.map((f) => [f.key, f.bookCount]))
 
     assert.strictEqual(byKey["missing-files"], 1)

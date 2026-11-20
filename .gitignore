@@ -14,7 +14,6 @@ test.db*
 words.txt
 node_modules
 .yarn/*
-!.yarn/cache
 !.yarn/patches
 !.yarn/plugins
 !.yarn/releases
@@ -25,9 +24,13 @@ node_modules
 **/*tsconfig.tsbuildinfo
 
 tsbuild
+# per-package output of tsconfig.build.json
+.tsbuild/
 
 # direnv/devenv config and cache
 local.envrc
+devenv.local.nix
+devenv.local.yaml
 .direnv
 .devenv
 /.devenv-initialized
@@ -39,8 +42,14 @@ local.envrc
 
 /.idea/*
 /.helix/
+/.mitos/
 
 logs/
+!applications/web/src/app/api/v2/logs/
 /.build/
 /.swiftpm/
 /storyteller-debug.apk
+
+# generated when the Android devenv profile is active
+local.properties
+/.android/

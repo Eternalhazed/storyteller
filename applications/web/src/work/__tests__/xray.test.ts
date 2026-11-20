@@ -12,17 +12,19 @@ import {
 } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, it } from "node:test"
+
+import { describe, it } from "vitest"
 
 import {
   type BookSource,
   type CallModel,
   type GenerationState,
   UnansweredError,
+  XRAY_GENERATOR_VERSION,
   xraySchema,
-} from "@storyteller-platform/xray"
+} from "@storyteller/xray"
 
-import { seedBooks, setupTestDb } from "@/__tests__/harness/testDb"
+import { seedBooks, seedUser, setupTestDb } from "@/__tests__/harness/testDb"
 import {
   notifyEbookImported,
   setEbookImportHandler,
@@ -41,6 +43,7 @@ import { JobEvents } from "@/jobEvents"
 import { encryptSecret } from "@/secrets"
 import type { UUID } from "@/uuid"
 import {
+  backfillXray,
   cancelJob,
   maybeEnqueueBookXray,
   pauseJob,
@@ -118,7 +121,12 @@ async function setupBook() {
         config: null,
         position: (await getJobs()).length,
       })
-      return queued ? job : updateJob(job.uuid, { status: "RUNNING" })
+      if (queued) {
+        const queuedJob = await getJob(job.uuid)
+        assert.ok(queuedJob)
+        return queuedJob
+      }
+      return updateJob(job.uuid, { status: "RUNNING" })
     },
     async [Symbol.asyncDispose]() {
       await rm(getXrayFilepath(bookUuid), { force: true })
@@ -153,8 +161,8 @@ async function waitForFinishedJob(
   }
 }
 
-void describe("X-Ray generation jobs", () => {
-  void it("writes the source ebook's X-Ray atomically and removes saved state", async () => {
+describe("X-Ray generation jobs", () => {
+  it("writes the source ebook's X-Ray atomically and removes saved state", async () => {
     await using fixture = await setupBook()
     const before = (await getBook(fixture.bookUuid))?.readaloud
     const job = await fixture.job()
@@ -181,7 +189,7 @@ void describe("X-Ray generation jobs", () => {
     assert.deepEqual((await getBook(fixture.bookUuid))?.readaloud, before)
   })
 
-  void it("retains completed passages on failure and resumes without repeating them", async () => {
+  it("retains completed passages on failure and resumes without repeating them", async () => {
     await using fixture = await setupBook()
     const before = (await getBook(fixture.bookUuid))?.readaloud
     const finishedPrompts: string[] = []
@@ -227,7 +235,7 @@ void describe("X-Ray generation jobs", () => {
     assert.deepEqual((await getBook(fixture.bookUuid))?.readaloud, before)
   })
 
-  void it("discards incompatible saved progress and starts over", async () => {
+  it("discards incompatible saved progress and starts over", async () => {
     await using fixture = await setupBook()
     await writeFile(
       getXrayStateFilepath(fixture.bookUuid),
@@ -252,7 +260,7 @@ void describe("X-Ray generation jobs", () => {
     })
   })
 
-  void it("checkpoints an in-flight passage before pausing", async () => {
+  it("checkpoints an in-flight passage before pausing", async () => {
     await using fixture = await setupBook()
     const controller = new AbortController()
     const job = await fixture.job()
@@ -276,7 +284,7 @@ void describe("X-Ray generation jobs", () => {
     })
   })
 
-  void it("fails before reading or calling the model when X-Ray storage is not writable", async () => {
+  it("fails before reading or calling the model when X-Ray storage is not writable", async () => {
     await using fixture = await setupBook()
     const job = await fixture.job()
     const probe = join(XRAY_DIR, `${job.uuid}.write-test`)
@@ -306,7 +314,7 @@ void describe("X-Ray generation jobs", () => {
     }
   })
 
-  void it("finishes with an index when the model cannot answer a passage", async () => {
+  it("finishes with an index when the model cannot answer a passage", async () => {
     await using fixture = await setupBook()
     const job = await fixture.job()
     await runXrayJob(job, {
@@ -324,8 +332,8 @@ void describe("X-Ray generation jobs", () => {
   })
 })
 
-void describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
-  void it("recovers a running X-Ray job while alignment is busy and admits only one X-Ray job", async () => {
+describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
+  it("recovers a running X-Ray job while alignment is busy and admits only one X-Ray job", async () => {
     await using fixture = await setupBook()
     const alignment = await fixture.job("book_align")
     assert.ok(globalThis.jobControllers)
@@ -363,7 +371,7 @@ void describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
     }
   })
 
-  void it("fails cleanly and frees the lane when reading the source fails", async () => {
+  it("fails cleanly and frees the lane when reading the source fails", async () => {
     await using fixture = await setupBook()
     const before = (await getBook(fixture.bookUuid))?.readaloud
     const failed = await fixture.job("book_xray", true)
@@ -390,7 +398,7 @@ void describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
     assert.equal((await getJob(next.uuid))?.status, "DONE")
   })
 
-  void it("pauses while the source worker is reading without calling the model", async () => {
+  it("pauses while the source worker is reading without calling the model", async () => {
     await using fixture = await setupBook()
     const job = await fixture.job("book_xray", true)
     const entered = Promise.withResolvers<null>()
@@ -425,7 +433,7 @@ void describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
     })
   })
 
-  void it("pauses, resumes, reorders, and cancels queued X-Ray jobs without changing readaloud status", async () => {
+  it("pauses, resumes, reorders, and cancels queued X-Ray jobs without changing readaloud status", async () => {
     await using fixture = await setupBook()
     const before = (await getBook(fixture.bookUuid))?.readaloud
     const reservation = randomUUID()
@@ -454,7 +462,7 @@ void describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
     }
   })
 
-  void it("only auto-queues when configured and missing, and never duplicates active jobs", async () => {
+  it("only auto-queues when configured and missing or outdated, and never duplicates active jobs", async () => {
     await using fixture = await setupBook()
     const reservation = randomUUID()
     assert.ok(globalThis.xrayJobControllers)
@@ -475,15 +483,25 @@ void describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
           "UPDATE settings SET value = ? WHERE name = 'xrayAnthropicApiKey'",
         )
         .run(JSON.stringify(await encryptSecret("test-key")))
-      await writeFile(getXrayFilepath(fixture.bookUuid), "{}")
+      await writeFile(
+        getXrayFilepath(fixture.bookUuid),
+        JSON.stringify({ generator: { version: XRAY_GENERATOR_VERSION } }),
+      )
       await maybeEnqueueBookXray(fixture.bookUuid)
-      assert.equal((await getJobs()).length, 0)
-      await writeFile(getXrayFilepath(fixture.bookUuid), "")
+      assert.equal((await getJobs()).length, 0, "a current file is kept")
+      await writeFile(
+        getXrayFilepath(fixture.bookUuid),
+        JSON.stringify({ generator: { version: XRAY_GENERATOR_VERSION - 1 } }),
+      )
       await Promise.all([
         maybeEnqueueBookXray(fixture.bookUuid),
         maybeEnqueueBookXray(fixture.bookUuid),
       ])
-      assert.equal((await getJobs({ type: "book_xray" })).length, 1)
+      assert.equal(
+        (await getJobs({ type: "book_xray" })).length,
+        1,
+        "an outdated file is regenerated, once",
+      )
     } finally {
       await fixture.ctx.db
         .deleteFrom("job")
@@ -493,7 +511,107 @@ void describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
     }
   })
 
-  void it("finishes and releases its slot when the book is deleted by an in-flight model call", async () => {
+  it("queues the library once per generator version at startup", async () => {
+    await using fixture = await setupBook()
+    const reservation = randomUUID()
+    assert.ok(globalThis.xrayJobControllers)
+    globalThis.xrayJobControllers.set(reservation, new AbortController())
+    const marker = join(XRAY_DIR, "backfill-version")
+    await rm(marker, { force: true })
+    try {
+      fixture.ctx.sqlite
+        .prepare(
+          "UPDATE settings SET value = 'true' WHERE name = 'xrayAutoGenerate'",
+        )
+        .run()
+      fixture.ctx.sqlite
+        .prepare(
+          "UPDATE settings SET value = ? WHERE name = 'xrayAnthropicApiKey'",
+        )
+        .run(JSON.stringify(await encryptSecret("test-key")))
+      await writeFile(
+        getXrayFilepath(fixture.bookUuid),
+        JSON.stringify({ generator: { version: XRAY_GENERATOR_VERSION - 1 } }),
+      )
+
+      await backfillXray()
+      const queued = await getJobs({ type: "book_xray" })
+      assert.equal(queued.length, 1, "the outdated book is queued")
+      assert.equal(
+        (await readFile(marker, "utf8")).trim(),
+        String(XRAY_GENERATOR_VERSION),
+      )
+
+      // Once the pass has run, a book whose job did not finish is not queued
+      // again at every restart.
+      await cancelJob(queued[0]!.uuid)
+      await backfillXray()
+      assert.equal(
+        (await getJobs({ type: "book_xray", statuses: ["QUEUED"] })).length,
+        0,
+      )
+    } finally {
+      await rm(marker, { force: true })
+      await fixture.ctx.db
+        .deleteFrom("job")
+        .where("bookUuid", "=", fixture.bookUuid)
+        .execute()
+      globalThis.xrayJobControllers.delete(reservation)
+    }
+  })
+
+  it("leaves books everyone has finished out of the startup pass", async () => {
+    await using fixture = await setupBook()
+    const reservation = randomUUID()
+    assert.ok(globalThis.xrayJobControllers)
+    globalThis.xrayJobControllers.set(reservation, new AbortController())
+    const marker = join(XRAY_DIR, "backfill-version")
+    await rm(marker, { force: true })
+    const userId = randomUUID()
+    seedUser(fixture.ctx, userId)
+    const setStatus = (name: string) =>
+      fixture.ctx.sqlite
+        .prepare(
+          `INSERT INTO book_to_status (book_uuid, status_uuid, user_id)
+           VALUES (?, (SELECT uuid FROM status WHERE name = ?), ?)
+           ON CONFLICT DO UPDATE SET status_uuid = excluded.status_uuid`,
+        )
+        .run(fixture.bookUuid, name, userId)
+    try {
+      fixture.ctx.sqlite
+        .prepare(
+          "UPDATE settings SET value = 'true' WHERE name = 'xrayAutoGenerate'",
+        )
+        .run()
+      fixture.ctx.sqlite
+        .prepare(
+          "UPDATE settings SET value = ? WHERE name = 'xrayAnthropicApiKey'",
+        )
+        .run(JSON.stringify(await encryptSecret("test-key")))
+      await writeFile(
+        getXrayFilepath(fixture.bookUuid),
+        JSON.stringify({ generator: { version: XRAY_GENERATOR_VERSION - 1 } }),
+      )
+
+      setStatus("Read")
+      await backfillXray()
+      assert.equal((await getJobs({ type: "book_xray" })).length, 0)
+
+      await rm(marker, { force: true })
+      setStatus("Reading")
+      await backfillXray()
+      assert.equal((await getJobs({ type: "book_xray" })).length, 1)
+    } finally {
+      await rm(marker, { force: true })
+      await fixture.ctx.db
+        .deleteFrom("job")
+        .where("bookUuid", "=", fixture.bookUuid)
+        .execute()
+      globalThis.xrayJobControllers.delete(reservation)
+    }
+  })
+
+  it("finishes and releases its slot when the book is deleted by an in-flight model call", async () => {
     await using fixture = await setupBook()
     const job = await fixture.job("book_xray", true)
     let calls = 0
@@ -520,7 +638,7 @@ void describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
     assert.equal(globalThis.xrayJobControllers?.size, 0)
   })
 
-  void it("still claims X-Ray when claiming alignment throws", async () => {
+  it("still claims X-Ray when claiming alignment throws", async () => {
     await using fixture = await setupBook()
     const alignment = await fixture.job("book_align", true)
     const xray = await fixture.job("book_xray", true)
@@ -542,7 +660,7 @@ void describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
     }
   })
 
-  void it("still claims alignment when claiming X-Ray throws and resets its start time", async () => {
+  it("still claims alignment when claiming X-Ray throws and resets its start time", async () => {
     await using fixture = await setupBook()
     const alignment = await fixture.job("book_align")
     const xray = await fixture.job("book_xray", true)
@@ -575,7 +693,7 @@ void describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
     }
   })
 
-  void it("records a runner failure when its first final status write throws", async () => {
+  it("records a runner failure when its first final status write throws", async () => {
     await using fixture = await setupBook()
     const job = await fixture.job("book_xray", true)
     fixture.ctx.sqlite.exec(`
@@ -598,7 +716,7 @@ void describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
     assert.equal(globalThis.xrayJobControllers?.size, 0)
   })
 
-  void it("does not reclaim a RUNNING row when every final status write fails", async () => {
+  it("does not reclaim a RUNNING row when every final status write fails", async () => {
     await using fixture = await setupBook()
     const job = await fixture.job("book_xray", true)
     let reads = 0
@@ -623,7 +741,7 @@ void describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
     }
   })
 
-  void it("never fails a completed import when optional background work fails", async () => {
+  it("never fails a completed import when optional background work fails", async () => {
     const previous = globalThis.ebookImportHandler
     try {
       setEbookImportHandler(() =>

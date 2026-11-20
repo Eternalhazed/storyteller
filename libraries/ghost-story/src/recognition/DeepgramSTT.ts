@@ -1,3 +1,5 @@
+import { MediaType } from "@storyteller/media-types"
+
 import {
   type AudioFormat,
   type AudioSource,
@@ -19,18 +21,18 @@ const SERVICE_ID = "deepgram"
 function formatToContentType(format: AudioFormat): string {
   switch (format) {
     case "wav":
-      return "audio/wav"
+      return MediaType.WAV_AUDIO.mime
     case "flac":
-      return "audio/flac"
+      return MediaType.FLAC_AUDIO.mime
     case "opus":
     case "ogg":
-      return "audio/ogg"
+      return MediaType.OGG_AUDIO.mime
     case "mp3":
-      return "audio/mpeg"
+      return MediaType.MPEG_AUDIO.mime
     case "webm":
-      return "audio/webm"
+      return MediaType.WEBM_AUDIO.mime
     default:
-      return "audio/wav"
+      return MediaType.WAV_AUDIO.mime
   }
 }
 
@@ -121,6 +123,7 @@ export async function recognize(
     const transcript = firstAlternative?.transcript || ""
     const words = firstAlternative?.words || []
 
+    /* oxlint-disable typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type */
     const timeline = words.map(
       (wordEntry: DeepgramWordEntry) =>
         ({
@@ -131,6 +134,7 @@ export async function recognize(
           confidence: wordEntry.confidence,
         }) as TimelineEntry,
     )
+    /* oxlint-enable typescript/no-unnecessary-type-assertion */
 
     if (opts.punctuate) {
       applyPunctuationToTimeline(timeline, transcript)

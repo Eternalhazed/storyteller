@@ -5,7 +5,7 @@ import {
   ordinalAtProgression,
   ordinalAtTextOffset,
   ordinalOfFragment,
-} from "@storyteller-platform/xray/view"
+} from "@storyteller/xray/view"
 
 import { type ReadiumLocator } from "@/modules/readium/src/Readium.types"
 import { type ReturnToPosition } from "@/store/slices/bookshelfSlice"
@@ -80,7 +80,7 @@ function boundaryAtLocator(
   ) {
     return textEnd === 0
       ? -1
-      : ordinalAtTextOffset(xray, chapterIndex, textEnd - 1) ?? -1
+      : (ordinalAtTextOffset(xray, chapterIndex, textEnd - 1) ?? -1)
   }
 
   for (const fragment of boundaryLocator.locations?.fragments ?? []) {

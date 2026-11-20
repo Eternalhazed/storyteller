@@ -16,6 +16,7 @@ import {
   FieldError,
   FieldLabel,
 } from "@v3/_/components/ui/field"
+import { InfoTip } from "@v3/_/components/ui/info-tip"
 import {
   Tooltip,
   TooltipContent,
@@ -23,7 +24,7 @@ import {
 } from "@v3/_/components/ui/tooltip"
 import { useTranslation } from "@v3/_/hooks/use-translation"
 
-import { type Settings } from "@/apiModels"
+import { type ServerCapabilities, type Settings } from "@/apiModels"
 import { type SettingsSchema } from "@/database/settingsTypes"
 import * as icon from "@/icons"
 
@@ -33,11 +34,13 @@ export type SettingsFormProviderProps = {
   children: React.ReactNode
   form: SettingsFormForm
   lockedSettings: Set<keyof Settings>
+  capabilities?: ServerCapabilities
 }
 
 export type SettingsFormProviderContext = {
   form: SettingsFormForm
   lockedSettings: Set<keyof Settings>
+  capabilities?: ServerCapabilities
 } | null
 
 export const SettingsFormProviderContext =
@@ -47,9 +50,12 @@ export const SettingsFormProvider = ({
   children,
   form,
   lockedSettings,
+  capabilities,
 }: SettingsFormProviderProps) => {
   return (
-    <SettingsFormProviderContext.Provider value={{ form, lockedSettings }}>
+    <SettingsFormProviderContext.Provider
+      value={{ form, lockedSettings, capabilities }}
+    >
       {children}
     </SettingsFormProviderContext.Provider>
   )
@@ -73,6 +79,7 @@ export type SettingsFormFieldProps<
   name: T
   label: string
   description?: string
+  tip?: React.ReactNode
   render: (
     field: ControllerRenderProps<z.infer<typeof SettingsSchema>, T>,
     fieldState: ControllerFieldState,
@@ -98,6 +105,7 @@ export const SettingsFormField = <
   name,
   label,
   description,
+  tip,
   render,
 }: SettingsFormFieldProps<T>) => {
   const { form, lockedSettings } = useSettingsForm()
@@ -111,6 +119,7 @@ export const SettingsFormField = <
         <Field data-invalid={fieldState.invalid} data-disabled={isLocked}>
           <FieldLabel htmlFor={name}>
             {label}
+            {tip && <InfoTip>{tip}</InfoTip>}
             {isLocked && <LockTooltip />}
           </FieldLabel>
           {description && <FieldDescription>{description}</FieldDescription>}

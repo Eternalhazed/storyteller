@@ -1,9 +1,17 @@
 *
-
 !/package.json
+!/nginx.conf
 !/yarn.lock
 !/.yarnrc.yml
 !/.yarn
+!/libraries/crengine-xpointer
+/libraries/crengine-xpointer/node_modules
+/libraries/crengine-xpointer/dist
+/libraries/crengine-xpointer/.tsbuild
+!/libraries/epubcfi
+/libraries/epubcfi/node_modules
+/libraries/epubcfi/dist
+/libraries/epubcfi/.tsbuild
 !/libraries/fs
 /libraries/fs/node_modules
 /libraries/fs/index.js
@@ -25,12 +33,15 @@
 /libraries/mapping/index.js
 /libraries/mapping/index.cjs
 /libraries/mapping/index.d.ts
-!/libraries/audiobook
-/libraries/audiobook/src/__fixtures__/
-/libraries/audiobook/node_modules
-/libraries/audiobook/src/**/*.js
-/libraries/audiobook/src/**/*.cjs
-/libraries/audiobook/src/**/*.d.ts
+!/libraries/audiobooks
+/libraries/audiobooks/src/__fixtures__/
+/libraries/audiobooks/node_modules
+/libraries/audiobooks/src/**/*.js
+/libraries/audiobooks/src/**/*.cjs
+/libraries/audiobooks/src/**/*.d.ts
+!/libraries/uri-fragment
+/libraries/uri-fragment/node_modules
+/libraries/uri-fragment/dist
 !/libraries/align
 /libraries/align/src/**/__fixtures__/
 /libraries/align/node_modules
@@ -70,7 +81,24 @@ __tests__
 /libraries/xray/node_modules
 /libraries/xray/dist
 
+!/libraries/media-types
+/libraries/media-types/node_modules
+/libraries/media-types/dist
+
+!/libraries/mlx-audio
+/libraries/mlx-audio/node_modules
+/libraries/mlx-audio/build
+/libraries/mlx-audio/.build
+/libraries/mlx-audio/.build-xcode
+/libraries/mlx-audio/_models
+
+
+!/types
 
 /docker
 
 **/whisper.cpp/**
+
+/libraries/*/dist
+**/.tsbuild
+**/*.tsbuildinfo

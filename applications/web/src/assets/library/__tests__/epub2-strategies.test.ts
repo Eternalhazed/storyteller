@@ -1,16 +1,17 @@
 import assert from "node:assert"
 import { readFile, readdir } from "node:fs/promises"
-import { join } from "node:path"
-import { describe, it } from "node:test"
+import { dirname, join } from "node:path"
 
+import { describe, it } from "vitest"
 import { ZipFile } from "yazl"
 
-import { Epub, MemoryAdapter } from "@storyteller-platform/epub"
+import { Epub, MemoryAdapter } from "@storyteller/epub"
 
 import { setupTestDb } from "@/__tests__/harness/testDb"
 import { createTestLibrary } from "@/__tests__/harness/testFs"
 import { canonicalizePath } from "@/assets/library/scanner/folder"
 import { scanLibrary } from "@/assets/library/scanner/scan"
+import { isSuppressed } from "@/assets/library/scanner/write-intent"
 import { getBooks } from "@/database/books"
 import { createImportRule, getIgnorePaths } from "@/database/importRules"
 
@@ -130,8 +131,8 @@ async function epubVersionAt(path: string): Promise<string> {
 
 const SIGNAL = () => new AbortController().signal
 
-void describe("epub2 import strategies", () => {
-  void it("replace converts the file in place", async () => {
+describe("epub2 import strategies", () => {
+  it("replace converts the file in place", async () => {
     using _db = setupTestDb({ epub2ImportStrategy: "replace" })
     await using library = await createTestLibrary("epub2-replace")
 
@@ -159,7 +160,7 @@ void describe("epub2 import strategies", () => {
     await folder.expectFiles(["book.epub"])
   })
 
-  void it("backup-and-convert keeps a suffixed backup and converts the original path", async () => {
+  it("backup-and-convert keeps a suffixed backup and converts the original path", async () => {
     using _db = setupTestDb({ epub2ImportStrategy: "backup-and-convert" })
     await using library = await createTestLibrary("epub2-backup")
 
@@ -199,7 +200,7 @@ void describe("epub2 import strategies", () => {
     assert.strictEqual((await getBooks()).length, 1)
   })
 
-  void it("skip refuses to import epub 2 files", async () => {
+  it("skip refuses to import epub 2 files", async () => {
     using _db = setupTestDb({ epub2ImportStrategy: "skip" })
     await using library = await createTestLibrary("epub2-skip")
 
@@ -222,7 +223,7 @@ void describe("epub2 import strategies", () => {
     assert.ok((await readFile(source)).equals(originalBytes))
   })
 
-  void it("convert-alongside leaves the original untouched and imports the converted copy", async () => {
+  it("convert-alongside leaves the original untouched and imports the converted copy", async () => {
     using _db = setupTestDb({ epub2ImportStrategy: "convert-alongside" })
     await using library = await createTestLibrary("epub2-alongside")
 
@@ -266,7 +267,7 @@ void describe("epub2 import strategies", () => {
     assert.ok((await readFile(source)).equals(originalBytes))
   })
 
-  void it("renders the version placeholder in the configured suffix", async () => {
+  it("renders the version placeholder in the configured suffix", async () => {
     using _db = setupTestDb({
       epub2ImportStrategy: "convert-alongside",
       epub2BackupSuffix: " (v{version})",
@@ -296,7 +297,7 @@ void describe("epub2 import strategies", () => {
     await folder.expectFiles(["book.epub", "book (v3).epub"])
   })
 
-  void it("falls back to -epub3 for a suffix without a placeholder", async () => {
+  it("falls back to _epub3 for a suffix without a placeholder", async () => {
     using _db = setupTestDb({
       epub2ImportStrategy: "convert-alongside",
       epub2BackupSuffix: "_epub2",
@@ -321,11 +322,11 @@ void describe("epub2 import strategies", () => {
     assert.strictEqual(books.length, 1)
     assert.strictEqual(
       books[0]?.ebook?.filepath,
-      await canonicalizePath(join(folder.path, "book-epub3.epub")),
+      await canonicalizePath(join(folder.path, "book_epub3.epub")),
     )
   })
 
-  void it("backup-and-convert rolls back when the conversion fails", async () => {
+  it("backup-and-convert rolls back when the conversion fails", async () => {
     using _db = setupTestDb({ epub2ImportStrategy: "backup-and-convert" })
     await using library = await createTestLibrary("epub2-backup-rollback")
 
@@ -357,9 +358,15 @@ void describe("epub2 import strategies", () => {
 
     const ignorePaths = await getIgnorePaths()
     assert.ok(!ignorePaths.includes(await canonicalizePath(backupPath)))
+
+    assert.ok(
+      isSuppressed(source) &&
+        isSuppressed(join(dirname(source), "book_epub2.epub")),
+      "the rollback writes must stay suppressed, or the watcher rescans the file and retries the failing conversion forever",
+    )
   })
 
-  void it("convert-alongside rolls back when the conversion fails", async () => {
+  it("convert-alongside rolls back when the conversion fails", async () => {
     using _db = setupTestDb({ epub2ImportStrategy: "convert-alongside" })
     await using library = await createTestLibrary("epub2-alongside-rollback")
 
@@ -385,11 +392,16 @@ void describe("epub2 import strategies", () => {
     await folder.expectFiles(["book.epub"])
     assert.ok((await readFile(source)).equals(originalBytes))
     assert.ok(!(await getIgnorePaths()).includes(source))
+
+    assert.ok(
+      isSuppressed(source),
+      "the rollback writes must stay suppressed, or the watcher rescans the file and retries the failing conversion forever",
+    )
   })
 })
 
-void describe("epub2 files that used to fail to open", () => {
-  void it("imports an epub 2 with trailing junk after the zip end record", async () => {
+describe("epub2 files that used to fail to open", () => {
+  it("imports an epub 2 with trailing junk after the zip end record", async () => {
     using _db = setupTestDb({ epub2ImportStrategy: "replace" })
     await using library = await createTestLibrary("epub2-junk")
 
@@ -419,7 +431,7 @@ void describe("epub2 files that used to fail to open", () => {
     assert.strictEqual(await epubVersionAt(source), "3.0")
   })
 
-  void it("imports an epub 2 whose opf uses a prefixed package namespace", async () => {
+  it("imports an epub 2 whose opf uses a prefixed package namespace", async () => {
     using _db = setupTestDb({ epub2ImportStrategy: "replace" })
     await using library = await createTestLibrary("epub2-prefixed")
 
@@ -450,8 +462,8 @@ void describe("epub2 files that used to fail to open", () => {
   })
 })
 
-void describe("folder listing", () => {
-  void it("does not race the converted file into a duplicate candidate", async () => {
+describe("folder listing", () => {
+  it("does not race the converted file into a duplicate candidate", async () => {
     using _db = setupTestDb({ epub2ImportStrategy: "convert-alongside" })
     await using library = await createTestLibrary("epub2-alongside-dupes")
 

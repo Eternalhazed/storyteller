@@ -14,6 +14,11 @@ export const V3_ROOTS = [
   "settings",
   "login",
   "init",
+  "forgot-password",
+  "reset-password",
+  "invites",
+  "auth",
+  "device",
   "preferences",
   "shelves",
   "formats",
@@ -24,11 +29,7 @@ export const V3_ROOTS = [
   "theme",
 ]
 
-export const V2_ONLY_PATTERNS = [/^\/books\/[^/]+\/read$/]
-
 export function hasV3Route(pathname: string): boolean {
-  if (V2_ONLY_PATTERNS.some((pattern) => pattern.test(pathname))) return false
-
   if (pathname === "/") return true
 
   return V3_ROOTS.some(

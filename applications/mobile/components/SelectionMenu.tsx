@@ -11,7 +11,7 @@ import {
 } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 
-import { findEntity, viewXray } from "@storyteller-platform/xray/view"
+import { findEntity, viewXray } from "@storyteller/xray/view"
 
 import { type HighlightTint, highlightTints } from "@/colors"
 import { defaultPreferences } from "@/database/preferencesTypes"

@@ -1,21 +1,26 @@
 import type { Metadata, Viewport } from "next"
+import { NextIntlClientProvider } from "next-intl"
+import { getTranslations } from "next-intl/server"
 import localFont from "next/font/local"
 import { cookies, headers } from "next/headers"
 import Script from "next/script"
-import { NextIntlClientProvider } from "next-intl"
-import { getTranslations } from "next-intl/server"
-import { NuqsAdapter } from "nuqs/adapters/next"
+import { NuqsAdapter } from "nuqs/adapters/next/app"
 
+import { PiPProvider } from "@v3/_/components/reader/PipProvider"
+import { ReaderAudioProvider } from "@v3/_/components/reader/ReaderAudioProvider"
 import { TauriTitlebarSync } from "@v3/_/components/tauri-titlebar-sync"
 import { ThemeProvider } from "@v3/_/components/theme-provider"
 import { Toaster } from "@v3/_/components/ui/sonner"
+import {
+  BASE_TOOLTIP_DELAY,
+  TooltipProvider,
+} from "@v3/_/components/ui/tooltip"
 import { VersionProvider } from "@v3/_/components/version-context"
+import { DocumentTitleProvider } from "@v3/_/hooks/use-document-title"
 
-import StoreProvider from "@/components/StoreProvider"
-import { AudioProviderRedux } from "@/components/reader/AudioProviderRedux"
-import { PiPProvider } from "@/components/reader/PipProvider"
 import { getSetting } from "@/database/settings"
 import { env } from "@/env"
+import StoreProvider from "@/store/StoreProvider"
 import {
   type UISettings,
   UI_SETTINGS_COOKIE_NAME,
@@ -87,7 +92,13 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode
 }) {
-  const [reqHeaders, cookieStore] = await Promise.all([headers(), cookies()])
+  const [reqHeaders, cookieStore, t, libraryName] = await Promise.all([
+    headers(),
+    cookies(),
+    getTranslations("Layout"),
+    getSetting("libraryName"),
+  ])
+  const titleTemplate = `%s • ${libraryName || t("title")}`
   const isRewritten = reqHeaders.get("x-v3-rewritten") === "1"
   const basePath = isRewritten ? "" : "/v3"
 
@@ -120,8 +131,8 @@ export default async function RootLayout({
         {/* <TweaksPanel /> */}
         <VersionProvider basePath={basePath}>
           <NextIntlClientProvider>
-            <StoreProvider initialUISettings={initialUISettings}>
-              <AudioProviderRedux>
+            <ReaderAudioProvider>
+              <StoreProvider initialUISettings={initialUISettings}>
                 <PiPProvider>
                   <ThemeProvider
                     attribute="class"
@@ -129,15 +140,19 @@ export default async function RootLayout({
                     enableSystem
                     themes={["light", "dark", "system"]}
                   >
-                    <NuqsAdapter>
-                      {children}
-                      <Toaster />
-                      <TauriTitlebarSync />
-                    </NuqsAdapter>
+                    <TooltipProvider delay={BASE_TOOLTIP_DELAY}>
+                      <NuqsAdapter>
+                        <DocumentTitleProvider template={titleTemplate}>
+                          {children}
+                        </DocumentTitleProvider>
+                        <Toaster />
+                        <TauriTitlebarSync />
+                      </NuqsAdapter>
+                    </TooltipProvider>
                   </ThemeProvider>
                 </PiPProvider>
-              </AudioProviderRedux>
-            </StoreProvider>
+              </StoreProvider>
+            </ReaderAudioProvider>
           </NextIntlClientProvider>
         </VersionProvider>
       </body>

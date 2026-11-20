@@ -1,5 +1,6 @@
 "use client"
 
+import { useRouter } from "next/navigation"
 import { useRef } from "react"
 
 import { BookCard } from "@v3/_/components/books/Grid/BookCard"
@@ -28,10 +29,22 @@ function RelatedBooksRow({
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const { bookOpenTarget } = useUserPreferences()
-  const { setSelectedBookUuid } = useBookInSidePanel()
+  const { setSelectedBookUuid, selectedBookUuid } = useBookInSidePanel()
+  const isInSidePanel = !!selectedBookUuid
+
+  const router = useRouter()
 
   const scrollBy = (delta: number) => {
     scrollRef.current?.scrollBy({ left: delta, behavior: "smooth" })
+  }
+
+  const handleClick = (book: BookWithRelations) => {
+    if (isInSidePanel && bookOpenTarget === "panel") {
+      void setSelectedBookUuid(book.uuid)
+      return
+    }
+
+    router.push(`/books/${book.uuid}`)
   }
 
   return (
@@ -43,16 +56,13 @@ function RelatedBooksRow({
         {books.map((book) => (
           <div
             key={book.uuid}
-            className="w-[110px] shrink-0 snap-mandatory snap-start [&_h3]:text-sm"
+            className="w-[110px] shrink-0 snap-mandatory snap-start"
           >
             <BookCard
               book={book}
               displayFields={displayFields}
-              {...(bookOpenTarget === "panel" && {
-                onClick: (clicked: BookWithRelations) => {
-                  void setSelectedBookUuid(clicked.uuid)
-                },
-              })}
+              onClick={handleClick}
+              gridCardSize="smallest"
             />
           </div>
         ))}

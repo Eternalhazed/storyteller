@@ -107,7 +107,6 @@ object AndroidBridgeCallbacks {
 
     @JvmStatic
     fun readerStateDidChange(payload: String) {
-        android.util.Log.d("StorytellerReaderState", payload)
         readerStateListener?.callback?.invoke(payload)
     }
 
@@ -123,13 +122,18 @@ object AndroidBridgeCallbacks {
 
     @JvmStatic
     fun evaluateReaderJS(requestID: String, script: String) {
+        val registration = readerWebView
         mainHandler.post {
-            val webView = readerWebView?.callback
-            if (webView == null) {
+            val webView = registration?.callback
+            if (webView == null || readerWebView !== registration) {
                 StorytellerAndroidBridge.readerJSResult(requestID, "", "No reader WebView registered")
             } else {
                 webView.evaluateJavascript(script) { value ->
-                    StorytellerAndroidBridge.readerJSResult(requestID, value ?: "null", "")
+                    if (readerWebView === registration) {
+                        StorytellerAndroidBridge.readerJSResult(requestID, value ?: "null", "")
+                    } else {
+                        StorytellerAndroidBridge.readerJSResult(requestID, "", "Reader was replaced")
+                    }
                 }
             }
         }

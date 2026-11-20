@@ -1,6 +1,7 @@
-# @storyteller-platform/epub
+# @storyteller/epub
 
-A Node.js library for inspecting, modifying, and creating EPUB 3 publications.
+A Node.js/browser library for inspecting, modifying, and creating EPUB 3
+publications.
 
 <!-- toc -->
 
@@ -13,7 +14,8 @@ A Node.js library for inspecting, modifying, and creating EPUB 3 publications.
   - [Creating from scratch](#creating-from-scratch)
   - [Adding a chapter](#adding-a-chapter)
   - [Writing to disk](#writing-to-disk)
-  - [Writing to a byte array](#writing-to-a-byte-array)
+  - [Upgrading an EPUB 2 to EPUB 3](#upgrading-an-epub-2-to-epub-3)
+  - [Browser support](#browser-support)
 - [Development](#development)
 - [API Docs](#api-docs)
 
@@ -24,19 +26,19 @@ A Node.js library for inspecting, modifying, and creating EPUB 3 publications.
 npm:
 
 ```sh
-npm install @storyteller-platform/epub
+npm install @storyteller/epub
 ```
 
 yarn:
 
 ```sh
-yarn add @storyteller-platform/epub
+yarn add @storyteller/epub
 ```
 
 deno:
 
 ```sh
-deno install npm:@storyteller-platform/epub
+deno install npm:@storyteller/epub
 ```
 
 ## About
@@ -73,9 +75,9 @@ readers will encounter the manifest items by simply turning pages one at a time.
 
 ### What this library does
 
-`@storyteller-platform/epub` provides an API to interact with the metadata,
-manifest, and spine of the EPUB publication. There are higher level APIs that
-mostly abstract away the implementation details of the EPUB specification, like
+`@storyteller/epub` provides an API to interact with the metadata, manifest, and
+spine of the EPUB publication. There are higher level APIs that mostly abstract
+away the implementation details of the EPUB specification, like
 `epub.setTitle(title: string)` and `epub.getCreators()`, as well as lower level
 APIs like `epub.writeItemContents(path: string, contents: Uint8Array)` and
 `epub.addMetadata(entry: MetadataEntry)`, which require some understanding of
@@ -95,11 +97,23 @@ scratch.
 ### Reading from a file
 
 ```ts
-// If you want to read or write to disk, import from the `/node`
-// export
-import { Epub } from "@storyteller-platform/epub/node"
+import { Epub } from "@storyteller/epub"
 
-const epub = await Epub.from("path/to/book.epub")
+using epub = await Epub.from("path/to/book.epub")
+// equivalent to
+// using epub = await Epub.using(TmpFsAdapter).from("path/to/book.epub")
+console.log(await epub.getTitle())
+```
+
+If you want to be a little more efficient and not unpack the entire EPUB file
+into disk (which can take some time when dealing with EPUBs with Media
+Overlays/audio contents), you can instead lazily read the contents of the EPUB
+file into memory.
+
+```ts
+import { Epub, MemoryAdapter } from "@storyteller/epub"
+
+using epub = await Epub.using(MemoryAdapter).from("path/to/book.epub")
 console.log(await epub.getTitle())
 ```
 
@@ -116,9 +130,10 @@ incrementally after creation.
 ```ts
 import { randomUUID } from "node:crypto"
 
-import { Epub } from "@storyteller-platform/epub"
+import { Epub } from "@storyteller/epub"
 
-const epub = await Epub.create({
+// Implicitly uses the TmpFsAdapter
+const epub = await Epub.create("/path/to/book.epub", {
   title: "S'mores For Everyone",
   // This should be the primary language of the publication.
   // Individual content resources may specify their own languages.
@@ -130,8 +145,8 @@ const epub = await Epub.create({
 
 ### Adding a chapter
 
-```ts
-import { Epub, ManifestItem } from "@storyteller-platform/epub"
+```tsx
+import { Epub, type ManifestItem, x } from "@storyteller/epub"
 
 const epub = await Epub.from("path/to/book.epub")
 
@@ -158,11 +173,16 @@ const contents = `<?xml version="1.0" encoding="UTF-8"?>
 </html>`
 
 // Or you can specify the contents as an XML structure
-const xmlContents = epub.createXhtmlDocument([
-  Epub.createXmlElement("h1", {}, [Epub.createXmlTextNode("Chapter 1")]),
-  Epub.createXmlElement("p", {}, [
-    Epub.createXmlTextNode("At first, there were s'mores."),
-  ]),
+const xmlContents = await epub.createXhtmlDocument([
+  x("h1", null, "Chapter 1"),
+  x("p", null, "At first, there were s'mores."),
+])
+
+// Or, using JSX
+/** @jsxImportSource @storyteller/epub */
+const xmlContents = await epub.createXhtmlDocument([
+  <h1>Chapter 1</h1>,
+  <p>At first, there were s'mores.</p>,
 ])
 
 // First, add the new item to the manifest, and add
@@ -179,48 +199,101 @@ await epub.addSpineItem(manifestItem.id)
 ### Writing to disk
 
 ```ts
-import { Epub } from "@storyteller-platform/epub/node"
+import { Epub } from "@storyteller/epub"
 
 const epub = await Epub.from("path/to/book.epub")
 await epub.setTitle("S'mores for Everyone")
 
-await epub.writeToFile("path/to/updated.epub")
-```
-
-### Writing to a byte array
-
-```ts
-import { randomUUID } from "node:crypto"
-
-import { Epub } from "@storyteller-platform/epub"
-
-const epub = await Epub.create({
-  title: "S'mores For Everyone",
-  language: new Intl.Locale("en-US"),
-  identifier: randomUUID(),
-})
-
-const data: Uint8Array = await epub.writeToArray()
+await epub.saveAndClose()
 ```
 
 For more details about using the API, see the [API documentation](#epub).
+
+### Upgrading an EPUB 2 to EPUB 3
+
+This library only supports operations on EPUB 3 files and will throw an error if
+you attempt to load an EPUB 2 file.
+
+However, it does support upgrading an EPUB 2 file to EPUB 3, after which you can
+use the library like normal.
+
+```ts
+import { Epub } from "@storyteller/epub"
+
+using epub = await Epub.upgrade("path/to/epub2.epub", {
+  // optional. if omitted the Epub
+  outputPath: "path/to/epub3.epub",
+})
+
+// if .saveAndClose() is not called and `outputPath` isn't provided, the Epub will return to it's unupgraded state
+await epub.saveAndClose()
+
+// Do Epub stuff
+```
+
+### Browser support
+
+This library is designed to be used in both Node.js and browser environments.
+
+In the browser, currently you can only use the `MemoryAdapter` to read EPUB
+files.
+
+```tsx
+import { useState, useEffect } from "react"
+
+import { Epub, type EpubReader, MemoryAdapter } from "@storyteller/epub"
+
+export function BookCover(file: File) {
+  const [cover, setCover] = useState<string | null>(null)
+
+  useEffect(() => {
+    let epub: EpubReader | null = null
+    let coverUrl: string | null = null
+
+    async function loadCover() {
+      // unfortunately Safari does not support `using` syntax yet
+      try {
+        epub = await Epub.using(MemoryAdapter).from(file)
+        const cover = await epub.getCoverImage()
+        if (cover) {
+          coverUrl = URL.createObjectURL(new Blob([new Uint8Array(cover)]))
+          setCover(coverUrl)
+        }
+      } finally {
+        epub?.discardAndClose()
+      }
+    }
+
+    loadCover()
+
+    return () => {
+      if (coverUrl) {
+        URL.revokeObjectURL(coverUrl)
+      }
+    }
+  }, [file])
+
+  return cover ? <img src={cover} alt="Cover" /> : null
+}
+```
+
+Note that doing a bare `Epub.from` will result in an error.
 
 ## Development
 
 This package lives in the
 [Storyteller monorepo](https://gitlab.com/storyteller-platform/storyteller), and
 is developed alongside the
-[Storyteller platform](https://storyteller-platform.gitlab.io/storyteller).
+[Storyteller platform](https://storyteller-platform.dev).
 
 To get started with developing in the Storyteller monorepo, check out the
-[development guides in the docs](https://storyteller-platform.gitlab.io/storyteller/docs/category/development).
+[development guides in the docs](https://storyteller-platform.dev/docs/category/development).
 
 ## API Docs
 
 ## Epub
 
-Defined in:
-[libraries/epub/index.ts:327](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L327)
+Defined in: [libraries/epub/src/index.tsx:380](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L380)
 
 A single EPUB instance.
 
@@ -229,26 +302,20 @@ The entire EPUB contents will be read into memory.
 Example usage:
 
 ```ts
-import {
-  Epub,
-  getBody,
-  findByName,
-  textContent,
-} from "@storyteller-platform/epub"
+import { Epub, getBody, findByName, textContent } from "@storyteller/epub";
 
-const epub = await Epub.from("./path/to/book.epub")
-const title = await epub.getTitle()
-const spineItems = await epub.getSpineItems()
-const chptOne = spineItems[0]
-const chptOneXml = await epub.readXhtmlItemContents(chptOne.id)
+using epub = await Epub.from("./path/to/book.epub");
+const title = await epub.getTitle();
+const spineItems = await epub.getSpineItems();
+const chptOne = spineItems[0];
+const chptOneXml = await epub.readXhtmlItemContents(chptOne.id);
 
-const body = getBody(chptOneXml)
-const h1 = Epub.findXmlChildByName("h1", body)
-const headingText = textContent(h1)
+const body = getBody(chptOneXml);
+const h1 = findXmlChildByName("h1", body);
+const headingText = textContent(h1);
 
-await epub.setTitle(headingText)
-await epub.writeToFile("./path/to/updated.epub")
-await epub.close()
+await epub.setTitle(headingText);
+await epub.saveAndClose();
 ```
 
 ### Link
@@ -259,16 +326,14 @@ https://www.w3.org/TR/epub-33/
 
 #### Constructor
 
-> **new Epub**(`adapterClass`, `adapter`, `inputPath`, `readonlyOverride`):
-> [`Epub`](#epub)
+> **new Epub**(`adapterClass`, `adapter`, `inputPath`, `readonlyOverride`): [`Epub`](#epub)
 
-Defined in:
-[libraries/epub/index.ts:593](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L593)
+Defined in: [libraries/epub/src/index.tsx:423](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L423)
 
 Prefer the static factories ([Epub.using](#using), [Epub.from](#from),
 [Epub.create](#create), [Epub.upgrade](#upgrade)) over calling this constructor
-directly. It's public so [EpubFactory](#epubfactory) can construct instances;
-nothing else should need to.
+directly. It's public so [EpubFactory](#epubfactory) can construct instances; nothing
+else should need to.
 
 ##### Parameters
 
@@ -276,7 +341,7 @@ nothing else should need to.
 | ------------------ | ----------------------------------------------------- | ------------- |
 | `adapterClass`     | [`EpubStorageAdapterClass`](#epubstorageadapterclass) | `undefined`   |
 | `adapter`          | [`EpubStorageAdapter`](#epubstorageadapter)           | `undefined`   |
-| `inputPath`        | `undefined` \| `string`                               | `undefined`   |
+| `inputPath`        | `string` \| `undefined`                               | `undefined`   |
 | `readonlyOverride` | `boolean`                                             | `false`       |
 
 ##### Returns
@@ -289,71 +354,51 @@ nothing else should need to.
 
 > `protected` **adapter**: [`EpubStorageAdapter`](#epubstorageadapter)
 
-Defined in:
-[libraries/epub/index.ts:595](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L595)
+Defined in: [libraries/epub/src/index.tsx:425](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L425)
 
 #### adapterClass
 
-> `protected` **adapterClass**:
-> [`EpubStorageAdapterClass`](#epubstorageadapterclass)
+> `protected` **adapterClass**: [`EpubStorageAdapterClass`](#epubstorageadapterclass)
 
-Defined in:
-[libraries/epub/index.ts:594](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L594)
+Defined in: [libraries/epub/src/index.tsx:424](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L424)
 
 #### inputPath
 
-> `protected` **inputPath**: `undefined` \| `string`
+> `protected` **inputPath**: `string` \| `undefined`
 
-Defined in:
-[libraries/epub/index.ts:596](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L596)
+Defined in: [libraries/epub/src/index.tsx:426](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L426)
 
 #### readonlyOverride
 
 > `protected` **readonlyOverride**: `boolean` = `false`
 
-Defined in:
-[libraries/epub/index.ts:597](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L597)
+Defined in: [libraries/epub/src/index.tsx:427](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L427)
 
 #### storage
 
 > `readonly` **storage**: [`EpubStorageKind`](#epubstoragekind)
 
-Defined in:
-[libraries/epub/index.ts:585](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L585)
+Defined in: [libraries/epub/src/index.tsx:415](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L415)
 
 Storage backend kind in use for this instance
 
-Public so callers can declare type-level requirements via
-[InMemoryEpubReader](#inmemoryepubreader) Orthogonal to the read-only / writable
-axis (controlled by `readonlyOverride` and the adapter's capability bag)
+Public so callers can declare type-level requirements via [InMemoryEpubReader](#inmemoryepubreader)
+Orthogonal to the read-only / writable axis (controlled by `readonlyOverride`
+and the adapter's capability bag)
 
-#### xhtmlBuilder
+### Accessors
 
-> `static` **xhtmlBuilder**: `XMLBuilder`
+#### adapterRootPath
 
-Defined in:
-[libraries/epub/index.ts:375](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L375)
+##### Get Signature
 
-#### xhtmlParser
+> **get** **adapterRootPath**(): `string` \| `null`
 
-> `static` **xhtmlParser**: `XMLParser`
+Defined in: [libraries/epub/src/index.tsx:520](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L520)
 
-Defined in:
-[libraries/epub/index.ts:335](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L335)
+###### Returns
 
-#### xmlBuilder
-
-> `static` **xmlBuilder**: `XMLBuilder`
-
-Defined in:
-[libraries/epub/index.ts:368](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L368)
-
-#### xmlParser
-
-> `static` **xmlParser**: `XMLParser`
-
-Defined in:
-[libraries/epub/index.ts:328](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L328)
+`string` \| `null`
 
 ### Methods
 
@@ -361,8 +406,7 @@ Defined in:
 
 > **\[dispose\]**(): `void`
 
-Defined in:
-[libraries/epub/index.ts:3521](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3521)
+Defined in: [libraries/epub/src/index.tsx:3491](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3491)
 
 ##### Returns
 
@@ -372,13 +416,13 @@ Defined in:
 
 > **addCollection**(`collection`, `index?`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:2219](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2219)
+Defined in: [libraries/epub/src/index.tsx:2038](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2038)
 
 Add a collection to the EPUB metadata.
 
-If index is provided, the collection will be placed at that index in the list of
-collections. Otherwise, it will be added to the end of the list.
+If index is provided, the collection will be placed at
+that index in the list of collections. Otherwise, it
+will be added to the end of the list.
 
 ##### Parameters
 
@@ -395,13 +439,13 @@ collections. Otherwise, it will be added to the end of the list.
 
 > **addContributor**(`contributor`, `index?`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:2564](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2564)
+Defined in: [libraries/epub/src/index.tsx:2347](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2347)
 
 Add a contributor to the EPUB metadata.
 
-If index is provided, the creator will be placed at that index in the list of
-creators. Otherwise, it will be added to the end of the list.
+If index is provided, the creator will be placed at
+that index in the list of creators. Otherwise, it
+will be added to the end of the list.
 
 This is a convenience method for
 `epub.addCreator(contributor, index, 'contributor')`.
@@ -425,13 +469,13 @@ https://www.w3.org/TR/epub-33/#sec-opf-dccreator
 
 > **addCreator**(`creator`, `index?`, `type?`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:2409](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2409)
+Defined in: [libraries/epub/src/index.tsx:2212](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2212)
 
 Add a creator to the EPUB metadata.
 
-If index is provided, the creator will be placed at that index in the list of
-creators. Otherwise, it will be added to the end of the list.
+If index is provided, the creator will be placed at
+that index in the list of creators. Otherwise, it
+will be added to the end of the list.
 
 ##### Parameters
 
@@ -455,17 +499,17 @@ https://www.w3.org/TR/epub-33/#sec-opf-dccreator
 
 > **addManifestItem**(`item`, `contents`, `encoding`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:3107](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3107)
+Defined in: [libraries/epub/src/index.tsx:3087](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3087)
 
-Create a new manifest item and write its contents to a new entry.
+Create a new manifest item and write its contents to a
+new entry.
 
 ###### Parameters
 
 | Parameter  | Type                            | Description                                                                                                                 |
 | ---------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `item`     | [`ManifestItem`](#manifestitem) | -                                                                                                                           |
-| `contents` | [`ParsedXml`](#parsedxml)       | The new contents. May be either a parsed XML tree or a unicode string, as determined by the `as` argument.                  |
+| `contents` | [`Document`](#document-1)       | The new contents. May be either a parsed XML tree or a unicode string, as determined by the `as` argument.                  |
 | `encoding` | `"xml"`                         | Optional - whether to interpret contents as a parsed XML tree, a unicode string, or a byte array. Defaults to a byte array. |
 
 ###### Returns
@@ -484,10 +528,10 @@ https://www.w3.org/TR/epub-33/#sec-contentdocs
 
 > **addManifestItem**(`item`, `contents`, `encoding`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:3112](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3112)
+Defined in: [libraries/epub/src/index.tsx:3092](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3092)
 
-Create a new manifest item and write its contents to a new entry.
+Create a new manifest item and write its contents to a
+new entry.
 
 ###### Parameters
 
@@ -513,10 +557,10 @@ https://www.w3.org/TR/epub-33/#sec-contentdocs
 
 > **addManifestItem**(`item`, `contents`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:3117](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3117)
+Defined in: [libraries/epub/src/index.tsx:3097](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3097)
 
-Create a new manifest item and write its contents to a new entry.
+Create a new manifest item and write its contents to a
+new entry.
 
 ###### Parameters
 
@@ -541,14 +585,14 @@ https://www.w3.org/TR/epub-33/#sec-contentdocs
 
 > **addMetadata**(`entry`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:3228](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3228)
+Defined in: [libraries/epub/src/index.tsx:3224](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3224)
 
 Add a new metadata entry to the Epub.
 
-This method, like `epub.getMetadata()`, operates on metadata entries. For more
-useful semantic representations of metadata, use specific methods such as
-`setTitle()` and `setLanguage()`.
+This method, like `epub.getMetadata()`, operates on
+metadata entries. For more useful semantic representations
+of metadata, use specific methods such as `setTitle()` and
+`setLanguage()`.
 
 ##### Parameters
 
@@ -566,25 +610,28 @@ https://www.w3.org/TR/epub-33/#sec-pkg-metadata
 
 #### addSpineItem()
 
-> **addSpineItem**(`manifestId`, `index?`): `Promise`\<`void`\>
+> **addSpineItem**(`manifestId`, `index?`, `options?`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:2618](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2618)
+Defined in: [libraries/epub/src/index.tsx:2474](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2474)
 
 Add an item to the spine of the EPUB.
 
-If `index` is undefined, the item will be added to the end of the spine.
-Otherwise it will be inserted at the specified index.
+If `index` is undefined, the item will be added
+to the end of the spine. Otherwise it will be
+inserted at the specified index.
 
-If the manifestId does not correspond to an item in the manifest, this will
-throw an error.
+If the manifestId does not correspond to an item
+in the manifest, this will throw an error.
 
 ##### Parameters
 
-| Parameter    | Type     |
-| ------------ | -------- |
-| `manifestId` | `string` |
-| `index?`     | `number` |
+| Parameter                  | Type                                                        |
+| -------------------------- | ----------------------------------------------------------- |
+| `manifestId`               | `string`                                                    |
+| `index?`                   | `number`                                                    |
+| `options?`                 | \{ `linear?`: `boolean`; `spineProperties?`: `string`[]; \} |
+| `options.linear?`          | `boolean`                                                   |
+| `options.spineProperties?` | `string`[]                                                  |
 
 ##### Returns
 
@@ -598,8 +645,7 @@ https://www.w3.org/TR/epub-33/#sec-spine-elem
 
 > **addSubject**(`subject`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:1748](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1748)
+Defined in: [libraries/epub/src/index.tsx:1583](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1583)
 
 Add a subject to the EPUB metadata.
 
@@ -621,8 +667,7 @@ https://www.w3.org/TR/epub-33/#sec-opf-dcsubject
 
 > **copy**(`path?`): `Promise`\<[`Epub`](#epub)\>
 
-Defined in:
-[libraries/epub/index.ts:690](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L690)
+Defined in: [libraries/epub/src/index.tsx:524](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L524)
 
 ##### Parameters
 
@@ -636,34 +681,48 @@ Defined in:
 
 #### createXhtmlDocument()
 
-> **createXhtmlDocument**(`body`, `head?`, `language?`):
-> `Promise`\<([`XmlElement`](#xmlelement)\<`"?xml"`\> \|
-> [`XmlElement`](#xmlelement)\<`"html"`\>)[]\>
+> **createXhtmlDocument**(`body`, `head?`, `language?`): `Promise`\<[`Document`](#document-1)\>
 
-Defined in:
-[libraries/epub/index.ts:2924](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2924)
+Defined in: [libraries/epub/src/index.tsx:2882](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2882)
 
-Create a new XHTML document with the given body and head.
+Create a new XHTML document with the given body
+and head.
 
 ##### Parameters
 
-| Parameter   | Type                      | Description                                        |
-| ----------- | ------------------------- | -------------------------------------------------- |
-| `body`      | [`ParsedXml`](#parsedxml) | The XML nodes to place in the body of the document |
-| `head?`     | [`ParsedXml`](#parsedxml) | Optional - the XMl nodes to place in the head      |
-| `language?` | `Locale`                  | Optional - defaults to the EPUB's language         |
+| Parameter   | Type                | Description                                        |
+| ----------- | ------------------- | -------------------------------------------------- |
+| `body`      | [`Node`](#node-1)[] | The XML nodes to place in the body of the document |
+| `head?`     | [`Node`](#node-1)[] | Optional - the XMl nodes to place in the head      |
+| `language?` | `Locale`            | Optional - defaults to the EPUB's language         |
 
 ##### Returns
 
-`Promise`\<([`XmlElement`](#xmlelement)\<`"?xml"`\> \|
-[`XmlElement`](#xmlelement)\<`"html"`\>)[]\>
+`Promise`\<[`Document`](#document-1)\>
+
+#### createXmlDocument()
+
+> **createXmlDocument**(`root`): [`Document`](#document-1)
+
+Defined in: [libraries/epub/src/index.tsx:2846](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2846)
+
+Create a new XML document with the given root node.
+
+##### Parameters
+
+| Parameter | Type                    | Description                                 |
+| --------- | ----------------------- | ------------------------------------------- |
+| `root`    | [`Element`](#element-1) | The XML node to use as the document element |
+
+##### Returns
+
+[`Document`](#document-1)
 
 #### discardAndClose()
 
 > **discardAndClose**(): `void`
 
-Defined in:
-[libraries/epub/index.ts:3471](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3471)
+Defined in: [libraries/epub/src/index.tsx:3441](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3441)
 
 ##### Returns
 
@@ -671,13 +730,12 @@ Defined in:
 
 #### findAllMetadataItems()
 
-> **findAllMetadataItems**(`predicate`): `Promise`\<`object`[]\>
+> **findAllMetadataItems**(`predicate`): `Promise`\<[`MetadataEntry`](#metadataentry)[]\>
 
-Defined in:
-[libraries/epub/index.ts:955](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L955)
+Defined in: [libraries/epub/src/index.tsx:830](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L830)
 
-Returns the item in the metadata element's children array that matches the
-provided predicate.
+Returns the item in the metadata element's children array
+that matches the provided predicate.
 
 ##### Parameters
 
@@ -687,37 +745,16 @@ provided predicate.
 
 ##### Returns
 
-`Promise`\<`object`[]\>
+`Promise`\<[`MetadataEntry`](#metadataentry)[]\>
 
 #### findMetadataItem()
 
-> **findMetadataItem**(`predicate`): `Promise`\<`null` \| \{ `id`: `undefined`
-> \| `string`; `properties`: \{[`k`: `string`]: `string`; \}; `type`:
-> `` `r${string}` `` \| `` `a${string}` `` \| `` `b${string}` `` \|
-> `` `c${string}` `` \| `` `d${string}` `` \| `` `e${string}` `` \|
-> `` `f${string}` `` \| `` `g${string}` `` \| `` `h${string}` `` \|
-> `` `i${string}` `` \| `` `j${string}` `` \| `` `k${string}` `` \|
-> `` `l${string}` `` \| `` `m${string}` `` \| `` `n${string}` `` \|
-> `` `o${string}` `` \| `` `p${string}` `` \| `` `q${string}` `` \|
-> `` `s${string}` `` \| `` `t${string}` `` \| `` `u${string}` `` \|
-> `` `v${string}` `` \| `` `w${string}` `` \| `` `x${string}` `` \|
-> `` `y${string}` `` \| `` `z${string}` `` \| `` `R${string}` `` \|
-> `` `A${string}` `` \| `` `B${string}` `` \| `` `C${string}` `` \|
-> `` `D${string}` `` \| `` `E${string}` `` \| `` `F${string}` `` \|
-> `` `G${string}` `` \| `` `H${string}` `` \| `` `I${string}` `` \|
-> `` `J${string}` `` \| `` `K${string}` `` \| `` `L${string}` `` \|
-> `` `M${string}` `` \| `` `N${string}` `` \| `` `O${string}` `` \|
-> `` `P${string}` `` \| `` `Q${string}` `` \| `` `S${string}` `` \|
-> `` `T${string}` `` \| `` `U${string}` `` \| `` `V${string}` `` \|
-> `` `W${string}` `` \| `` `X${string}` `` \| `` `Y${string}` `` \|
-> `` `Z${string}` `` \| `` `?${string}` ``; `value`: `undefined` \| `string`;
-> \}\>
+> **findMetadataItem**(`predicate`): `Promise`\<[`MetadataEntry`](#metadataentry) \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:946](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L946)
+Defined in: [libraries/epub/src/index.tsx:821](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L821)
 
-Returns the item in the metadata element's children array that matches the
-provided predicate.
+Returns the item in the metadata element's children array
+that matches the provided predicate.
 
 ##### Parameters
 
@@ -727,37 +764,18 @@ provided predicate.
 
 ##### Returns
 
-`Promise`\<`null` \| \{ `id`: `undefined` \| `string`; `properties`: \{[`k`:
-`string`]: `string`; \}; `type`: `` `r${string}` `` \| `` `a${string}` `` \|
-`` `b${string}` `` \| `` `c${string}` `` \| `` `d${string}` `` \|
-`` `e${string}` `` \| `` `f${string}` `` \| `` `g${string}` `` \|
-`` `h${string}` `` \| `` `i${string}` `` \| `` `j${string}` `` \|
-`` `k${string}` `` \| `` `l${string}` `` \| `` `m${string}` `` \|
-`` `n${string}` `` \| `` `o${string}` `` \| `` `p${string}` `` \|
-`` `q${string}` `` \| `` `s${string}` `` \| `` `t${string}` `` \|
-`` `u${string}` `` \| `` `v${string}` `` \| `` `w${string}` `` \|
-`` `x${string}` `` \| `` `y${string}` `` \| `` `z${string}` `` \|
-`` `R${string}` `` \| `` `A${string}` `` \| `` `B${string}` `` \|
-`` `C${string}` `` \| `` `D${string}` `` \| `` `E${string}` `` \|
-`` `F${string}` `` \| `` `G${string}` `` \| `` `H${string}` `` \|
-`` `I${string}` `` \| `` `J${string}` `` \| `` `K${string}` `` \|
-`` `L${string}` `` \| `` `M${string}` `` \| `` `N${string}` `` \|
-`` `O${string}` `` \| `` `P${string}` `` \| `` `Q${string}` `` \|
-`` `S${string}` `` \| `` `T${string}` `` \| `` `U${string}` `` \|
-`` `V${string}` `` \| `` `W${string}` `` \| `` `X${string}` `` \|
-`` `Y${string}` `` \| `` `Z${string}` `` \| `` `?${string}` ``; `value`:
-`undefined` \| `string`; \}\>
+`Promise`\<[`MetadataEntry`](#metadataentry) \| `null`\>
 
 #### getBaseDirection()
 
 > **getBaseDirection**(): `Promise`\<`"auto"` \| `"rtl"` \| `"ltr"`\>
 
-Defined in:
-[libraries/epub/index.ts:1702](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1702)
+Defined in: [libraries/epub/src/index.tsx:1537](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1537)
 
 Retrieve the base direction from the package element.
 
-If there is no `dir` attribute on the package element, returns 'auto'.
+If there is no `dir` attribute on the package element,
+returns 'auto'.
 
 ##### Returns
 
@@ -771,8 +789,7 @@ https://www.w3.org/TR/epub-33/#attrdef-dir
 
 > **getCollections**(): `Promise`\<[`Collection`](#collection)[]\>
 
-Defined in:
-[libraries/epub/index.ts:2179](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2179)
+Defined in: [libraries/epub/src/index.tsx:1998](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1998)
 
 Retrieve the list of collections.
 
@@ -784,12 +801,12 @@ Retrieve the list of collections.
 
 > **getContributors**(): `Promise`\<[`DcCreator`](#dccreator)[]\>
 
-Defined in:
-[libraries/epub/index.ts:2396](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2396)
+Defined in: [libraries/epub/src/index.tsx:2199](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2199)
 
 Retrieve the list of contributors.
 
-This is a convenience method for `epub.getCreators('contributor')`.
+This is a convenience method for
+`epub.getCreators('contributor')`.
 
 ##### Returns
 
@@ -801,19 +818,19 @@ https://www.w3.org/TR/epub-33/#sec-opf-dccontributor
 
 #### getCoverImage()
 
-> **getCoverImage**(): `Promise`\<`null` \| `Uint8Array`\<`ArrayBufferLike`\>\>
+> **getCoverImage**(): `Promise`\<`Uint8Array`\<`ArrayBufferLike`\> \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:1598](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1598)
+Defined in: [libraries/epub/src/index.tsx:1433](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1433)
 
 Retrieve the cover image data as a byte array.
 
-This does not include, for example, the cover image's filename or mime type. To
-retrieve the image manifest item, use epub.getCoverImageItem().
+This does not include, for example, the cover image's
+filename or mime type. To retrieve the image manifest
+item, use epub.getCoverImageItem().
 
 ##### Returns
 
-`Promise`\<`null` \| `Uint8Array`\<`ArrayBufferLike`\>\>
+`Promise`\<`Uint8Array`\<`ArrayBufferLike`\> \| `null`\>
 
 ##### Link
 
@@ -821,20 +838,20 @@ https://www.w3.org/TR/epub-33/#sec-cover-image
 
 #### getCoverImageItem()
 
-> **getCoverImageItem**(): `Promise`\<`null` \|
-> [`ManifestItem`](#manifestitem)\>
+> **getCoverImageItem**(): `Promise`\<[`ManifestItem`](#manifestitem) \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:1579](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1579)
+Defined in: [libraries/epub/src/index.tsx:1414](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1414)
 
 Retrieve the cover image manifest item.
 
-This does not return the actual image data. To retrieve the image data, pass
-this item's id to epub.readItemContents, or use epub.getCoverImage() instead.
+This does not return the actual image data. To
+retrieve the image data, pass this item's id to
+epub.readItemContents, or use epub.getCoverImage()
+instead.
 
 ##### Returns
 
-`Promise`\<`null` \| [`ManifestItem`](#manifestitem)\>
+`Promise`\<[`ManifestItem`](#manifestitem) \| `null`\>
 
 ##### Link
 
@@ -844,8 +861,7 @@ https://www.w3.org/TR/epub-33/#sec-cover-image
 
 > **getCreators**(`type`): `Promise`\<[`DcCreator`](#dccreator)[]\>
 
-Defined in:
-[libraries/epub/index.ts:2332](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2332)
+Defined in: [libraries/epub/src/index.tsx:2135](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2135)
 
 Retrieve the list of creators.
 
@@ -865,51 +881,84 @@ https://www.w3.org/TR/epub-33/#sec-opf-dccreator
 
 #### getDescription()
 
-> **getDescription**(): `Promise`\<`null` \| `string`\>
+> **getDescription**(): `Promise`\<`string` \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:2030](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2030)
+Defined in: [libraries/epub/src/index.tsx:1856](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1856)
 
-Retrieve the Epub's description as specified in its package document metadata.
+Retrieve the Epub's description as specified in its
+package document metadata.
 
-If no description metadata is specified, returns null. Returns the description
-as a string. Descriptions may include HTML markup.
+If no description metadata is specified, returns null.
+Returns the description as a string. Descriptions may
+include HTML markup.
 
 ##### Returns
 
-`Promise`\<`null` \| `string`\>
+`Promise`\<`string` \| `null`\>
+
+#### getEncryptionDocument()
+
+> **getEncryptionDocument**(): `Promise`\<[`Document`](#document-1) \| `null`\>
+
+Defined in: [libraries/epub/src/index.tsx:567](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L567)
+
+The XML Document for this EPUB's META-INF/encryption.xml.
+Null if no encryption document exists.
+
+##### Returns
+
+`Promise`\<[`Document`](#document-1) \| `null`\>
+
+##### See
+
+[https://www.w3.org/TR/epub/#sec-container-metainf-encryption.xml](https://www.w3.org/TR/epub/#sec-container-metainf-encryption.xml)
+
+#### getEncryptionSummary()
+
+> **getEncryptionSummary**(): `Promise`\<[`EncryptionSummary`](#encryptionsummary) \| `null`\>
+
+Defined in: [libraries/epub/src/index.tsx:586](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L586)
+
+A summary of the encryption information specified in this
+publication's META-INF/encryption.xml document.
+
+##### Returns
+
+`Promise`\<[`EncryptionSummary`](#encryptionsummary) \| `null`\>
+
+##### See
+
+[https://www.w3.org/TR/epub/#sec-container-metainf-encryption.xml](https://www.w3.org/TR/epub/#sec-container-metainf-encryption.xml)
 
 #### getGuideEntries()
 
-> **getGuideEntries**(): `Promise`\<`GuideItem`[]\>
+> **getGuideEntries**(): `Promise`\<[`GuideItem`](#guideitem)[]\>
 
-Defined in:
-[libraries/epub/index.ts:3448](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3448)
+Defined in: [libraries/epub/src/index.tsx:3424](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3424)
 
 Retrieve the guide entries from the package document.
 
-The guide element is deprecated in EPUB 3 in favor of the landmarks nav, but
-many publications still include it.
+The guide element is deprecated in EPUB 3 in favor of
+the landmarks nav, but many publications still include it.
 
 ##### Returns
 
-`Promise`\<`GuideItem`[]\>
+`Promise`\<[`GuideItem`](#guideitem)[]\>
 
 #### ~~getIdentifier()~~
 
-> **getIdentifier**(): `Promise`\<`null` \| `string`\>
+> **getIdentifier**(): `Promise`\<`string` \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:1053](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1053)
+Defined in: [libraries/epub/src/index.tsx:922](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L922)
 
-Retrieve the first identifier from the dc:identifier element in the EPUB
-metadata.
+Retrieve the first identifier from the dc:identifier element
+in the EPUB metadata.
 
 If there is no dc:identifier element, returns null.
 
 ##### Returns
 
-`Promise`\<`null` \| `string`\>
+`Promise`\<`string` \| `null`\>
 
 ##### Link
 
@@ -917,21 +966,20 @@ https://www.w3.org/TR/epub-33/#sec-opf-dcidentifier
 
 ##### Deprecated
 
-Use [getUniqueIdentifier](#getuniqueidentifier) instead to get the unique
-identifier, or [getIdentifiers](#getidentifiers) to get all identifiers.
+Use [getUniqueIdentifier](#getuniqueidentifier) instead to get the unique identifier,
+or [getIdentifiers](#getidentifiers) to get all identifiers.
 
 #### getIdentifiers()
 
 > **getIdentifiers**(): `Promise`\<[`EpubIdentifier`](#epubidentifier)[]\>
 
-Defined in:
-[libraries/epub/index.ts:1228](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1228)
+Defined in: [libraries/epub/src/index.tsx:1088](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1088)
 
 Retrieve every `dc:identifier` entry, returned as found.
 
-Values are not interpreted. Any refining `identifier-type` meta (spec D.3.8) or
-legacy `opf:scheme` attribute is surfaced on the entry, but no parsing of the
-value itself is attempted. To read `dc:source` entries, use
+Values are not interpreted. Any refining `identifier-type` meta (spec
+D.3.8) or legacy `opf:scheme` attribute is surfaced on the entry, but no
+parsing of the value itself is attempted. To read `dc:source` entries, use
 [getSources](#getsources).
 
 ##### Returns
@@ -946,11 +994,10 @@ https://www.w3.org/TR/epub-33/#sec-opf-dcidentifier
 
 > **getItemArchiveLength**(`id`): `Promise`\<`number`\>
 
-Defined in:
-[libraries/epub/index.ts:732](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L732)
+Defined in: [libraries/epub/src/index.tsx:550](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L550)
 
-Length of the underlying archive entry for a manifest item, in bytes Necessary
-to compute the readium page count which is for COMPRESSED content
+Length of the underlying archive entry for a manifest item, in bytes
+Necessary to compute the readium page count which is for COMPRESSED content
 
 ##### Parameters
 
@@ -968,13 +1015,12 @@ to compute the readium page count which is for COMPRESSED content
 
 #### getLandmarks()
 
-> **getLandmarks**(`__namedParameters`): `Promise`\<`null` \|
-> [`Navigation`](#navigation)\>
+> **getLandmarks**(`__namedParameters`): `Promise`\<[`Navigation`](#navigation) \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:2797](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2797)
+Defined in: [libraries/epub/src/index.tsx:2669](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2669)
 
-Returns the structured landmarks navigation document as a Navigation object
+Returns the structured landmarks navigation document
+as a Navigation object
 
 ##### Parameters
 
@@ -985,7 +1031,7 @@ Returns the structured landmarks navigation document as a Navigation object
 
 ##### Returns
 
-`Promise`\<`null` \| [`Navigation`](#navigation)\>
+`Promise`\<[`Navigation`](#navigation) \| `null`\>
 
 ##### Link
 
@@ -993,19 +1039,19 @@ https://www.w3.org/TR/epub-33/#sec-nav-landmarks
 
 #### getLanguage()
 
-> **getLanguage**(): `Promise`\<`null` \| `Locale`\>
+> **getLanguage**(): `Promise`\<`Locale` \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:1867](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1867)
+Defined in: [libraries/epub/src/index.tsx:1693](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1693)
 
-Retrieve the Epub's language as specified in its package document metadata.
+Retrieve the Epub's language as specified in its
+package document metadata.
 
-If no language metadata is specified, returns null. Returns the language as an
-Intl.Locale instance.
+If no language metadata is specified, returns null.
+Returns the language as an Intl.Locale instance.
 
 ##### Returns
 
-`Promise`\<`null` \| `Locale`\>
+`Promise`\<`Locale` \| `null`\>
 
 ##### Link
 
@@ -1015,10 +1061,10 @@ https://www.w3.org/TR/epub-33/#sec-opf-dclanguage
 
 > **getLayout**(): `Promise`\<`"pre-paginated"` \| `"reflowable"`\>
 
-Defined in:
-[libraries/epub/index.ts:1683](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1683)
+Defined in: [libraries/epub/src/index.tsx:1518](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1518)
 
-Retrieve the layout from the rendition:layout meta element in the EPUB metadata.
+Retrieve the layout from the rendition:layout meta element
+in the EPUB metadata.
 
 If there is no meta element, returns 'reflowable'.
 
@@ -1032,16 +1078,16 @@ https://www.w3.org/TR/epub-33/#layout
 
 #### getManifest()
 
-> **getManifest**(): `Promise`\<`Record`\<`string`,
-> [`ManifestItem`](#manifestitem)\>\>
+> **getManifest**(): `Promise`\<`Record`\<`string`, [`ManifestItem`](#manifestitem)\>\>
 
-Defined in:
-[libraries/epub/index.ts:871](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L871)
+Defined in: [libraries/epub/src/index.tsx:743](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L743)
 
 Retrieve the manifest for the Epub.
 
-This is represented as a map from each manifest items' id to the rest of its
-properties.
+This is represented as a map from each manifest items'
+id to the rest of its properties. Manifest hrefs are
+always URI-encoded (e.g. `chapter one.xhtml` -> `chapter%20one.xhtml`),
+even if the raw XML is (incorrectly) not URI-encoded.
 
 ##### Returns
 
@@ -1055,16 +1101,15 @@ https://www.w3.org/TR/epub-33/#sec-pkg-manifest
 
 > **getMetadata**(): `Promise`\<[`EpubMetadata`](#epubmetadata)\>
 
-Defined in:
-[libraries/epub/index.ts:1022](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1022)
+Defined in: [libraries/epub/src/index.tsx:890](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L890)
 
 Retrieve the metadata entries for the Epub.
 
-This is represented as an array of metadata entries, in the order that they're
-presented in the Epub package document.
+This is represented as an array of metadata entries,
+in the order that they're presented in the Epub package document.
 
-For more useful semantic representations of metadata, use specific methods such
-as `getTitle()` and `getAuthors()`.
+For more useful semantic representations of metadata, use
+specific methods such as `getTitle()` and `getAuthors()`.
 
 ##### Returns
 
@@ -1076,19 +1121,18 @@ https://www.w3.org/TR/epub-33/#sec-pkg-metadata
 
 #### getModifiedDate()
 
-> **getModifiedDate**(): `Promise`\<`null` \| `Date`\>
+> **getModifiedDate**(): `Promise`\<`Date` \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:1666](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1666)
+Defined in: [libraries/epub/src/index.tsx:1501](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1501)
 
-Retrieve the modified date from the dcterms:modified metadata in the EPUB
-metadata as a Date object.
+Retrieve the modified date from the dcterms:modified metadata
+in the EPUB metadata as a Date object.
 
 If there is no meta element with dcterms:modified, returns null.
 
 ##### Returns
 
-`Promise`\<`null` \| `Date`\>
+`Promise`\<`Date` \| `null`\>
 
 ##### Link
 
@@ -1098,41 +1142,63 @@ https://www.w3.org/TR/epub-33/#sec-metadata-last-modified
 
 > **getNcxTableOfContents**(): `Promise`\<[`NavigationList`](#navigationlist)\>
 
-Defined in:
-[libraries/epub/index.ts:3353](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3353)
+Defined in: [libraries/epub/src/index.tsx:3348](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3348)
 
-Parse the NCX table of contents, if one exists, and return a tree of TocEntry
-nodes.
+Parse the NCX table of contents, if one exists, and return
+a tree of TocEntry nodes.
 
-Useful for both EPUB 2 publications (where the NCX is the primary navigation)
-and EPUB 3 publications that retain an NCX for backwards compatibility.
+Useful for both EPUB 2 publications (where the NCX is the
+primary navigation) and EPUB 3 publications that retain an
+NCX for backwards compatibility.
 
 ##### Returns
 
 `Promise`\<[`NavigationList`](#navigationlist)\>
 
-#### getPackageElement()
+#### getPackageDocument()
 
-> **getPackageElement**():
-> `Promise`\<[`XmlElement`](#xmlelement)\<`"package"`\>\>
+> **getPackageDocument**(): `Promise`\<[`Document`](#document-1)\>
 
-Defined in:
-[libraries/epub/index.ts:806](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L806)
+Defined in: [libraries/epub/src/index.tsx:649](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L649)
 
 ##### Returns
 
-`Promise`\<[`XmlElement`](#xmlelement)\<`"package"`\>\>
+`Promise`\<[`Document`](#document-1)\>
+
+#### getPackageDocumentSource()
+
+> **getPackageDocumentSource**(): `Promise`\<`string`\>
+
+Defined in: [libraries/epub/src/index.tsx:637](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L637)
+
+##### Returns
+
+`Promise`\<`string`\>
+
+#### getPackageElement()
+
+> **getPackageElement**(`lock`): `Promise`\<[`Element`](#element-1)\>
+
+Defined in: [libraries/epub/src/index.tsx:660](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L660)
+
+##### Parameters
+
+| Parameter | Type      | Default value |
+| --------- | --------- | ------------- |
+| `lock`    | `boolean` | `true`        |
+
+##### Returns
+
+`Promise`\<[`Element`](#element-1)\>
 
 #### getPackageVocabularyPrefixes()
 
-> **getPackageVocabularyPrefixes**(): `Promise`\<`Record`\<`string`,
-> `string`\>\>
+> **getPackageVocabularyPrefixes**(): `Promise`\<`Record`\<`string`, `string`\>\>
 
-Defined in:
-[libraries/epub/index.ts:2047](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2047)
+Defined in: [libraries/epub/src/index.tsx:1873](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1873)
 
-Return the set of custom vocabulary prefixes set on this publication's root
-package element.
+Return the set of custom vocabulary prefixes set on this publication's
+root package element.
 
 Returns a map from prefix to URI
 
@@ -1146,21 +1212,20 @@ https://www.w3.org/TR/epub-33/#sec-prefix-attr
 
 #### getPageBreakSource()
 
-> **getPageBreakSource**(): `Promise`\<`null` \| [`EpubSource`](#epubsource)\>
+> **getPageBreakSource**(): `Promise`\<[`EpubSource`](#epubsource) \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:1265](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1265)
+Defined in: [libraries/epub/src/index.tsx:1125](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1125)
 
 Retrieve the `pageBreakSource` property (EPUB 3.4, spec D.2.9), the
 publication-level source for the source of its page break markers.
 
-This property replaces the refining `source-of="pagination"` meta (spec D.3.11),
-see EpubSource.sourceOf. If no `pageBreakSource` property is found, we fall back
-to finding a `dc:source` with a `source-of="pagination"` refinement.
+This property replaces the refining `source-of="pagination"` meta (spec
+D.3.11), see EpubSource.sourceOf. If no `pageBreakSource` property is found,
+we fall back to finding a `dc:source` with a `source-of="pagination"` refinement.
 
 ##### Returns
 
-`Promise`\<`null` \| [`EpubSource`](#epubsource)\>
+`Promise`\<[`EpubSource`](#epubsource) \| `null`\>
 
 ##### Link
 
@@ -1168,13 +1233,12 @@ https://www.w3.org/TR/epub/#pageBreakSource
 
 #### getPageList()
 
-> **getPageList**(`__namedParameters`): `Promise`\<`null` \|
-> [`Navigation`](#navigation)\>
+> **getPageList**(`__namedParameters`): `Promise`\<[`Navigation`](#navigation) \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:2809](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2809)
+Defined in: [libraries/epub/src/index.tsx:2681](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2681)
 
-Returns the structured page list navigation document as a Navigation object
+Returns the structured page list navigation document
+as a Navigation object
 
 ##### Parameters
 
@@ -1185,27 +1249,42 @@ Returns the structured page list navigation document as a Navigation object
 
 ##### Returns
 
-`Promise`\<`null` \| [`Navigation`](#navigation)\>
+`Promise`\<[`Navigation`](#navigation) \| `null`\>
 
 ##### Link
 
 https://www.w3.org/TR/epub-33/#sec-nav-landmarks
 
+#### getPageProgressionDirection()
+
+> **getPageProgressionDirection**(): `Promise`\<`"rtl"` \| `"ltr"` \| `"default"`\>
+
+Defined in: [libraries/epub/src/index.tsx:2425](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2425)
+
+Get the publication-level page progression direction
+
+##### Returns
+
+`Promise`\<`"rtl"` \| `"ltr"` \| `"default"`\>
+
+##### Link
+
+https://www.w3.org/TR/epub-33/#attrdef-spine-page-progression-direction
+
 #### getPublicationDate()
 
-> **getPublicationDate**(): `Promise`\<`null` \| `Date`\>
+> **getPublicationDate**(): `Promise`\<`Date` \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:1635](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1635)
+Defined in: [libraries/epub/src/index.tsx:1470](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1470)
 
-Retrieve the publication date from the dc:date element in the EPUB metadata as a
-Date object.
+Retrieve the publication date from the dc:date element
+in the EPUB metadata as a Date object.
 
 If there is no dc:date element, returns null.
 
 ##### Returns
 
-`Promise`\<`null` \| `Date`\>
+`Promise`\<`Date` \| `null`\>
 
 ##### Link
 
@@ -1215,8 +1294,7 @@ https://www.w3.org/TR/epub-33/#sec-opf-dcdate
 
 > **getRootfile**(): `Promise`\<`string`\>
 
-Defined in:
-[libraries/epub/index.ts:742](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L742)
+Defined in: [libraries/epub/src/index.tsx:594](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L594)
 
 ##### Returns
 
@@ -1226,13 +1304,12 @@ Defined in:
 
 > **getSources**(): `Promise`\<[`EpubSource`](#epubsource)[]\>
 
-Defined in:
-[libraries/epub/index.ts:1242](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1242)
+Defined in: [libraries/epub/src/index.tsx:1102](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1102)
 
 Retrieve every `dc:source` entry, returned as found.
 
-Like [getIdentifiers](#getidentifiers), values are not interpreted. In addition
-to a refining `identifier-type`, a refining `source-of` meta (spec D.3.11) is
+Like [getIdentifiers](#getidentifiers), values are not interpreted. In addition to a
+refining `identifier-type`, a refining `source-of` meta (spec D.3.11) is
 surfaced as `sourceOf`.
 
 ##### Returns
@@ -1245,19 +1322,18 @@ https://www.w3.org/TR/epub-33/#sec-opf-dcsource
 
 #### getSpineItems()
 
-> **getSpineItems**(): `Promise`\<[`ManifestItem`](#manifestitem)[]\>
+> **getSpineItems**(): `Promise`\<[`ManifestItem`](#manifestitem) & `object`[]\>
 
-Defined in:
-[libraries/epub/index.ts:2599](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2599)
+Defined in: [libraries/epub/src/index.tsx:2398](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2398)
 
 Retrieve the manifest items that make up the Epub's spine.
 
-The spine specifies the order that the contents of the Epub should be displayed
-to users by default.
+The spine specifies the order that the contents of the Epub
+should be displayed to users by default.
 
 ##### Returns
 
-`Promise`\<[`ManifestItem`](#manifestitem)[]\>
+`Promise`\<[`ManifestItem`](#manifestitem) & `object`[]\>
 
 ##### Link
 
@@ -1267,13 +1343,13 @@ https://www.w3.org/TR/epub-33/#sec-spine-elem
 
 > **getSubjects**(): `Promise`\<(`string` \| [`DcSubject`](#dcsubject))[]\>
 
-Defined in:
-[libraries/epub/index.ts:1822](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1822)
+Defined in: [libraries/epub/src/index.tsx:1648](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1648)
 
 Retrieve the list of subjects for this EPUB.
 
-Subjects without associated authority and term metadata will be returned as
-strings. Otherwise, they will be represented as DcSubject objects, with a value,
+Subjects without associated authority and term metadata
+will be returned as strings. Otherwise, they will
+be represented as DcSubject objects, with a value,
 authority, and term.
 
 ##### Returns
@@ -1286,16 +1362,15 @@ https://www.w3.org/TR/epub-33/#sec-opf-dcsubject
 
 #### getSubtitle()
 
-> **getSubtitle**(): `Promise`\<`null` \| `string`\>
+> **getSubtitle**(): `Promise`\<`string` \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:1937](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1937)
+Defined in: [libraries/epub/src/index.tsx:1763](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1763)
 
 Retrieve the subtitle of the Epub, if it exists.
 
 ##### Returns
 
-`Promise`\<`null` \| `string`\>
+`Promise`\<`string` \| `null`\>
 
 ##### Link
 
@@ -1303,14 +1378,12 @@ https://www.w3.org/TR/epub-33/#sec-opf-dctitle
 
 #### getTableOfContents()
 
-> **getTableOfContents**(`__namedParameters`): `Promise`\<`null` \|
-> [`Navigation`](#navigation)\>
+> **getTableOfContents**(`__namedParameters`): `Promise`\<[`Navigation`](#navigation) \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:2780](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2780)
+Defined in: [libraries/epub/src/index.tsx:2651](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2651)
 
-Returns the structured table of contents navigation document as a Navigation
-object.
+Returns the structured table of contents navigation document
+as a Navigation object.
 
 ##### Parameters
 
@@ -1321,7 +1394,7 @@ object.
 
 ##### Returns
 
-`Promise`\<`null` \| [`Navigation`](#navigation)\>
+`Promise`\<[`Navigation`](#navigation) \| `null`\>
 
 ##### Link
 
@@ -1329,10 +1402,9 @@ https://www.w3.org/TR/epub-33/#sec-nav-toc
 
 #### getTitle()
 
-> **getTitle**(`expanded`): `Promise`\<`null` \| `string`\>
+> **getTitle**(`expanded`): `Promise`\<`string` \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:1913](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1913)
+Defined in: [libraries/epub/src/index.tsx:1739](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1739)
 
 Retrieve the title of the Epub.
 
@@ -1344,7 +1416,7 @@ Retrieve the title of the Epub.
 
 ##### Returns
 
-`Promise`\<`null` \| `string`\>
+`Promise`\<`string` \| `null`\>
 
 ##### Link
 
@@ -1354,8 +1426,7 @@ https://www.w3.org/TR/epub-33/#sec-opf-dctitle
 
 > **getTitles**(): `Promise`\<`object`[]\>
 
-Defined in:
-[libraries/epub/index.ts:1949](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1949)
+Defined in: [libraries/epub/src/index.tsx:1775](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1775)
 
 Retrieve all title entries of the Epub.
 
@@ -1369,18 +1440,18 @@ https://www.w3.org/TR/epub-33/#sec-opf-dctitle
 
 #### getType()
 
-> **getType**(): `Promise`\<`null` \| [`MetadataEntry`](#metadataentry)\>
+> **getType**(): `Promise`\<[`MetadataEntry`](#metadataentry) \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:1735](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1735)
+Defined in: [libraries/epub/src/index.tsx:1570](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1570)
 
-Retrieve the publication type from the dc:type element in the EPUB metadata.
+Retrieve the publication type from the dc:type element
+in the EPUB metadata.
 
 If there is no dc:type element, returns null.
 
 ##### Returns
 
-`Promise`\<`null` \| [`MetadataEntry`](#metadataentry)\>
+`Promise`\<[`MetadataEntry`](#metadataentry) \| `null`\>
 
 ##### Link
 
@@ -1388,18 +1459,18 @@ https://www.w3.org/TR/epub-33/#sec-opf-dctype
 
 #### getUniqueIdentifier()
 
-> **getUniqueIdentifier**(): `Promise`\<`null` \| `string`\>
+> **getUniqueIdentifier**(): `Promise`\<`string` \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:1085](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1085)
+Defined in: [libraries/epub/src/index.tsx:954](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L954)
 
-Retrieve the identifier with the unique identifier id in the EPUB metadata.
+Retrieve the identifier with the unique identifier id
+in the EPUB metadata.
 
 If there is no unique identifier id, returns the first dc:identifier element.
 
 ##### Returns
 
-`Promise`\<`null` \| `string`\>
+`Promise`\<`string` \| `null`\>
 
 ##### Link
 
@@ -1407,17 +1478,16 @@ https://www.w3.org/TR/epub-33/#sec-opf-dcidentifier
 
 #### getUniqueIdentifierId()
 
-> **getUniqueIdentifierId**(): `Promise`\<`null` \| `string`\>
+> **getUniqueIdentifierId**(): `Promise`\<`string` \| `null`\>
 
-Defined in:
-[libraries/epub/index.ts:1166](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1166)
+Defined in: [libraries/epub/src/index.tsx:1026](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1026)
 
 Retrieve the id of the publication's unique identifier, as declared by the
 package element's `unique-identifier` attribute.
 
 ##### Returns
 
-`Promise`\<`null` \| `string`\>
+`Promise`\<`string` \| `null`\>
 
 ##### Link
 
@@ -1427,8 +1497,7 @@ https://www.w3.org/TR/epub-33/#sec-opf-dcidentifier
 
 > **getVersion**(): `Promise`\<`string`\>
 
-Defined in:
-[libraries/epub/index.ts:3340](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3340)
+Defined in: [libraries/epub/src/index.tsx:3335](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3335)
 
 Returns the EPUB version declared on the package element.
 
@@ -1440,16 +1509,14 @@ Returns the EPUB version declared on the package element.
 
 ##### Call Signature
 
-> **readFileContents**(`href`, `relativeTo?`):
-> `Promise`\<`Uint8Array`\<`ArrayBufferLike`\>\>
+> **readFileContents**(`href`, `relativeTo?`): `Promise`\<`Uint8Array`\<`ArrayBufferLike`\>\>
 
-Defined in:
-[libraries/epub/index.ts:2863](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2863)
+Defined in: [libraries/epub/src/index.tsx:2787](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2787)
 
 Retrieve the contents of a file, given its href.
 
-Optionally takes the href that this href should be resolved relative to, and an
-encoding parameter.
+Optionally takes the href that this href should be resolved relative to,
+and an encoding parameter.
 
 ###### Parameters
 
@@ -1466,20 +1533,19 @@ encoding parameter.
 
 > **readFileContents**(`href`, `relativeTo`, `encoding`): `Promise`\<`string`\>
 
-Defined in:
-[libraries/epub/index.ts:2864](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2864)
+Defined in: [libraries/epub/src/index.tsx:2788](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2788)
 
 Retrieve the contents of a file, given its href.
 
-Optionally takes the href that this href should be resolved relative to, and an
-encoding parameter.
+Optionally takes the href that this href should be resolved relative to,
+and an encoding parameter.
 
 ###### Parameters
 
 | Parameter    | Type                    | Description                                                                                                                                                        |
 | ------------ | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `href`       | `string`                | The href of the file to retrieve                                                                                                                                   |
-| `relativeTo` | `undefined` \| `string` | -                                                                                                                                                                  |
+| `relativeTo` | `string` \| `undefined` | -                                                                                                                                                                  |
 | `encoding`   | `"utf-8"`               | Optional - Must be the string "utf-8". If provided, the function will encode the data into a unicode string. Otherwise, the data will be returned as a byte array. |
 
 ###### Returns
@@ -1492,8 +1558,7 @@ encoding parameter.
 
 > **readItemContents**(`id`): `Promise`\<`Uint8Array`\<`ArrayBufferLike`\>\>
 
-Defined in:
-[libraries/epub/index.ts:2896](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2896)
+Defined in: [libraries/epub/src/index.tsx:2820](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2820)
 
 Retrieve the contents of a manifest item, given its id.
 
@@ -1515,8 +1580,7 @@ https://www.w3.org/TR/epub-33/#sec-contentdocs
 
 > **readItemContents**(`id`, `encoding`): `Promise`\<`string`\>
 
-Defined in:
-[libraries/epub/index.ts:2897](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2897)
+Defined in: [libraries/epub/src/index.tsx:2821](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2821)
 
 Retrieve the contents of a manifest item, given its id.
 
@@ -1539,10 +1603,9 @@ https://www.w3.org/TR/epub-33/#sec-contentdocs
 
 ##### Call Signature
 
-> **readXhtmlItemContents**(`id`, `as?`): `Promise`\<[`ParsedXml`](#parsedxml)\>
+> **readXhtmlItemContents**(`id`, `as?`): `Promise`\<[`Document`](#document-1)\>
 
-Defined in:
-[libraries/epub/index.ts:2959](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2959)
+Defined in: [libraries/epub/src/index.tsx:2932](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2932)
 
 Retrieves the contents of an XHTML item, given its manifest id.
 
@@ -1555,7 +1618,7 @@ Retrieves the contents of an XHTML item, given its manifest id.
 
 ###### Returns
 
-`Promise`\<[`ParsedXml`](#parsedxml)\>
+`Promise`\<[`Document`](#document-1)\>
 
 ###### Link
 
@@ -1565,8 +1628,7 @@ https://www.w3.org/TR/epub-33/#sec-xhtml
 
 > **readXhtmlItemContents**(`id`, `as`): `Promise`\<`string`\>
 
-Defined in:
-[libraries/epub/index.ts:2960](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2960)
+Defined in: [libraries/epub/src/index.tsx:2933](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2933)
 
 Retrieves the contents of an XHTML item, given its manifest id.
 
@@ -1589,13 +1651,12 @@ https://www.w3.org/TR/epub-33/#sec-xhtml
 
 > **removeCollection**(`index`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:2288](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2288)
+Defined in: [libraries/epub/src/index.tsx:2102](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2102)
 
 Remove a collection from the EPUB metadata.
 
-Removes the collection at the provided index. This index refers to the array
-returned by `epub.getCollections()`.
+Removes the collection at the provided index. This index
+refers to the array returned by `epub.getCollections()`.
 
 ##### Parameters
 
@@ -1611,15 +1672,15 @@ returned by `epub.getCollections()`.
 
 > **removeContributor**(`index`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:2548](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2548)
+Defined in: [libraries/epub/src/index.tsx:2331](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2331)
 
 Remove a contributor from the EPUB metadata.
 
-Removes the contributor at the provided index. This index refers to the array
-returned by `epub.getContributors()`.
+Removes the contributor at the provided index. This index
+refers to the array returned by `epub.getContributors()`.
 
-This is a convenience method for `epub.removeCreator(index, 'contributor')`.
+This is a convenience method for
+`epub.removeCreator(index, 'contributor')`.
 
 ##### Parameters
 
@@ -1639,13 +1700,12 @@ https://www.w3.org/TR/epub-33/#sec-opf-dccreator
 
 > **removeCreator**(`index`, `type`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:2496](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2496)
+Defined in: [libraries/epub/src/index.tsx:2294](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2294)
 
 Remove a creator from the EPUB metadata.
 
-Removes the creator at the provided index. This index refers to the array
-returned by `epub.getCreators()`.
+Removes the creator at the provided index. This index
+refers to the array returned by `epub.getCreators()`.
 
 ##### Parameters
 
@@ -1666,8 +1726,7 @@ https://www.w3.org/TR/epub-33/#sec-opf-dccreator
 
 > **removeManifestItem**(`id`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:3064](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3064)
+Defined in: [libraries/epub/src/index.tsx:3032](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3032)
 
 ##### Parameters
 
@@ -1683,13 +1742,13 @@ Defined in:
 
 > **removeMetadata**(`predicate`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:3312](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3312)
+Defined in: [libraries/epub/src/index.tsx:3310](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3310)
 
 Remove one or more metadata entries.
 
-The `predicate` argument will be used to determine which entries to remove. The
-all metadata entries that match the predicate will be removed.
+The `predicate` argument will be used to determine which entries
+to remove. The all metadata entries that match the
+predicate will be removed.
 
 ##### Parameters
 
@@ -1709,8 +1768,7 @@ https://www.w3.org/TR/epub-33/#sec-pkg-metadata
 
 > **removeSpineItem**(`index`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:2654](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2654)
+Defined in: [libraries/epub/src/index.tsx:2530](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2530)
 
 Remove the spine item at the specified index.
 
@@ -1732,13 +1790,12 @@ https://www.w3.org/TR/epub-33/#sec-spine-elem
 
 > **removeSubject**(`index`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:1785](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1785)
+Defined in: [libraries/epub/src/index.tsx:1620](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1620)
 
 Remove a subject from the EPUB metadata.
 
-Removes the subject at the provided index. This index refers to the array
-returned by `epub.getSubjects()`.
+Removes the subject at the provided index. This index
+refers to the array returned by `epub.getSubjects()`.
 
 ##### Parameters
 
@@ -1758,13 +1815,13 @@ https://www.w3.org/TR/epub-33/#sec-opf-dccreator
 
 > **replaceMetadata**(`predicate`, `entry`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:3267](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3267)
+Defined in: [libraries/epub/src/index.tsx:3259](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3259)
 
 Replace a metadata entry with a new one.
 
-The `predicate` argument will be used to determine which entry to replace. The
-first metadata entry that matches the predicate will be replaced.
+The `predicate` argument will be used to determine which entry
+to replace. The first metadata entry that matches the
+predicate will be replaced.
 
 ##### Parameters
 
@@ -1783,13 +1840,15 @@ https://www.w3.org/TR/epub-33/#sec-pkg-metadata
 
 #### resolveHref()
 
-> **resolveHref**(`href`, `relativeTo?`, `__namedParameters?`):
-> `Promise`\<`string`\>
+> **resolveHref**(`href`, `relativeTo?`, `__namedParameters?`): `Promise`\<`string`\>
 
-Defined in:
-[libraries/epub/index.ts:2835](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2835)
+Defined in: [libraries/epub/src/index.tsx:2745](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2745)
 
-Returns a path-relative-scheme-less URL, relative to the container root.
+Returns a path-relative-scheme-less URL, relative to the
+container root.
+
+An href that points outside the publication, such as an external link in
+a navigation document, is handed back unchanged.
 
 ##### Parameters
 
@@ -1808,13 +1867,14 @@ Returns a path-relative-scheme-less URL, relative to the container root.
 
 > **saveAndClose**(): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:3486](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3486)
+Defined in: [libraries/epub/src/index.tsx:3456](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3456)
 
-Write the current contents of the Epub to a new EPUB archive on disk.
+Write the current contents of the Epub to a new
+EPUB archive on disk.
 
-When this method is called, the "dcterms:modified" meta tag is automatically
-updated to the current UTC timestamp.
+When this method is called, the "dcterms:modified"
+meta tag is automatically updated to the current UTC
+timestamp.
 
 ##### Returns
 
@@ -1824,13 +1884,13 @@ updated to the current UTC timestamp.
 
 > **setCoverImage**(`href`, `data`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:1612](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1612)
+Defined in: [libraries/epub/src/index.tsx:1447](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1447)
 
 Set the cover image for the EPUB.
 
-Adds a manifest item with the `cover-image` property, per the EPUB 3 spec, and
-then writes the provided image data to the provided href within the publication.
+Adds a manifest item with the `cover-image` property, per
+the EPUB 3 spec, and then writes the provided image data to
+the provided href within the publication.
 
 ##### Parameters
 
@@ -1847,14 +1907,13 @@ then writes the provided image data to the provided href within the publication.
 
 > **setDescription**(`description`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:2014](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2014)
+Defined in: [libraries/epub/src/index.tsx:1840](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1840)
 
 Update the Epub's description metadata entry.
 
-Updates the existing dc:description element if one exists. Otherwise creates a
-new element. Any non-ASCII symbols, `&`, `<`, `>`, `"`, `'`, and ```` will be
-encoded as HTML entities.
+Updates the existing dc:description element if one exists.
+Otherwise creates a new element. Any non-ASCII symbols,
+`&`, `<`, `>`, `"`, `'`, and ```` will be encoded as HTML entities.
 
 ##### Parameters
 
@@ -1870,13 +1929,12 @@ encoded as HTML entities.
 
 > **setIdentifier**(`identifier`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:1069](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1069)
+Defined in: [libraries/epub/src/index.tsx:938](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L938)
 
 Set the dc:identifier metadata element with the provided string.
 
-Updates the existing dc:identifier element if one exists. Otherwise creates a
-new element
+Updates the existing dc:identifier element if one exists.
+Otherwise creates a new element
 
 ##### Parameters
 
@@ -1900,8 +1958,7 @@ Use [setUniqueIdentifier](#setuniqueidentifier) instead.
 
 > **setIdentifiers**(`identifiers`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:1334](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1334)
+Defined in: [libraries/epub/src/index.tsx:1194](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1194)
 
 Replace the publication's `dc:identifier` entries.
 
@@ -1915,10 +1972,10 @@ Identifiers are placed in the order they are provided.
 
 `dc:source` entries are not touched, use [setSources](#setsources) for those.
 
-When an entry has an `identifierType`, it is written in the refining form (a
-`meta` with `property="identifier-type"`, carrying the `scheme` attribute when
-provided). An entry with only a `scheme` is written using the legacy
-`opf:scheme` attribute.
+When an entry has an `identifierType`, it is written in the refining form
+(a `meta` with `property="identifier-type"`, carrying the `scheme`
+attribute when provided). An entry with only a `scheme` is written using
+the legacy `opf:scheme` attribute.
 
 ##### Parameters
 
@@ -1938,13 +1995,12 @@ https://www.w3.org/TR/epub-33/#sec-opf-dcidentifier
 
 > **setLanguage**(`locale`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:1896](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1896)
+Defined in: [libraries/epub/src/index.tsx:1722](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1722)
 
 Update the Epub's language metadata entry.
 
-Updates the existing dc:language element if one exists. Otherwise creates a new
-element
+Updates the existing dc:language element if one exists.
+Otherwise creates a new element
 
 ##### Parameters
 
@@ -1964,8 +2020,7 @@ https://www.w3.org/TR/epub-33/#sec-opf-dclanguage
 
 > **setPackageVocabularyPrefix**(`prefix`, `uri`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:2065](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2065)
+Defined in: [libraries/epub/src/index.tsx:1891](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1891)
 
 Set a custom vocabulary prefix on the root package element.
 
@@ -1988,8 +2043,7 @@ https://www.w3.org/TR/epub-33/#sec-prefix-attr
 
 > **setPageBreakSource**(`value`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:1301](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1301)
+Defined in: [libraries/epub/src/index.tsx:1161](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1161)
 
 Set the `pageBreakSource` property (EPUB 3.4, spec D.2.9), or remove it when
 passed null. Replaces an existing `pageBreakSource` meta if present.
@@ -2000,7 +2054,7 @@ Pass `none` to indicate the pagination is unique to this publication.
 
 | Parameter | Type               |
 | --------- | ------------------ |
-| `value`   | `null` \| `string` |
+| `value`   | `string` \| `null` |
 
 ##### Returns
 
@@ -2010,17 +2064,38 @@ Pass `none` to indicate the pagination is unique to this publication.
 
 https://www.w3.org/TR/epub/#pageBreakSource
 
+#### setPageProgressionDirection()
+
+> **setPageProgressionDirection**(`dir`): `Promise`\<`void`\>
+
+Defined in: [libraries/epub/src/index.tsx:2448](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2448)
+
+Set the publication-level page progression direction
+
+##### Parameters
+
+| Parameter | Type                              |
+| --------- | --------------------------------- |
+| `dir`     | `"default"` \| `"rtl"` \| `"ltr"` |
+
+##### Returns
+
+`Promise`\<`void`\>
+
+##### Link
+
+https://www.w3.org/TR/epub-33/#attrdef-spine-page-progression-direction
+
 #### setPublicationDate()
 
 > **setPublicationDate**(`date`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:1650](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1650)
+Defined in: [libraries/epub/src/index.tsx:1485](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1485)
 
 Set the dc:date metadata element with the provided date.
 
-Updates the existing dc:date element if one exists. Otherwise creates a new
-element
+Updates the existing dc:date element if one exists.
+Otherwise creates a new element
 
 ##### Parameters
 
@@ -2040,19 +2115,18 @@ https://www.w3.org/TR/epub-33/#sec-opf-dcdate
 
 > **setSources**(`sources`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:1452](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1452)
+Defined in: [libraries/epub/src/index.tsx:1299](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1299)
 
 Replace the publication's `dc:source` entries.
 
 This replaces ALL existing `dc:source` elements (and their refining
-`identifier-type` / `source-of` metas). `dc:identifier` entries are not touched;
-use [setIdentifiers](#setidentifiers) for those. Pass an empty array to remove
-all sources.
+`identifier-type` / `source-of` metas). `dc:identifier` entries are not
+touched; use [setIdentifiers](#setidentifiers) for those. Pass an empty array to
+remove all sources.
 
-When an entry has an `identifierType`, it is written in the refining form. A
-`sourceOf` value is written as a refining `source-of` meta (spec D.3.11). An
-entry with only a `scheme` uses the legacy `opf:scheme` attribute.
+When an entry has an `identifierType`, it is written in the refining form.
+A `sourceOf` value is written as a refining `source-of` meta (spec D.3.11).
+An entry with only a `scheme` uses the legacy `opf:scheme` attribute.
 
 ##### Parameters
 
@@ -2072,13 +2146,12 @@ https://www.w3.org/TR/epub-33/#sec-opf-dcsource
 
 > **setTitle**(`title`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:2089](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2089)
+Defined in: [libraries/epub/src/index.tsx:1927](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1927)
 
 Set the title of the Epub.
 
-This will replace all existing dc:title elements with this title. It will be
-given title-type "main".
+This will replace all existing dc:title elements with
+this title. It will be given title-type "main".
 
 To set specific titles and their types, use epub.setTitles().
 
@@ -2100,8 +2173,7 @@ https://www.w3.org/TR/epub-33/#sec-opf-dctitle
 
 > **setTitles**(`entries`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:2117](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L2117)
+Defined in: [libraries/epub/src/index.tsx:1949](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1949)
 
 ##### Parameters
 
@@ -2117,13 +2189,12 @@ Defined in:
 
 > **setType**(`type`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:1719](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1719)
+Defined in: [libraries/epub/src/index.tsx:1554](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L1554)
 
 Set the dc:type metadata element.
 
-Updates the existing dc:type element if one exists. Otherwise creates a new
-element.
+Updates the existing dc:type element if one exists.
+Otherwise creates a new element.
 
 ##### Parameters
 
@@ -2143,17 +2214,14 @@ https://www.w3.org/TR/epub-33/#sec-opf-dctype
 
 > **setUniqueIdentifier**(`identifier`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:1110](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L1110)
+Defined in: [libraries/epub/src/index.tsx:979](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L979)
 
 Set the unique identifier id for the EPUB.
 
-Updates the existing dc:identifier element referenced by the unique identifier
-id if one exists. Otherwise creates a new element with the provided identifier,
-and sets the unique identifier id to the new element's id.
+Updates the existing dc:identifier element referenced by the unique identifier id if one exists.
+Otherwise creates a new element with the provided identifier, and sets the unique identifier id to the new element's id.
 
-Note: you likely shouldn't change the unique identifier id unless you are
-producing a new EPUB.
+Note: you likely shouldn't change the unique identifier id unless you are producing a new EPUB.
 
 ##### Parameters
 
@@ -2173,13 +2241,12 @@ https://www.w3.org/TR/epub-33/#sec-opf-dcidentifier
 
 > **updateManifestItem**(`id`, `newItem`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:3179](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3179)
+Defined in: [libraries/epub/src/index.tsx:3175](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3175)
 
 Update the manifest entry for an existing item.
 
-To update the contents of an entry, use `epub.writeItemContents()` or
-`epub.writeXhtmlItemContents()`
+To update the contents of an entry, use `epub.writeItemContents()`
+or `epub.writeXhtmlItemContents()`
 
 ##### Parameters
 
@@ -2200,21 +2267,21 @@ https://www.w3.org/TR/epub-33/#sec-pkg-manifest
 
 > **withPackage**(`producer`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:832](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L832)
+Defined in: [libraries/epub/src/index.tsx:700](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L700)
 
 Safely modify the package document, without race conditions.
 
-Since the reading the package document is an async process, multiple
-simultaneously dispatched function calls that all attempt to modify it can
-clobber each other's changes. This method uses a mutex to ensure that each
-update runs exclusively.
+Since the reading the package document is an async process,
+multiple simultaneously dispatched function calls that all
+attempt to modify it can clobber each other's changes. This
+method uses a read/write lock to ensure that each update runs
+exclusively.
 
 ##### Parameters
 
-| Parameter  | Type                                                                                                                                                                                                             | Description                                                                                                                                                                              |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `producer` | (`packageElement`) => `void` \| (`packageElement`) => [`PackageElement`](#packageelement) \| (`packageElement`) => `Promise`\<[`PackageElement`](#packageelement)\> \| (`packageElement`) => `Promise`\<`void`\> | The function to update the package document. If it returns a new package document, that will be persisted, otherwise it will be assumed that the package document was modified in place. |
+| Parameter  | Type                                                                                                                                                                                     | Description                                                                                                                                                                              |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `producer` | (`packageElement`) => `void` \| (`packageElement`) => [`Element`](#element-1) \| (`packageElement`) => `Promise`\<[`Element`](#element-1)\> \| (`packageElement`) => `Promise`\<`void`\> | The function to update the package document. If it returns a new package document, that will be persisted, otherwise it will be assumed that the package document was modified in place. |
 
 ##### Returns
 
@@ -2226,13 +2293,13 @@ update runs exclusively.
 
 > **writeItemContents**(`id`, `contents`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:3016](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3016)
+Defined in: [libraries/epub/src/index.tsx:2988](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2988)
 
-Write new contents for an existing manifest item, specified by its id.
+Write new contents for an existing manifest item,
+specified by its id.
 
-The id must reference an existing manifest item. If creating a new item, use
-`epub.addManifestItem()` instead.
+The id must reference an existing manifest item. If
+creating a new item, use `epub.addManifestItem()` instead.
 
 ###### Parameters
 
@@ -2253,13 +2320,13 @@ https://www.w3.org/TR/epub-33/#sec-contentdocs
 
 > **writeItemContents**(`id`, `contents`, `encoding`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:3017](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3017)
+Defined in: [libraries/epub/src/index.tsx:2989](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L2989)
 
-Write new contents for an existing manifest item, specified by its id.
+Write new contents for an existing manifest item,
+specified by its id.
 
-The id must reference an existing manifest item. If creating a new item, use
-`epub.addManifestItem()` instead.
+The id must reference an existing manifest item. If
+creating a new item, use `epub.addManifestItem()` instead.
 
 ###### Parameters
 
@@ -2281,20 +2348,20 @@ https://www.w3.org/TR/epub-33/#sec-contentdocs
 
 > **writeXhtmlItemContents**(`id`, `contents`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:3056](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3056)
+Defined in: [libraries/epub/src/index.tsx:3028](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3028)
 
-Write new contents for an existing XHTML item, specified by its id.
+Write new contents for an existing XHTML item,
+specified by its id.
 
-The id must reference an existing manifest item. If creating a new item, use
-`epub.addManifestItem()` instead.
+The id must reference an existing manifest item. If
+creating a new item, use `epub.addManifestItem()` instead.
 
 ##### Parameters
 
 | Parameter  | Type                      | Description                                           |
 | ---------- | ------------------------- | ----------------------------------------------------- |
 | `id`       | `string`                  | The id of the manifest item to write new contents for |
-| `contents` | [`ParsedXml`](#parsedxml) | The new contents. Must be a parsed XML tree.          |
+| `contents` | [`Document`](#document-1) | The new contents. Must be a parsed XML tree.          |
 
 ##### Returns
 
@@ -2304,38 +2371,11 @@ The id must reference an existing manifest item. If creating a new item, use
 
 https://www.w3.org/TR/epub-33/#sec-xhtml
 
-#### addLinkToXhtmlHead()
-
-> `static` **addLinkToXhtmlHead**(`xml`, `link`): `void`
-
-Defined in:
-[libraries/epub/index.ts:405](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L405)
-
-Given an XML structure representing a complete XHTML document, add a `link`
-element to the `head` of the document.
-
-This method modifies the provided XML structure.
-
-##### Parameters
-
-| Parameter   | Type                                                       |
-| ----------- | ---------------------------------------------------------- |
-| `xml`       | [`ParsedXml`](#parsedxml)                                  |
-| `link`      | \{ `href`: `string`; `rel`: `string`; `type`: `string`; \} |
-| `link.href` | `string`                                                   |
-| `link.rel`  | `string`                                                   |
-| `link.type` | `string`                                                   |
-
-##### Returns
-
-`void`
-
 #### assertEpub3()
 
 > `static` **assertEpub3**(`epub`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/index.ts:680](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L680)
+Defined in: [libraries/epub/src/index.tsx:510](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L510)
 
 ##### Parameters
 
@@ -2349,14 +2389,13 @@ Defined in:
 
 #### create()
 
-> `static` **create**(`path`, `dublinCore`, `additionalMetadata`):
-> `Promise`\<[`Epub`](#epub)\>
+> `static` **create**(`path`, `dublinCore`, `additionalMetadata`): `Promise`\<[`Epub`](#epub)\>
 
-Defined in:
-[libraries/epub/index.ts:628](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L628)
+Defined in: [libraries/epub/src/index.tsx:458](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L458)
 
-Construct a new EPUB on a writable backend, optionally seeded with the provided
-metadata. Equivalent to `Epub.using(TmpFsAdapter).create(...)`.
+Construct a new EPUB on a writable backend, optionally seeded
+with the provided metadata. Equivalent to
+`Epub.using(TmpFsAdapter).create(...)`.
 
 ##### Parameters
 
@@ -2370,119 +2409,14 @@ metadata. Equivalent to `Epub.using(TmpFsAdapter).create(...)`.
 
 `Promise`\<[`Epub`](#epub)\>
 
-#### createXmlElement()
-
-> `static` **createXmlElement**\<`Name`\>(`name`, `properties`, `children`):
-> [`XmlElement`](#xmlelement)\<`Name`\>
-
-Defined in:
-[libraries/epub/index.ts:440](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L440)
-
-##### Type Parameters
-
-| Type Parameter                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Name` _extends_ `` `r${string}` `` \| `` `a${string}` `` \| `` `b${string}` `` \| `` `c${string}` `` \| `` `d${string}` `` \| `` `e${string}` `` \| `` `f${string}` `` \| `` `g${string}` `` \| `` `h${string}` `` \| `` `i${string}` `` \| `` `j${string}` `` \| `` `k${string}` `` \| `` `l${string}` `` \| `` `m${string}` `` \| `` `n${string}` `` \| `` `o${string}` `` \| `` `p${string}` `` \| `` `q${string}` `` \| `` `s${string}` `` \| `` `t${string}` `` \| `` `u${string}` `` \| `` `v${string}` `` \| `` `w${string}` `` \| `` `x${string}` `` \| `` `y${string}` `` \| `` `z${string}` `` \| `` `R${string}` `` \| `` `A${string}` `` \| `` `B${string}` `` \| `` `C${string}` `` \| `` `D${string}` `` \| `` `E${string}` `` \| `` `F${string}` `` \| `` `G${string}` `` \| `` `H${string}` `` \| `` `I${string}` `` \| `` `J${string}` `` \| `` `K${string}` `` \| `` `L${string}` `` \| `` `M${string}` `` \| `` `N${string}` `` \| `` `O${string}` `` \| `` `P${string}` `` \| `` `Q${string}` `` \| `` `S${string}` `` \| `` `T${string}` `` \| `` `U${string}` `` \| `` `V${string}` `` \| `` `W${string}` `` \| `` `X${string}` `` \| `` `Y${string}` `` \| `` `Z${string}` `` \| `` `?${string}` `` |
-
-##### Parameters
-
-| Parameter    | Type                           | Default value |
-| ------------ | ------------------------------ | ------------- |
-| `name`       | `Name`                         | `undefined`   |
-| `properties` | `Record`\<`string`, `string`\> | `undefined`   |
-| `children`   | [`XmlNode`](#xmlnode)[]        | `[]`          |
-
-##### Returns
-
-[`XmlElement`](#xmlelement)\<`Name`\>
-
-#### createXmlTextNode()
-
-> `static` **createXmlTextNode**(`text`): [`XmlTextNode`](#xmltextnode)
-
-Defined in:
-[libraries/epub/index.ts:453](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L453)
-
-##### Parameters
-
-| Parameter | Type     |
-| --------- | -------- |
-| `text`    | `string` |
-
-##### Returns
-
-[`XmlTextNode`](#xmltextnode)
-
-#### findXmlChildByName()
-
-> `static` **findXmlChildByName**\<`Name`\>(`name`, `xml`, `filter?`):
-> `undefined` \| [`XmlElement`](#xmlelement)\<`Name`\>
-
-Defined in:
-[libraries/epub/index.ts:526](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L526)
-
-Given an XML structure, find the first child matching the provided name and
-optional filter.
-
-##### Type Parameters
-
-| Type Parameter                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Name` _extends_ `` `r${string}` `` \| `` `a${string}` `` \| `` `b${string}` `` \| `` `c${string}` `` \| `` `d${string}` `` \| `` `e${string}` `` \| `` `f${string}` `` \| `` `g${string}` `` \| `` `h${string}` `` \| `` `i${string}` `` \| `` `j${string}` `` \| `` `k${string}` `` \| `` `l${string}` `` \| `` `m${string}` `` \| `` `n${string}` `` \| `` `o${string}` `` \| `` `p${string}` `` \| `` `q${string}` `` \| `` `s${string}` `` \| `` `t${string}` `` \| `` `u${string}` `` \| `` `v${string}` `` \| `` `w${string}` `` \| `` `x${string}` `` \| `` `y${string}` `` \| `` `z${string}` `` \| `` `R${string}` `` \| `` `A${string}` `` \| `` `B${string}` `` \| `` `C${string}` `` \| `` `D${string}` `` \| `` `E${string}` `` \| `` `F${string}` `` \| `` `G${string}` `` \| `` `H${string}` `` \| `` `I${string}` `` \| `` `J${string}` `` \| `` `K${string}` `` \| `` `L${string}` `` \| `` `M${string}` `` \| `` `N${string}` `` \| `` `O${string}` `` \| `` `P${string}` `` \| `` `Q${string}` `` \| `` `S${string}` `` \| `` `T${string}` `` \| `` `U${string}` `` \| `` `V${string}` `` \| `` `W${string}` `` \| `` `X${string}` `` \| `` `Y${string}` `` \| `` `Z${string}` `` \| `` `?${string}` `` |
-
-##### Parameters
-
-| Parameter | Type                      |
-| --------- | ------------------------- |
-| `name`    | `Name`                    |
-| `xml`     | [`ParsedXml`](#parsedxml) |
-| `filter?` | (`node`) => `boolean`     |
-
-##### Returns
-
-`undefined` \| [`XmlElement`](#xmlelement)\<`Name`\>
-
-#### findXmlDescendantByName()
-
-> `static` **findXmlDescendantByName**\<`Name`\>(`name`, `xml`, `filter?`):
-> `undefined` \| [`XmlElement`](#xmlelement)\<`Name`\>
-
-Defined in:
-[libraries/epub/index.ts:544](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L544)
-
-Given an XML structure, find the first descendant matching the provided name and
-optional filter.
-
-Will perform a breadth first search for the element, returning the highest
-element in the tree matching the name and filter.
-
-##### Type Parameters
-
-| Type Parameter                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Name` _extends_ `` `r${string}` `` \| `` `a${string}` `` \| `` `b${string}` `` \| `` `c${string}` `` \| `` `d${string}` `` \| `` `e${string}` `` \| `` `f${string}` `` \| `` `g${string}` `` \| `` `h${string}` `` \| `` `i${string}` `` \| `` `j${string}` `` \| `` `k${string}` `` \| `` `l${string}` `` \| `` `m${string}` `` \| `` `n${string}` `` \| `` `o${string}` `` \| `` `p${string}` `` \| `` `q${string}` `` \| `` `s${string}` `` \| `` `t${string}` `` \| `` `u${string}` `` \| `` `v${string}` `` \| `` `w${string}` `` \| `` `x${string}` `` \| `` `y${string}` `` \| `` `z${string}` `` \| `` `R${string}` `` \| `` `A${string}` `` \| `` `B${string}` `` \| `` `C${string}` `` \| `` `D${string}` `` \| `` `E${string}` `` \| `` `F${string}` `` \| `` `G${string}` `` \| `` `H${string}` `` \| `` `I${string}` `` \| `` `J${string}` `` \| `` `K${string}` `` \| `` `L${string}` `` \| `` `M${string}` `` \| `` `N${string}` `` \| `` `O${string}` `` \| `` `P${string}` `` \| `` `Q${string}` `` \| `` `S${string}` `` \| `` `T${string}` `` \| `` `U${string}` `` \| `` `V${string}` `` \| `` `W${string}` `` \| `` `X${string}` `` \| `` `Y${string}` `` \| `` `Z${string}` `` \| `` `?${string}` `` |
-
-##### Parameters
-
-| Parameter | Type                      |
-| --------- | ------------------------- |
-| `name`    | `Name`                    |
-| `xml`     | [`ParsedXml`](#parsedxml) |
-| `filter?` | (`node`) => `boolean`     |
-
-##### Returns
-
-`undefined` \| [`XmlElement`](#xmlelement)\<`Name`\>
-
 #### formatSmilDuration()
 
 > `static` **formatSmilDuration**(`duration`): `string`
 
-Defined in:
-[libraries/epub/index.ts:388](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L388)
+Defined in: [libraries/epub/src/index.tsx:387](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L387)
 
-Format a duration, provided as a number of seconds, as a SMIL clock value, to be
-used for Media Overlays.
+Format a duration, provided as a number of seconds, as
+a SMIL clock value, to be used for Media Overlays.
 
 ##### Parameters
 
@@ -2504,11 +2438,10 @@ https://www.w3.org/TR/epub-33/#sec-duration
 
 > `static` **from**(`pathOrData`): `Promise`\<[`Epub`](#epub)\>
 
-Defined in:
-[libraries/epub/index.ts:664](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L664)
+Defined in: [libraries/epub/src/index.tsx:494](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L494)
 
-Open an existing EPUB publication, extracting it to a temp directory so writes
-can mutate the unpacked tree and rezip with `saveAndClose`.
+Open an existing EPUB publication, extracting it to a temp directory
+so writes can mutate the unpacked tree and rezip with `saveAndClose`.
 
 Pass `{ readonly: true }` to gate mutations at runtime.
 
@@ -2517,9 +2450,9 @@ prefer `Epub.using(TmpFsAdapter).from(path)` (or
 
 ###### Parameters
 
-| Parameter    | Type                                          |
-| ------------ | --------------------------------------------- |
-| `pathOrData` | `string` \| `Uint8Array`\<`ArrayBufferLike`\> |
+| Parameter    | Type                              |
+| ------------ | --------------------------------- |
+| `pathOrData` | [`ArchiveSource`](#archivesource) |
 
 ###### Returns
 
@@ -2531,14 +2464,12 @@ when the archive is not a valid EPUB 3
 
 ##### Call Signature
 
-> `static` **from**(`pathOrData`, `options`):
-> `Promise`\<[`EpubReader`](#epubreader)\>
+> `static` **from**(`pathOrData`, `options`): `Promise`\<[`EpubReader`](#epubreader)\>
 
-Defined in:
-[libraries/epub/index.ts:665](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L665)
+Defined in: [libraries/epub/src/index.tsx:495](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L495)
 
-Open an existing EPUB publication, extracting it to a temp directory so writes
-can mutate the unpacked tree and rezip with `saveAndClose`.
+Open an existing EPUB publication, extracting it to a temp directory
+so writes can mutate the unpacked tree and rezip with `saveAndClose`.
 
 Pass `{ readonly: true }` to gate mutations at runtime.
 
@@ -2547,10 +2478,10 @@ prefer `Epub.using(TmpFsAdapter).from(path)` (or
 
 ###### Parameters
 
-| Parameter    | Type                                          |
-| ------------ | --------------------------------------------- |
-| `pathOrData` | `string` \| `Uint8Array`\<`ArrayBufferLike`\> |
-| `options`    | [`FromOptions`](#fromoptions) & `object`      |
+| Parameter    | Type                                     |
+| ------------ | ---------------------------------------- |
+| `pathOrData` | [`ArchiveSource`](#archivesource)        |
+| `options`    | [`FromOptions`](#fromoptions) & `object` |
 
 ###### Returns
 
@@ -2562,14 +2493,12 @@ when the archive is not a valid EPUB 3
 
 ##### Call Signature
 
-> `static` **from**(`pathOrData`, `options?`): `Promise`\<[`Epub`](#epub) \|
-> [`EpubReader`](#epubreader)\>
+> `static` **from**(`pathOrData`, `options?`): `Promise`\<[`Epub`](#epub) \| [`EpubReader`](#epubreader)\>
 
-Defined in:
-[libraries/epub/index.ts:669](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L669)
+Defined in: [libraries/epub/src/index.tsx:499](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L499)
 
-Open an existing EPUB publication, extracting it to a temp directory so writes
-can mutate the unpacked tree and rezip with `saveAndClose`.
+Open an existing EPUB publication, extracting it to a temp directory
+so writes can mutate the unpacked tree and rezip with `saveAndClose`.
 
 Pass `{ readonly: true }` to gate mutations at runtime.
 
@@ -2578,10 +2507,10 @@ prefer `Epub.using(TmpFsAdapter).from(path)` (or
 
 ###### Parameters
 
-| Parameter    | Type                                          |
-| ------------ | --------------------------------------------- |
-| `pathOrData` | `string` \| `Uint8Array`\<`ArrayBufferLike`\> |
-| `options?`   | [`FromOptions`](#fromoptions)                 |
+| Parameter    | Type                              |
+| ------------ | --------------------------------- |
+| `pathOrData` | [`ArchiveSource`](#archivesource) |
+| `options?`   | [`FromOptions`](#fromoptions)     |
 
 ###### Returns
 
@@ -2591,167 +2520,15 @@ prefer `Epub.using(TmpFsAdapter).from(path)` (or
 
 when the archive is not a valid EPUB 3
 
-#### getXhtmlBody()
-
-> `static` **getXhtmlBody**(`xml`): [`ParsedXml`](#parsedxml)
-
-Defined in:
-[libraries/epub/index.ts:430](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L430)
-
-Given an XML structure representing a complete XHTML document, return the
-sub-structure representing the children of the document's body element.
-
-##### Parameters
-
-| Parameter | Type                      |
-| --------- | ------------------------- |
-| `xml`     | [`ParsedXml`](#parsedxml) |
-
-##### Returns
-
-[`ParsedXml`](#parsedxml)
-
-#### getXhtmlTextContent()
-
-> `static` **getXhtmlTextContent**(`xml`): `string`
-
-Defined in:
-[libraries/epub/index.ts:462](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L462)
-
-Given an XML structure representing a complete XHTML document, return a string
-representing the concatenation of all text nodes in the document.
-
-##### Parameters
-
-| Parameter | Type                      |
-| --------- | ------------------------- |
-| `xml`     | [`ParsedXml`](#parsedxml) |
-
-##### Returns
-
-`string`
-
-#### getXmlAttributes()
-
-> `static` **getXmlAttributes**(`element`): `Record`\<`string`, `string`\>
-
-Defined in:
-[libraries/epub/index.ts:479](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L479)
-
-Given an XMLElement, return its attributes.
-
-##### Parameters
-
-| Parameter | Type                        |
-| --------- | --------------------------- |
-| `element` | [`XmlElement`](#xmlelement) |
-
-##### Returns
-
-`Record`\<`string`, `string`\>
-
-#### getXmlChildren()
-
-> `static` **getXmlChildren**\<`Name`\>(`element`): [`ParsedXml`](#parsedxml)
-
-Defined in:
-[libraries/epub/index.ts:506](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L506)
-
-Given an XMLElement, return a list of its children
-
-##### Type Parameters
-
-| Type Parameter                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Name` _extends_ `` `r${string}` `` \| `` `a${string}` `` \| `` `b${string}` `` \| `` `c${string}` `` \| `` `d${string}` `` \| `` `e${string}` `` \| `` `f${string}` `` \| `` `g${string}` `` \| `` `h${string}` `` \| `` `i${string}` `` \| `` `j${string}` `` \| `` `k${string}` `` \| `` `l${string}` `` \| `` `m${string}` `` \| `` `n${string}` `` \| `` `o${string}` `` \| `` `p${string}` `` \| `` `q${string}` `` \| `` `s${string}` `` \| `` `t${string}` `` \| `` `u${string}` `` \| `` `v${string}` `` \| `` `w${string}` `` \| `` `x${string}` `` \| `` `y${string}` `` \| `` `z${string}` `` \| `` `R${string}` `` \| `` `A${string}` `` \| `` `B${string}` `` \| `` `C${string}` `` \| `` `D${string}` `` \| `` `E${string}` `` \| `` `F${string}` `` \| `` `G${string}` `` \| `` `H${string}` `` \| `` `I${string}` `` \| `` `J${string}` `` \| `` `K${string}` `` \| `` `L${string}` `` \| `` `M${string}` `` \| `` `N${string}` `` \| `` `O${string}` `` \| `` `P${string}` `` \| `` `Q${string}` `` \| `` `S${string}` `` \| `` `T${string}` `` \| `` `U${string}` `` \| `` `V${string}` `` \| `` `W${string}` `` \| `` `X${string}` `` \| `` `Y${string}` `` \| `` `Z${string}` `` \| `` `?${string}` `` |
-
-##### Parameters
-
-| Parameter | Type                                  |
-| --------- | ------------------------------------- |
-| `element` | [`XmlElement`](#xmlelement)\<`Name`\> |
-
-##### Returns
-
-[`ParsedXml`](#parsedxml)
-
-#### getXmlElementName()
-
-> `static` **getXmlElementName**\<`Name`\>(`element`): `Name`
-
-Defined in:
-[libraries/epub/index.ts:491](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L491)
-
-Given an XMLElement, return its tag name.
-
-##### Type Parameters
-
-| Type Parameter                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Name` _extends_ `` `r${string}` `` \| `` `a${string}` `` \| `` `b${string}` `` \| `` `c${string}` `` \| `` `d${string}` `` \| `` `e${string}` `` \| `` `f${string}` `` \| `` `g${string}` `` \| `` `h${string}` `` \| `` `i${string}` `` \| `` `j${string}` `` \| `` `k${string}` `` \| `` `l${string}` `` \| `` `m${string}` `` \| `` `n${string}` `` \| `` `o${string}` `` \| `` `p${string}` `` \| `` `q${string}` `` \| `` `s${string}` `` \| `` `t${string}` `` \| `` `u${string}` `` \| `` `v${string}` `` \| `` `w${string}` `` \| `` `x${string}` `` \| `` `y${string}` `` \| `` `z${string}` `` \| `` `R${string}` `` \| `` `A${string}` `` \| `` `B${string}` `` \| `` `C${string}` `` \| `` `D${string}` `` \| `` `E${string}` `` \| `` `F${string}` `` \| `` `G${string}` `` \| `` `H${string}` `` \| `` `I${string}` `` \| `` `J${string}` `` \| `` `K${string}` `` \| `` `L${string}` `` \| `` `M${string}` `` \| `` `N${string}` `` \| `` `O${string}` `` \| `` `P${string}` `` \| `` `Q${string}` `` \| `` `S${string}` `` \| `` `T${string}` `` \| `` `U${string}` `` \| `` `V${string}` `` \| `` `W${string}` `` \| `` `X${string}` `` \| `` `Y${string}` `` \| `` `Z${string}` `` \| `` `?${string}` `` |
-
-##### Parameters
-
-| Parameter | Type                                  |
-| --------- | ------------------------------------- |
-| `element` | [`XmlElement`](#xmlelement)\<`Name`\> |
-
-##### Returns
-
-`Name`
-
-#### isXmlTextNode()
-
-> `static` **isXmlTextNode**(`node`): `node is XmlTextNode`
-
-Defined in:
-[libraries/epub/index.ts:566](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L566)
-
-Given an XMLNode, determine whether it represents a text node or an XML element.
-
-##### Parameters
-
-| Parameter | Type                  |
-| --------- | --------------------- |
-| `node`    | [`XmlNode`](#xmlnode) |
-
-##### Returns
-
-`node is XmlTextNode`
-
-#### replaceXmlChildren()
-
-> `static` **replaceXmlChildren**\<`Name`\>(`element`, `children`): `void`
-
-Defined in:
-[libraries/epub/index.ts:514](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L514)
-
-##### Type Parameters
-
-| Type Parameter                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Name` _extends_ `` `r${string}` `` \| `` `a${string}` `` \| `` `b${string}` `` \| `` `c${string}` `` \| `` `d${string}` `` \| `` `e${string}` `` \| `` `f${string}` `` \| `` `g${string}` `` \| `` `h${string}` `` \| `` `i${string}` `` \| `` `j${string}` `` \| `` `k${string}` `` \| `` `l${string}` `` \| `` `m${string}` `` \| `` `n${string}` `` \| `` `o${string}` `` \| `` `p${string}` `` \| `` `q${string}` `` \| `` `s${string}` `` \| `` `t${string}` `` \| `` `u${string}` `` \| `` `v${string}` `` \| `` `w${string}` `` \| `` `x${string}` `` \| `` `y${string}` `` \| `` `z${string}` `` \| `` `R${string}` `` \| `` `A${string}` `` \| `` `B${string}` `` \| `` `C${string}` `` \| `` `D${string}` `` \| `` `E${string}` `` \| `` `F${string}` `` \| `` `G${string}` `` \| `` `H${string}` `` \| `` `I${string}` `` \| `` `J${string}` `` \| `` `K${string}` `` \| `` `L${string}` `` \| `` `M${string}` `` \| `` `N${string}` `` \| `` `O${string}` `` \| `` `P${string}` `` \| `` `Q${string}` `` \| `` `S${string}` `` \| `` `T${string}` `` \| `` `U${string}` `` \| `` `V${string}` `` \| `` `W${string}` `` \| `` `X${string}` `` \| `` `Y${string}` `` \| `` `Z${string}` `` \| `` `?${string}` `` |
-
-##### Parameters
-
-| Parameter  | Type                                  |
-| ---------- | ------------------------------------- |
-| `element`  | [`XmlElement`](#xmlelement)\<`Name`\> |
-| `children` | [`XmlNode`](#xmlnode)[]               |
-
-##### Returns
-
-`void`
-
 #### upgrade()
 
 > `static` **upgrade**(`path`, `options`): `Promise`\<[`Epub`](#epub)\>
 
-Defined in:
-[libraries/epub/index.ts:3514](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3514)
+Defined in: [libraries/epub/src/index.tsx:3484](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3484)
 
-Upgrade an EPUB 2 publication to EPUB 3 in place, returning a new, valid Epub 3
-instance. Equivalent to `Epub.using(TmpFsAdapter).upgrade(...)`.
+Upgrade an EPUB 2 publication to EPUB 3 in place, returning a new,
+valid Epub 3 instance. Equivalent to
+`Epub.using(TmpFsAdapter).upgrade(...)`.
 
 ##### Parameters
 
@@ -2766,16 +2543,14 @@ instance. Equivalent to `Epub.using(TmpFsAdapter).upgrade(...)`.
 
 #### using()
 
-> `static` **using**\<`A`\>(`adapterClass`):
-> [`EpubFactory`](#epubfactory)\<`A`\>
+> `static` **using**\<`A`\>(`adapterClass`): [`EpubFactory`](#epubfactory)\<`A`\>
 
-Defined in:
-[libraries/epub/index.ts:648](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L648)
+Defined in: [libraries/epub/src/index.tsx:478](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L478)
 
 Specify the storage backend to use for the EPUB
 
-The returned factory exposes `from`, `create`, and `upgrade`, which route
-through the supplied adapter.
+The returned factory exposes `from`, `create`, and `upgrade`,
+which route through the supplied adapter.
 
 ##### Type Parameters
 
@@ -2796,23 +2571,22 @@ through the supplied adapter.
 ##### Example
 
 ```ts
-using epub = await Epub.using(TmpFsAdapter).from(path)
-using reader = await Epub.using(MemoryAdapter).from(buffer, { cache: false })
+using epub = await Epub.using(TmpFsAdapter).from(path);
+using reader = await Epub.using(MemoryAdapter).from(buffer, { cache: false });
 ```
 
 ---
 
 ## EpubFactory\<A\>
 
-Defined in:
-[libraries/epub/index.ts:3543](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3543)
+Defined in: [libraries/epub/src/index.tsx:3513](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3513)
 
 Adapter-bound factory returned by [Epub.using](#using).
 
-Mirrors the static factory surface (`from`, `create`, `upgrade`) but routes all
-I/O through the supplied adapter. Each method's signature degrades gracefully
-when the adapter doesn't support the operation: `create` and `upgrade` throw at
-runtime if the adapter is read-only or lacks `initEmpty`.
+Mirrors the static factory surface (`from`, `create`, `upgrade`) but routes
+all I/O through the supplied adapter. Each method's signature degrades
+gracefully when the adapter doesn't support the operation: `create` and
+`upgrade` throw at runtime if the adapter is read-only or lacks `initEmpty`.
 
 ### Type Parameters
 
@@ -2824,11 +2598,9 @@ runtime if the adapter is read-only or lacks `initEmpty`.
 
 #### Constructor
 
-> **new EpubFactory**\<`A`\>(`adapterClass`):
-> [`EpubFactory`](#epubfactory)\<`A`\>
+> **new EpubFactory**\<`A`\>(`adapterClass`): [`EpubFactory`](#epubfactory)\<`A`\>
 
-Defined in:
-[libraries/epub/index.ts:3544](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3544)
+Defined in: [libraries/epub/src/index.tsx:3514](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3514)
 
 ##### Parameters
 
@@ -2846,22 +2618,19 @@ Defined in:
 
 > `readonly` **adapterClass**: `A`
 
-Defined in:
-[libraries/epub/index.ts:3544](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3544)
+Defined in: [libraries/epub/src/index.tsx:3514](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3514)
 
 ### Methods
 
 #### create()
 
-> **create**(`path`, `__namedParameters`, `additionalMetadata`):
-> `Promise`\<[`EpubInstanceFor`](#epubinstancefor)\<`A`\>\>
+> **create**(`path`, `__namedParameters`, `additionalMetadata`): `Promise`\<[`EpubInstanceFor`](#epubinstancefor)\<`A`\>\>
 
-Defined in:
-[libraries/epub/index.ts:3605](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3605)
+Defined in: [libraries/epub/src/index.tsx:3594](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3594)
 
-Construct a new EPUB on this factory's adapter, optionally seeded with the
-provided metadata. Requires a writable adapter that implements `initEmpty`
-(today: [TmpFsAdapter](#tmpfsadapter)).
+Construct a new EPUB on this factory's adapter, optionally seeded
+with the provided metadata. Requires a writable adapter that
+implements `initEmpty` (today: [TmpFsAdapter](#tmpfsadapter)).
 
 ##### Parameters
 
@@ -2883,24 +2652,9 @@ when the adapter is read-only or does not implement initEmpty
 
 ##### Call Signature
 
-> **from**(`source`, `options`): `Promise`\<`Pick`\<[`Epub`](#epub), `"storage"`
-> \| `"getItemArchiveLength"` \| `"getRootfile"` \| `"getPackageElement"` \|
-> `"getManifest"` \| `"findMetadataItem"` \| `"findAllMetadataItems"` \|
-> `"getMetadata"` \| `"getIdentifier"` \| `"getUniqueIdentifier"` \|
-> `"getUniqueIdentifierId"` \| `"getIdentifiers"` \| `"getSources"` \|
-> `"getPageBreakSource"` \| `"getCoverImageItem"` \| `"getCoverImage"` \|
-> `"getPublicationDate"` \| `"getModifiedDate"` \| `"getLayout"` \|
-> `"getBaseDirection"` \| `"getType"` \| `"getSubjects"` \| `"getLanguage"` \|
-> `"getTitle"` \| `"getSubtitle"` \| `"getTitles"` \| `"getDescription"` \|
-> `"getPackageVocabularyPrefixes"` \| `"getCollections"` \| `"getCreators"` \|
-> `"getContributors"` \| `"getSpineItems"` \| `"getTableOfContents"` \|
-> `"getLandmarks"` \| `"getPageList"` \| `"resolveHref"` \| `"readFileContents"`
-> \| `"readItemContents"` \| `"readXhtmlItemContents"` \| `"getVersion"` \|
-> `"getNcxTableOfContents"` \| `"getGuideEntries"` \| `"discardAndClose"`\> &
-> `Disposable` & `object`\>
+> **from**(`source`, `options`): `Promise`\<`Pick`\<[`Epub`](#epub), `"storage"` \| `"getItemArchiveLength"` \| `"getEncryptionDocument"` \| `"getEncryptionSummary"` \| `"getRootfile"` \| `"getPackageDocumentSource"` \| `"getPackageDocument"` \| `"getPackageElement"` \| `"getManifest"` \| `"findMetadataItem"` \| `"findAllMetadataItems"` \| `"getMetadata"` \| `"getIdentifier"` \| `"getUniqueIdentifier"` \| `"getUniqueIdentifierId"` \| `"getIdentifiers"` \| `"getSources"` \| `"getPageBreakSource"` \| `"getCoverImageItem"` \| `"getCoverImage"` \| `"getPublicationDate"` \| `"getModifiedDate"` \| `"getLayout"` \| `"getBaseDirection"` \| `"getType"` \| `"getSubjects"` \| `"getLanguage"` \| `"getTitle"` \| `"getSubtitle"` \| `"getTitles"` \| `"getDescription"` \| `"getPackageVocabularyPrefixes"` \| `"getCollections"` \| `"getCreators"` \| `"getContributors"` \| `"getSpineItems"` \| `"getPageProgressionDirection"` \| `"getTableOfContents"` \| `"getLandmarks"` \| `"getPageList"` \| `"resolveHref"` \| `"readFileContents"` \| `"readItemContents"` \| `"readXhtmlItemContents"` \| `"getVersion"` \| `"getNcxTableOfContents"` \| `"getGuideEntries"` \| `"discardAndClose"`\> & `Disposable` & `object`\>
 
-Defined in:
-[libraries/epub/index.ts:3551](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3551)
+Defined in: [libraries/epub/src/index.tsx:3521](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3521)
 
 Open an existing EPUB through this factory's adapter
 
@@ -2908,26 +2662,12 @@ Open an existing EPUB through this factory's adapter
 
 | Parameter | Type                                                                                  |
 | --------- | ------------------------------------------------------------------------------------- |
-| `source`  | `string` \| `Uint8Array`\<`ArrayBufferLike`\>                                         |
+| `source`  | [`ArchiveSource`](#archivesource)                                                     |
 | `options` | [`FromOptions`](#fromoptions) & `object` & [`AdapterOptions`](#adapteroptions)\<`A`\> |
 
 ###### Returns
 
-`Promise`\<`Pick`\<[`Epub`](#epub), `"storage"` \| `"getItemArchiveLength"` \|
-`"getRootfile"` \| `"getPackageElement"` \| `"getManifest"` \|
-`"findMetadataItem"` \| `"findAllMetadataItems"` \| `"getMetadata"` \|
-`"getIdentifier"` \| `"getUniqueIdentifier"` \| `"getUniqueIdentifierId"` \|
-`"getIdentifiers"` \| `"getSources"` \| `"getPageBreakSource"` \|
-`"getCoverImageItem"` \| `"getCoverImage"` \| `"getPublicationDate"` \|
-`"getModifiedDate"` \| `"getLayout"` \| `"getBaseDirection"` \| `"getType"` \|
-`"getSubjects"` \| `"getLanguage"` \| `"getTitle"` \| `"getSubtitle"` \|
-`"getTitles"` \| `"getDescription"` \| `"getPackageVocabularyPrefixes"` \|
-`"getCollections"` \| `"getCreators"` \| `"getContributors"` \|
-`"getSpineItems"` \| `"getTableOfContents"` \| `"getLandmarks"` \|
-`"getPageList"` \| `"resolveHref"` \| `"readFileContents"` \|
-`"readItemContents"` \| `"readXhtmlItemContents"` \| `"getVersion"` \|
-`"getNcxTableOfContents"` \| `"getGuideEntries"` \| `"discardAndClose"`\> &
-`Disposable` & `object`\>
+`Promise`\<`Pick`\<[`Epub`](#epub), `"storage"` \| `"getItemArchiveLength"` \| `"getEncryptionDocument"` \| `"getEncryptionSummary"` \| `"getRootfile"` \| `"getPackageDocumentSource"` \| `"getPackageDocument"` \| `"getPackageElement"` \| `"getManifest"` \| `"findMetadataItem"` \| `"findAllMetadataItems"` \| `"getMetadata"` \| `"getIdentifier"` \| `"getUniqueIdentifier"` \| `"getUniqueIdentifierId"` \| `"getIdentifiers"` \| `"getSources"` \| `"getPageBreakSource"` \| `"getCoverImageItem"` \| `"getCoverImage"` \| `"getPublicationDate"` \| `"getModifiedDate"` \| `"getLayout"` \| `"getBaseDirection"` \| `"getType"` \| `"getSubjects"` \| `"getLanguage"` \| `"getTitle"` \| `"getSubtitle"` \| `"getTitles"` \| `"getDescription"` \| `"getPackageVocabularyPrefixes"` \| `"getCollections"` \| `"getCreators"` \| `"getContributors"` \| `"getSpineItems"` \| `"getPageProgressionDirection"` \| `"getTableOfContents"` \| `"getLandmarks"` \| `"getPageList"` \| `"resolveHref"` \| `"readFileContents"` \| `"readItemContents"` \| `"readXhtmlItemContents"` \| `"getVersion"` \| `"getNcxTableOfContents"` \| `"getGuideEntries"` \| `"discardAndClose"`\> & `Disposable` & `object`\>
 
 ###### Throws
 
@@ -2935,11 +2675,9 @@ when the archive is not a valid EPUB 3
 
 ##### Call Signature
 
-> **from**(`source`, `options?`):
-> `Promise`\<[`EpubInstanceFor`](#epubinstancefor)\<`A`\> & `object`\>
+> **from**(`source`, `options?`): `Promise`\<[`EpubInstanceFor`](#epubinstancefor)\<`A`\> & `object`\>
 
-Defined in:
-[libraries/epub/index.ts:3555](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3555)
+Defined in: [libraries/epub/src/index.tsx:3525](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3525)
 
 Open an existing EPUB through this factory's adapter
 
@@ -2947,7 +2685,7 @@ Open an existing EPUB through this factory's adapter
 
 | Parameter  | Type                                                                       |
 | ---------- | -------------------------------------------------------------------------- |
-| `source`   | `string` \| `Uint8Array`\<`ArrayBufferLike`\>                              |
+| `source`   | [`ArchiveSource`](#archivesource)                                          |
 | `options?` | [`FromOptions`](#fromoptions) & [`AdapterOptions`](#adapteroptions)\<`A`\> |
 
 ###### Returns
@@ -2958,16 +2696,31 @@ Open an existing EPUB through this factory's adapter
 
 when the archive is not a valid EPUB 3
 
+#### readPackageDocumentSource()
+
+> **readPackageDocumentSource**(`source`, `options`): `Promise`\<`string`\>
+
+Defined in: [libraries/epub/src/index.tsx:3568](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3568)
+
+##### Parameters
+
+| Parameter | Type                                       |
+| --------- | ------------------------------------------ |
+| `source`  | [`ArchiveSource`](#archivesource)          |
+| `options` | [`AdapterOptions`](#adapteroptions)\<`A`\> |
+
+##### Returns
+
+`Promise`\<`string`\>
+
 #### upgrade()
 
-> **upgrade**(`path`, `options`):
-> `Promise`\<[`EpubInstanceFor`](#epubinstancefor)\<`A`\>\>
+> **upgrade**(`path`, `options`): `Promise`\<[`EpubInstanceFor`](#epubinstancefor)\<`A`\>\>
 
-Defined in:
-[libraries/epub/index.ts:3718](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3718)
+Defined in: [libraries/epub/src/index.tsx:3721](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L3721)
 
-Upgrade an EPUB 2 publication to EPUB 3 in place using this factory's adapter,
-returning a new, valid Epub 3 instance.
+Upgrade an EPUB 2 publication to EPUB 3 in place using this
+factory's adapter, returning a new, valid Epub 3 instance.
 
 Performs the following transformations:
 
@@ -2977,13 +2730,11 @@ Performs the following transformations:
 - removes the NCX file and the guide element (configurable)
 - fixes common font MIME types
 - bumps the package version to 3.0
-- goes over each xhtml item and rewrites it using XMLParser to make sure the
-  output is valid XHTML
+- goes over each xhtml item and rewrites it using XMLParser to make sure the output is valid XHTML
 
-Requires a writable adapter. When
-[Upgrade.Epub2UpgradeOptions.outputPath](#outputpath) is set, the source file is
-copied to that path on disk first; this only makes sense for adapters whose
-`source` is a real fs path.
+Requires a writable adapter. When [Upgrade.Epub2UpgradeOptions.outputPath](#outputpath)
+is set, the source file is copied to that path on disk first; this
+only makes sense for adapters whose `source` is a real fs path.
 
 ##### Parameters
 
@@ -3004,8 +2755,7 @@ when the adapter is read-only
 
 ## EpubReadOnlyError
 
-Defined in:
-[libraries/epub/index.ts:238](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L238)
+Defined in: [libraries/epub/src/index.tsx:261](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L261)
 
 ### Extends
 
@@ -3015,10 +2765,9 @@ Defined in:
 
 #### Constructor
 
-> **new EpubReadOnlyError**(`message?`):
-> [`EpubReadOnlyError`](#epubreadonlyerror)
+> **new EpubReadOnlyError**(`message?`): [`EpubReadOnlyError`](#epubreadonlyerror)
 
-Defined in: node_modules/typescript/lib/lib.es5.d.ts:1082
+Defined in: node_modules/@typescript/old/lib/lib.es5.d.ts:1080
 
 ##### Parameters
 
@@ -3036,10 +2785,9 @@ Defined in: node_modules/typescript/lib/lib.es5.d.ts:1082
 
 #### Constructor
 
-> **new EpubReadOnlyError**(`message?`, `options?`):
-> [`EpubReadOnlyError`](#epubreadonlyerror)
+> **new EpubReadOnlyError**(`message?`, `options?`): [`EpubReadOnlyError`](#epubreadonlyerror)
 
-Defined in: node_modules/typescript/lib/lib.es5.d.ts:1082
+Defined in: node_modules/@typescript/old/lib/lib.es5.d.ts:1080
 
 ##### Parameters
 
@@ -3062,7 +2810,7 @@ Defined in: node_modules/typescript/lib/lib.es5.d.ts:1082
 
 > `optional` **cause**: `unknown`
 
-Defined in: node_modules/typescript/lib/lib.es2022.error.d.ts:26
+Defined in: node_modules/@typescript/old/lib/lib.es2022.error.d.ts:24
 
 ##### Inherited from
 
@@ -3072,7 +2820,7 @@ Defined in: node_modules/typescript/lib/lib.es2022.error.d.ts:26
 
 > **message**: `string`
 
-Defined in: node_modules/typescript/lib/lib.es5.d.ts:1077
+Defined in: node_modules/@typescript/old/lib/lib.es5.d.ts:1075
 
 ##### Inherited from
 
@@ -3082,7 +2830,7 @@ Defined in: node_modules/typescript/lib/lib.es5.d.ts:1077
 
 > **name**: `string`
 
-Defined in: node_modules/typescript/lib/lib.es5.d.ts:1076
+Defined in: node_modules/@typescript/old/lib/lib.es5.d.ts:1074
 
 ##### Inherited from
 
@@ -3092,7 +2840,7 @@ Defined in: node_modules/typescript/lib/lib.es5.d.ts:1076
 
 > `optional` **stack**: `string`
 
-Defined in: node_modules/typescript/lib/lib.es5.d.ts:1078
+Defined in: node_modules/@typescript/old/lib/lib.es5.d.ts:1076
 
 ##### Inherited from
 
@@ -3102,7 +2850,7 @@ Defined in: node_modules/typescript/lib/lib.es5.d.ts:1078
 
 > `static` **stackTraceLimit**: `number`
 
-Defined in: node_modules/@types/node/globals.d.ts:68
+Defined in: node_modules/@types/node/globals.d.ts:67
 
 The `Error.stackTraceLimit` property specifies the number of stack frames
 collected by a stack trace (whether generated by `new Error().stack` or
@@ -3111,8 +2859,8 @@ collected by a stack trace (whether generated by `new Error().stack` or
 The default value is `10` but may be set to any valid JavaScript number. Changes
 will affect any stack trace captured _after_ the value has been changed.
 
-If set to a non-number value, or set to a negative number, stack traces will not
-capture any frames.
+If set to a non-number value, or set to a negative number, stack traces will
+not capture any frames.
 
 ##### Inherited from
 
@@ -3124,16 +2872,16 @@ capture any frames.
 
 > `static` **captureStackTrace**(`targetObject`, `constructorOpt?`): `void`
 
-Defined in: node_modules/@types/node/globals.d.ts:52
+Defined in: node_modules/@types/node/globals.d.ts:51
 
-Creates a `.stack` property on `targetObject`, which when accessed returns a
-string representing the location in the code at which
+Creates a `.stack` property on `targetObject`, which when accessed returns
+a string representing the location in the code at which
 `Error.captureStackTrace()` was called.
 
 ```js
-const myObject = {}
-Error.captureStackTrace(myObject)
-myObject.stack // Similar to `new Error().stack`
+const myObject = {};
+Error.captureStackTrace(myObject);
+myObject.stack; // Similar to `new Error().stack`
 ```
 
 The first line of the trace will be prefixed with
@@ -3143,31 +2891,31 @@ The optional `constructorOpt` argument accepts a function. If given, all frames
 above `constructorOpt`, including `constructorOpt`, will be omitted from the
 generated stack trace.
 
-The `constructorOpt` argument is useful for hiding implementation details of
-error generation from the user. For instance:
+The `constructorOpt` argument is useful for hiding implementation
+details of error generation from the user. For instance:
 
 ```js
 function a() {
-  b()
+  b();
 }
 
 function b() {
-  c()
+  c();
 }
 
 function c() {
   // Create an error without stack trace to avoid calculating the stack trace twice.
-  const { stackTraceLimit } = Error
-  Error.stackTraceLimit = 0
-  const error = new Error()
-  Error.stackTraceLimit = stackTraceLimit
+  const { stackTraceLimit } = Error;
+  Error.stackTraceLimit = 0;
+  const error = new Error();
+  Error.stackTraceLimit = stackTraceLimit;
 
   // Capture the stack trace above function b
-  Error.captureStackTrace(error, b) // Neither function c, nor b is included in the stack trace
-  throw error
+  Error.captureStackTrace(error, b); // Neither function c, nor b is included in the stack trace
+  throw error;
 }
 
-a()
+a();
 ```
 
 ##### Parameters
@@ -3189,7 +2937,7 @@ a()
 
 > `static` **isError**(`error`): `error is Error`
 
-Defined in: node_modules/typescript/lib/lib.esnext.error.d.ts:23
+Defined in: node_modules/@typescript/old/lib/lib.esnext.error.d.ts:21
 
 Indicates whether the argument provided is a built-in Error instance or not.
 
@@ -3211,7 +2959,7 @@ Indicates whether the argument provided is a built-in Error instance or not.
 
 > `static` **prepareStackTrace**(`err`, `stackTraces`): `any`
 
-Defined in: node_modules/@types/node/globals.d.ts:56
+Defined in: node_modules/@types/node/globals.d.ts:55
 
 ##### Parameters
 
@@ -3236,8 +2984,7 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 ## EpubVersionError
 
-Defined in:
-[libraries/epub/index.ts:237](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L237)
+Defined in: [libraries/epub/src/index.tsx:260](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L260)
 
 ### Extends
 
@@ -3249,7 +2996,7 @@ Defined in:
 
 > **new EpubVersionError**(`message?`): [`EpubVersionError`](#epubversionerror)
 
-Defined in: node_modules/typescript/lib/lib.es5.d.ts:1082
+Defined in: node_modules/@typescript/old/lib/lib.es5.d.ts:1080
 
 ##### Parameters
 
@@ -3267,10 +3014,9 @@ Defined in: node_modules/typescript/lib/lib.es5.d.ts:1082
 
 #### Constructor
 
-> **new EpubVersionError**(`message?`, `options?`):
-> [`EpubVersionError`](#epubversionerror)
+> **new EpubVersionError**(`message?`, `options?`): [`EpubVersionError`](#epubversionerror)
 
-Defined in: node_modules/typescript/lib/lib.es5.d.ts:1082
+Defined in: node_modules/@typescript/old/lib/lib.es5.d.ts:1080
 
 ##### Parameters
 
@@ -3293,7 +3039,7 @@ Defined in: node_modules/typescript/lib/lib.es5.d.ts:1082
 
 > `optional` **cause**: `unknown`
 
-Defined in: node_modules/typescript/lib/lib.es2022.error.d.ts:26
+Defined in: node_modules/@typescript/old/lib/lib.es2022.error.d.ts:24
 
 ##### Inherited from
 
@@ -3303,7 +3049,7 @@ Defined in: node_modules/typescript/lib/lib.es2022.error.d.ts:26
 
 > **message**: `string`
 
-Defined in: node_modules/typescript/lib/lib.es5.d.ts:1077
+Defined in: node_modules/@typescript/old/lib/lib.es5.d.ts:1075
 
 ##### Inherited from
 
@@ -3313,7 +3059,7 @@ Defined in: node_modules/typescript/lib/lib.es5.d.ts:1077
 
 > **name**: `string`
 
-Defined in: node_modules/typescript/lib/lib.es5.d.ts:1076
+Defined in: node_modules/@typescript/old/lib/lib.es5.d.ts:1074
 
 ##### Inherited from
 
@@ -3323,7 +3069,7 @@ Defined in: node_modules/typescript/lib/lib.es5.d.ts:1076
 
 > `optional` **stack**: `string`
 
-Defined in: node_modules/typescript/lib/lib.es5.d.ts:1078
+Defined in: node_modules/@typescript/old/lib/lib.es5.d.ts:1076
 
 ##### Inherited from
 
@@ -3333,7 +3079,7 @@ Defined in: node_modules/typescript/lib/lib.es5.d.ts:1078
 
 > `static` **stackTraceLimit**: `number`
 
-Defined in: node_modules/@types/node/globals.d.ts:68
+Defined in: node_modules/@types/node/globals.d.ts:67
 
 The `Error.stackTraceLimit` property specifies the number of stack frames
 collected by a stack trace (whether generated by `new Error().stack` or
@@ -3342,8 +3088,8 @@ collected by a stack trace (whether generated by `new Error().stack` or
 The default value is `10` but may be set to any valid JavaScript number. Changes
 will affect any stack trace captured _after_ the value has been changed.
 
-If set to a non-number value, or set to a negative number, stack traces will not
-capture any frames.
+If set to a non-number value, or set to a negative number, stack traces will
+not capture any frames.
 
 ##### Inherited from
 
@@ -3355,16 +3101,16 @@ capture any frames.
 
 > `static` **captureStackTrace**(`targetObject`, `constructorOpt?`): `void`
 
-Defined in: node_modules/@types/node/globals.d.ts:52
+Defined in: node_modules/@types/node/globals.d.ts:51
 
-Creates a `.stack` property on `targetObject`, which when accessed returns a
-string representing the location in the code at which
+Creates a `.stack` property on `targetObject`, which when accessed returns
+a string representing the location in the code at which
 `Error.captureStackTrace()` was called.
 
 ```js
-const myObject = {}
-Error.captureStackTrace(myObject)
-myObject.stack // Similar to `new Error().stack`
+const myObject = {};
+Error.captureStackTrace(myObject);
+myObject.stack; // Similar to `new Error().stack`
 ```
 
 The first line of the trace will be prefixed with
@@ -3374,31 +3120,31 @@ The optional `constructorOpt` argument accepts a function. If given, all frames
 above `constructorOpt`, including `constructorOpt`, will be omitted from the
 generated stack trace.
 
-The `constructorOpt` argument is useful for hiding implementation details of
-error generation from the user. For instance:
+The `constructorOpt` argument is useful for hiding implementation
+details of error generation from the user. For instance:
 
 ```js
 function a() {
-  b()
+  b();
 }
 
 function b() {
-  c()
+  c();
 }
 
 function c() {
   // Create an error without stack trace to avoid calculating the stack trace twice.
-  const { stackTraceLimit } = Error
-  Error.stackTraceLimit = 0
-  const error = new Error()
-  Error.stackTraceLimit = stackTraceLimit
+  const { stackTraceLimit } = Error;
+  Error.stackTraceLimit = 0;
+  const error = new Error();
+  Error.stackTraceLimit = stackTraceLimit;
 
   // Capture the stack trace above function b
-  Error.captureStackTrace(error, b) // Neither function c, nor b is included in the stack trace
-  throw error
+  Error.captureStackTrace(error, b); // Neither function c, nor b is included in the stack trace
+  throw error;
 }
 
-a()
+a();
 ```
 
 ##### Parameters
@@ -3420,7 +3166,7 @@ a()
 
 > `static` **isError**(`error`): `error is Error`
 
-Defined in: node_modules/typescript/lib/lib.esnext.error.d.ts:23
+Defined in: node_modules/@typescript/old/lib/lib.esnext.error.d.ts:21
 
 Indicates whether the argument provided is a built-in Error instance or not.
 
@@ -3442,7 +3188,7 @@ Indicates whether the argument provided is a built-in Error instance or not.
 
 > `static` **prepareStackTrace**(`err`, `stackTraces`): `any`
 
-Defined in: node_modules/@types/node/globals.d.ts:56
+Defined in: node_modules/@types/node/globals.d.ts:55
 
 ##### Parameters
 
@@ -3467,11 +3213,9 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 ## MemoryAdapter
 
-Defined in:
-[libraries/epub/adapters/memory.ts:31](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/memory.ts#L31)
+Defined in: [libraries/epub/src/adapters/memory.ts:30](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/memory.ts#L30)
 
-Loads an EPUB archive into memory and serves all I/O off the in-memory zip
-handle.
+Loads an EPUB archive into memory and serves all I/O off the in-memory zip handle.
 
 read only
 
@@ -3481,27 +3225,11 @@ read only
 
 ### Properties
 
-#### rootPath
-
-> `readonly` **rootPath**: `string`
-
-Defined in:
-[libraries/epub/adapters/memory.ts:67](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/memory.ts#L67)
-
-Opaque path prefix used by `resolveInternalHref` to anchor absolute paths within
-the archive. For TmpFsAdapter this is the tmp dir; for MemoryAdapter it's a
-virtual prefix that's never written to disk
-
-##### Implementation of
-
-[`EpubStorageAdapter`](#epubstorageadapter).[`rootPath`](#rootpath-2)
-
 #### capabilities
 
 > `readonly` `static` **capabilities**: `object`
 
-Defined in:
-[libraries/epub/adapters/memory.ts:33](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/memory.ts#L33)
+Defined in: [libraries/epub/src/adapters/memory.ts:32](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/memory.ts#L32)
 
 ##### writable
 
@@ -3511,26 +3239,42 @@ Defined in:
 
 > `readonly` `static` **kind**: `"in-memory"`
 
-Defined in:
-[libraries/epub/adapters/memory.ts:32](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/memory.ts#L32)
+Defined in: [libraries/epub/src/adapters/memory.ts:31](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/memory.ts#L31)
+
+### Accessors
+
+#### rootPath
+
+##### Get Signature
+
+> **get** **rootPath**(): `null`
+
+Defined in: [libraries/epub/src/adapters/memory.ts:60](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/memory.ts#L60)
+
+###### Returns
+
+`null`
+
+##### Implementation of
+
+[`EpubStorageAdapter`](#epubstorageadapter).[`rootPath`](#rootpath-2)
 
 ### Methods
 
 #### archiveLength()
 
-> **archiveLength**(`path`): `Promise`\<`number`\>
+> **archiveLength**(`entry`): `Promise`\<`number`\>
 
-Defined in:
-[libraries/epub/adapters/memory.ts:110](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/memory.ts#L110)
+Defined in: [libraries/epub/src/adapters/memory.ts:89](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/memory.ts#L89)
 
-Length of an entry in bytes, for the readium page-count heuristic which expects
-compressed size when available
+Length of an entry in bytes, for the readium page-count heuristic
+which expects compressed size when available
 
 ##### Parameters
 
 | Parameter | Type     |
 | --------- | -------- |
-| `path`    | `string` |
+| `entry`   | `string` |
 
 ##### Returns
 
@@ -3544,8 +3288,7 @@ compressed size when available
 
 > **dispose**(): `void`
 
-Defined in:
-[libraries/epub/adapters/memory.ts:116](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/memory.ts#L116)
+Defined in: [libraries/epub/src/adapters/memory.ts:95](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/memory.ts#L95)
 
 Always called on close or error
 
@@ -3557,20 +3300,43 @@ Always called on close or error
 
 [`EpubStorageAdapter`](#epubstorageadapter).[`dispose`](#dispose-6)
 
+#### exists()
+
+> **exists**(`entry`): `Promise`\<`boolean`\>
+
+Defined in: [libraries/epub/src/adapters/memory.ts:84](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/memory.ts#L84)
+
+Whether the archive holds an entry under exactly this name.
+Used to choose between different canditates for an href
+so should be exact
+
+##### Parameters
+
+| Parameter | Type     |
+| --------- | -------- |
+| `entry`   | `string` |
+
+##### Returns
+
+`Promise`\<`boolean`\>
+
+##### Implementation of
+
+[`EpubStorageAdapter`](#epubstorageadapter).[`exists`](#exists-4)
+
 #### read()
 
 ##### Call Signature
 
-> **read**(`path`): `Promise`\<`Uint8Array`\<`ArrayBufferLike`\>\>
+> **read**(`entry`): `Promise`\<`Uint8Array`\<`ArrayBufferLike`\>\>
 
-Defined in:
-[libraries/epub/adapters/memory.ts:81](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/memory.ts#L81)
+Defined in: [libraries/epub/src/adapters/memory.ts:64](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/memory.ts#L64)
 
 ###### Parameters
 
 | Parameter | Type     |
 | --------- | -------- |
-| `path`    | `string` |
+| `entry`   | `string` |
 
 ###### Returns
 
@@ -3582,16 +3348,15 @@ Defined in:
 
 ##### Call Signature
 
-> **read**(`path`, `encoding`): `Promise`\<`string`\>
+> **read**(`entry`, `encoding`): `Promise`\<`string`\>
 
-Defined in:
-[libraries/epub/adapters/memory.ts:82](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/memory.ts#L82)
+Defined in: [libraries/epub/src/adapters/memory.ts:65](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/memory.ts#L65)
 
 ###### Parameters
 
 | Parameter  | Type      |
 | ---------- | --------- |
-| `path`     | `string`  |
+| `entry`    | `string`  |
 | `encoding` | `"utf-8"` |
 
 ###### Returns
@@ -3604,17 +3369,15 @@ Defined in:
 
 #### init()
 
-> `static` **init**(`source`, `opts`):
-> `Promise`\<[`MemoryAdapter`](#memoryadapter)\>
+> `static` **init**(`source`, `opts`): `Promise`\<[`MemoryAdapter`](#memoryadapter)\>
 
-Defined in:
-[libraries/epub/adapters/memory.ts:35](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/memory.ts#L35)
+Defined in: [libraries/epub/src/adapters/memory.ts:34](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/memory.ts#L34)
 
 ##### Parameters
 
 | Parameter | Type                                            |
 | --------- | ----------------------------------------------- |
-| `source`  | `string` \| `Uint8Array`\<`ArrayBufferLike`\>   |
+| `source`  | [`ArchiveSource`](#archivesource)               |
 | `opts`    | [`MemoryAdapterOptions`](#memoryadapteroptions) |
 
 ##### Returns
@@ -3625,12 +3388,11 @@ Defined in:
 
 ## TmpFsAdapter
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:62](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L62)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:57](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L57)
 
-Extracts an EPUB archive to a temp directory and serves all I/O off the real
-filesystem. `Epub.using(TmpFsAdapter).from(...)` returns a writable
-[Epub](#epub).
+Extracts an EPUB archive to a temp directory and serves all I/O off
+the real filesystem.
+`Epub.using(TmpFsAdapter).from(...)` returns a writable [Epub](#epub).
 
 ### Implements
 
@@ -3642,12 +3404,7 @@ filesystem. `Epub.using(TmpFsAdapter).from(...)` returns a writable
 
 > `readonly` **rootPath**: `string`
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:102](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L102)
-
-Opaque path prefix used by `resolveInternalHref` to anchor absolute paths within
-the archive. For TmpFsAdapter this is the tmp dir; for MemoryAdapter it's a
-virtual prefix that's never written to disk
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:85](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L85)
 
 ##### Implementation of
 
@@ -3657,8 +3414,7 @@ virtual prefix that's never written to disk
 
 > `readonly` `static` **capabilities**: `object`
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:64](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L64)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:59](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L59)
 
 ##### writable
 
@@ -3668,26 +3424,24 @@ Defined in:
 
 > `readonly` `static` **kind**: `"extracted-dir"`
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:63](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L63)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:58](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L58)
 
 ### Methods
 
 #### archiveLength()
 
-> **archiveLength**(`path`): `Promise`\<`number`\>
+> **archiveLength**(`entry`): `Promise`\<`number`\>
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:125](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L125)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:127](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L127)
 
-Length of an entry in bytes, for the readium page-count heuristic which expects
-compressed size when available
+Length of an entry in bytes, for the readium page-count heuristic
+which expects compressed size when available
 
 ##### Parameters
 
 | Parameter | Type     |
 | --------- | -------- |
-| `path`    | `string` |
+| `entry`   | `string` |
 
 ##### Returns
 
@@ -3701,8 +3455,7 @@ compressed size when available
 
 > **dispose**(): `void`
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:200](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L200)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:204](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L204)
 
 Always called on close or error
 
@@ -3718,8 +3471,7 @@ Always called on close or error
 
 > **duplicate**(): `Promise`\<[`TmpFsAdapter`](#tmpfsadapter)\>
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:149](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L149)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:154](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L154)
 
 Required for Epub.copy
 
@@ -3731,12 +3483,35 @@ Required for Epub.copy
 
 [`EpubStorageAdapter`](#epubstorageadapter).[`duplicate`](#duplicate-2)
 
+#### exists()
+
+> **exists**(`entry`): `Promise`\<`boolean`\>
+
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:118](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L118)
+
+Whether the archive holds an entry under exactly this name.
+Used to choose between different canditates for an href
+so should be exact
+
+##### Parameters
+
+| Parameter | Type     |
+| --------- | -------- |
+| `entry`   | `string` |
+
+##### Returns
+
+`Promise`\<`boolean`\>
+
+##### Implementation of
+
+[`EpubStorageAdapter`](#epubstorageadapter).[`exists`](#exists-4)
+
 #### list()
 
 > **list**(): `AsyncIterable`\<[`EpubListEntry`](#epublistentry)\>
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:134](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L134)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:136](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L136)
 
 Required for Epub.saveAndClose to walk the contents
 
@@ -3752,16 +3527,15 @@ Required for Epub.saveAndClose to walk the contents
 
 ##### Call Signature
 
-> **read**(`path`): `Promise`\<`Uint8Array`\<`ArrayBufferLike`\>\>
+> **read**(`entry`): `Promise`\<`Uint8Array`\<`ArrayBufferLike`\>\>
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:104](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L104)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:96](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L96)
 
 ###### Parameters
 
 | Parameter | Type     |
 | --------- | -------- |
-| `path`    | `string` |
+| `entry`   | `string` |
 
 ###### Returns
 
@@ -3773,16 +3547,15 @@ Defined in:
 
 ##### Call Signature
 
-> **read**(`path`, `encoding`): `Promise`\<`string`\>
+> **read**(`entry`, `encoding`): `Promise`\<`string`\>
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:105](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L105)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:97](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L97)
 
 ###### Parameters
 
 | Parameter  | Type      |
 | ---------- | --------- |
-| `path`     | `string`  |
+| `entry`    | `string`  |
 | `encoding` | `"utf-8"` |
 
 ###### Returns
@@ -3795,10 +3568,9 @@ Defined in:
 
 #### remove()
 
-> **remove**(`path`): `Promise`\<`void`\>
+> **remove**(`entry`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:121](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L121)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:114](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L114)
 
 Required for removeManifestItem / setCoverImage replacement
 
@@ -3806,7 +3578,7 @@ Required for removeManifestItem / setCoverImage replacement
 
 | Parameter | Type     |
 | --------- | -------- |
-| `path`    | `string` |
+| `entry`   | `string` |
 
 ##### Returns
 
@@ -3820,8 +3592,7 @@ Required for removeManifestItem / setCoverImage replacement
 
 > **serialize**(`targetPath`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:160](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L160)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:165](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L165)
 
 Required for Epub.saveAndClose
 
@@ -3843,10 +3614,9 @@ Required for Epub.saveAndClose
 
 ##### Call Signature
 
-> **write**(`path`, `data`): `Promise`\<`void`\>
+> **write**(`entry`, `data`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:110](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L110)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:102](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L102)
 
 Required for any mutation method on Epub
 
@@ -3854,7 +3624,7 @@ Required for any mutation method on Epub
 
 | Parameter | Type         |
 | --------- | ------------ |
-| `path`    | `string`     |
+| `entry`   | `string`     |
 | `data`    | `Uint8Array` |
 
 ###### Returns
@@ -3867,16 +3637,15 @@ Required for any mutation method on Epub
 
 ##### Call Signature
 
-> **write**(`path`, `data`, `encoding`): `Promise`\<`void`\>
+> **write**(`entry`, `data`, `encoding`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:111](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L111)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:103](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L103)
 
 ###### Parameters
 
 | Parameter  | Type      |
 | ---------- | --------- |
-| `path`     | `string`  |
+| `entry`    | `string`  |
 | `data`     | `string`  |
 | `encoding` | `"utf-8"` |
 
@@ -3892,14 +3661,13 @@ Defined in:
 
 > `static` **init**(`source`): `Promise`\<[`TmpFsAdapter`](#tmpfsadapter)\>
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:66](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L66)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:61](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L61)
 
 ##### Parameters
 
-| Parameter | Type                                          |
-| --------- | --------------------------------------------- |
-| `source`  | `string` \| `Uint8Array`\<`ArrayBufferLike`\> |
+| Parameter | Type                              |
+| --------- | --------------------------------- |
+| `source`  | [`ArchiveSource`](#archivesource) |
 
 ##### Returns
 
@@ -3909,8 +3677,7 @@ Defined in:
 
 > `static` **initEmpty**(): `Promise`\<[`TmpFsAdapter`](#tmpfsadapter)\>
 
-Defined in:
-[libraries/epub/adapters/tmpfs.ts:96](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/tmpfs.ts#L96)
+Defined in: [libraries/epub/src/adapters/tmpfs.ts:79](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/tmpfs.ts#L79)
 
 ##### Returns
 
@@ -3920,8 +3687,7 @@ Defined in:
 
 ## AlternateScript
 
-Defined in:
-[libraries/epub/index.ts:154](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L154)
+Defined in: [libraries/epub/src/index.tsx:177](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L177)
 
 ### Properties
 
@@ -3929,22 +3695,940 @@ Defined in:
 
 > **locale**: `Locale`
 
-Defined in:
-[libraries/epub/index.ts:156](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L156)
+Defined in: [libraries/epub/src/index.tsx:179](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L179)
 
 #### name
 
 > **name**: `string`
 
-Defined in:
-[libraries/epub/index.ts:155](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L155)
+Defined in: [libraries/epub/src/index.tsx:178](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L178)
+
+---
+
+## Attr
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:664
+
+A DOM element's attribute as an object. In most DOM methods, you will probably directly
+retrieve the attribute as a string (e.g., Element.getAttribute(), but certain functions (e.g.,
+Element.getAttributeNode()) or means of iterating give Attr types.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Attr)
+
+### Extends
+
+- [`Node`](#node-1)
+
+### Properties
+
+#### ATTRIBUTE_NODE
+
+> `readonly` **ATTRIBUTE_NODE**: `2`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:592
+
+##### Inherited from
+
+`Node.ATTRIBUTE_NODE`
+
+#### baseURI
+
+> `readonly` **baseURI**: `"about:blank"`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:396
+
+Always returns `about:blank` currently.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/baseURI)
+
+##### Inherited from
+
+`Node.baseURI`
+
+#### CDATA_SECTION_NODE
+
+> `readonly` **CDATA_SECTION_NODE**: `4`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:596
+
+node is a CDATASection node.
+
+##### Inherited from
+
+`Node.CDATA_SECTION_NODE`
+
+#### childNodes
+
+> `readonly` **childNodes**: `NodeList`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:374
+
+Returns the children.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/childNodes)
+
+##### Inherited from
+
+`Node.childNodes`
+
+#### columnNumber?
+
+> `optional` **columnNumber**: `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:479
+
+One based column position inside the parsed source,
+if the `locator` was not disabled.
+
+##### Inherited from
+
+`Node.columnNumber`
+
+#### COMMENT_NODE
+
+> `readonly` **COMMENT_NODE**: `8`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:602
+
+node is a Comment node.
+
+##### Inherited from
+
+`Node.COMMENT_NODE`
+
+#### DOCUMENT_FRAGMENT_NODE
+
+> `readonly` **DOCUMENT_FRAGMENT_NODE**: `11`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:608
+
+node is a DocumentFragment node.
+
+##### Inherited from
+
+`Node.DOCUMENT_FRAGMENT_NODE`
+
+#### DOCUMENT_NODE
+
+> `readonly` **DOCUMENT_NODE**: `9`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:604
+
+node is a document.
+
+##### Inherited from
+
+`Node.DOCUMENT_NODE`
+
+#### DOCUMENT_POSITION_CONTAINED_BY
+
+> `readonly` **DOCUMENT_POSITION_CONTAINED_BY**: `16`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:619
+
+Set when other is a descendant of node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_CONTAINED_BY`
+
+#### DOCUMENT_POSITION_CONTAINS
+
+> `readonly` **DOCUMENT_POSITION_CONTAINS**: `8`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:617
+
+Set when other is an ancestor of node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_CONTAINS`
+
+#### DOCUMENT_POSITION_DISCONNECTED
+
+> `readonly` **DOCUMENT_POSITION_DISCONNECTED**: `1`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:611
+
+Set when node and other are not in the same tree.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_DISCONNECTED`
+
+#### DOCUMENT_POSITION_FOLLOWING
+
+> `readonly` **DOCUMENT_POSITION_FOLLOWING**: `4`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:615
+
+Set when other is following node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_FOLLOWING`
+
+#### DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC
+
+> `readonly` **DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC**: `32`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:620
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC`
+
+#### DOCUMENT_POSITION_PRECEDING
+
+> `readonly` **DOCUMENT_POSITION_PRECEDING**: `2`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:613
+
+Set when other is preceding node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_PRECEDING`
+
+#### DOCUMENT_TYPE_NODE
+
+> `readonly` **DOCUMENT_TYPE_NODE**: `10`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:606
+
+node is a doctype.
+
+##### Inherited from
+
+`Node.DOCUMENT_TYPE_NODE`
+
+#### ELEMENT_NODE
+
+> `readonly` **ELEMENT_NODE**: `1`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:591
+
+node is an element.
+
+##### Inherited from
+
+`Node.ELEMENT_NODE`
+
+#### ENTITY_NODE
+
+> `readonly` **ENTITY_NODE**: `6`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:598
+
+##### Inherited from
+
+`Node.ENTITY_NODE`
+
+#### ENTITY_REFERENCE_NODE
+
+> `readonly` **ENTITY_REFERENCE_NODE**: `5`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:597
+
+##### Inherited from
+
+`Node.ENTITY_REFERENCE_NODE`
+
+#### firstChild
+
+> `readonly` **firstChild**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:380
+
+Returns the first child.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/firstChild)
+
+##### Inherited from
+
+`Node.firstChild`
+
+#### isConnected
+
+> `readonly` **isConnected**: `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:402
+
+Returns true if this node is inside of a document or is the document node itself.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/isConnected)
+
+##### Inherited from
+
+`Node.isConnected`
+
+#### lastChild
+
+> `readonly` **lastChild**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:386
+
+Returns the last child.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lastChild)
+
+##### Inherited from
+
+`Node.lastChild`
+
+#### lineNumber?
+
+> `optional` **lineNumber**: `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:474
+
+Zero based line position inside the parsed source,
+if the `locator` was not disabled.
+
+##### Inherited from
+
+`Node.lineNumber`
+
+#### localName
+
+> **localName**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:390
+
+The local part of the qualified name of this node.
+
+##### Inherited from
+
+`Node.localName`
+
+#### name
+
+> `readonly` **name**: `string`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:667
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Attr/name)
+
+#### namespaceURI
+
+> `readonly` **namespaceURI**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:669
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Attr/namespaceURI)
+
+##### Overrides
+
+`Node.namespaceURI`
+
+#### nextSibling
+
+> `readonly` **nextSibling**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:412
+
+Returns the next sibling.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nextSibling)
+
+##### Inherited from
+
+`Node.nextSibling`
+
+#### nodeName
+
+> `readonly` **nodeName**: `string`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:418
+
+Returns a string appropriate for the type of node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeName)
+
+##### Inherited from
+
+`Node.nodeName`
+
+#### nodeType
+
+> `readonly` **nodeType**: `2`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:665
+
+Returns the type of node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeType)
+
+##### Overrides
+
+`Node.nodeType`
+
+#### nodeValue
+
+> **nodeValue**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:426
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeValue)
+
+##### Inherited from
+
+`Node.nodeValue`
+
+#### NOTATION_NODE
+
+> `readonly` **NOTATION_NODE**: `12`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:609
+
+##### Inherited from
+
+`Node.NOTATION_NODE`
+
+#### ownerDocument
+
+> `readonly` **ownerDocument**: [`Document`](#document-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:670
+
+Returns the node document. Returns null for documents.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/ownerDocument)
+
+##### Overrides
+
+`Node.ownerDocument`
+
+#### ownerElement
+
+> `readonly` **ownerElement**: [`Element`](#element-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:672
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Attr/ownerElement)
+
+#### parentElement
+
+> `readonly` **parentElement**: [`Element`](#element-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:444
+
+Returns the parent `Node` if it is of type `Element`, otherwise `null`.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/parentElement)
+
+##### Inherited from
+
+`Node.parentElement`
+
+#### parentNode
+
+> `readonly` **parentNode**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:438
+
+Returns the parent.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/parentNode)
+
+##### Inherited from
+
+`Node.parentNode`
+
+#### prefix
+
+> `readonly` **prefix**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:674
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Attr/prefix)
+
+##### Overrides
+
+`Node.prefix`
+
+#### previousSibling
+
+> `readonly` **previousSibling**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:454
+
+Returns the previous sibling.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/previousSibling)
+
+##### Inherited from
+
+`Node.previousSibling`
+
+#### PROCESSING_INSTRUCTION_NODE
+
+> `readonly` **PROCESSING_INSTRUCTION_NODE**: `7`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:600
+
+node is a ProcessingInstruction node.
+
+##### Inherited from
+
+`Node.PROCESSING_INSTRUCTION_NODE`
+
+#### ~~specified~~
+
+> `readonly` **specified**: `true`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:679
+
+##### Deprecated
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Attr/specified)
+
+#### TEXT_NODE
+
+> `readonly` **TEXT_NODE**: `3`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:594
+
+node is a Text node.
+
+##### Inherited from
+
+`Node.TEXT_NODE`
+
+#### textContent
+
+> **textContent**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:468
+
+The text content of this node and its descendants.
+
+For [Element](#element-1) and DocumentFragment nodes, returns the concatenation of the
+`nodeValue` of every descendant text node, excluding processing instruction and comment
+nodes. For all other node types, returns `nodeValue`.
+
+Setting `textContent` on an element or document fragment replaces all child nodes with a
+single text node; on other nodes it sets `data`, `value`, and `nodeValue` directly.
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/textContent)
+
+##### See
+
+[https://dom.spec.whatwg.org/#dom-node-textcontent](https://dom.spec.whatwg.org/#dom-node-textcontent)
+
+##### Inherited from
+
+`Node.textContent`
+
+#### value
+
+> **value**: `string`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:681
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Attr/value)
+
+### Methods
+
+#### appendChild()
+
+> **appendChild**(`node`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:482
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/appendChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `node`    | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.appendChild`
+
+#### cloneNode()
+
+> **cloneNode**(`deep?`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:533
+
+Returns a copy of node. If deep is true, the copy also includes the node's descendants.
+
+##### Parameters
+
+| Parameter | Type      |
+| --------- | --------- |
+| `deep?`   | `boolean` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Throws
+
+May throw a DOMException if operations within [Element#setAttributeNode](#setattributenode) or
+[Node#appendChild](#appendchild-8) (which are potentially invoked in this method) do not meet their
+specific constraints.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/cloneNode)
+
+##### Inherited from
+
+`Node.cloneNode`
+
+#### compareDocumentPosition()
+
+> **compareDocumentPosition**(`other`): `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:540
+
+Returns a bitmask indicating the position of other relative to node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/compareDocumentPosition)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`number`
+
+##### Inherited from
+
+`Node.compareDocumentPosition`
+
+#### contains()
+
+> **contains**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:489
+
+Checks whether `other` is an inclusive descendant of this node.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/contains)
+
+##### Parameters
+
+| Parameter | Type                                       |
+| --------- | ------------------------------------------ |
+| `other`   | [`Node`](#node-1) \| `null` \| `undefined` |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.contains`
+
+#### getRootNode()
+
+> **getRootNode**(`options`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:502
+
+Searches for the root node of this node.
+
+**This behavior is slightly different from the one in the specs**:
+
+- ignores `options.composed`, since `ShadowRoot`s are unsupported, therefore always
+  returning root.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/getRootNode)
+
+##### Parameters
+
+| Parameter | Type                 |
+| --------- | -------------------- |
+| `options` | `GetRootNodeOptions` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### See
+
+- https://dom.spec.whatwg.org/#dom-node-getrootnode
+- https://dom.spec.whatwg.org/#concept-shadow-including-root
+
+##### Inherited from
+
+`Node.getRootNode`
+
+#### hasChildNodes()
+
+> **hasChildNodes**(): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:547
+
+Returns whether node has children.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/hasChildNodes)
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.hasChildNodes`
+
+#### insertBefore()
+
+> **insertBefore**(`node`, `child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:550
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/insertBefore)
+
+##### Parameters
+
+| Parameter | Type                        |
+| --------- | --------------------------- |
+| `node`    | [`Node`](#node-1)           |
+| `child`   | [`Node`](#node-1) \| `null` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.insertBefore`
+
+#### isDefaultNamespace()
+
+> **isDefaultNamespace**(`namespace`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:553
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/isDefaultNamespace)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.isDefaultNamespace`
+
+#### isEqualNode()
+
+> **isEqualNode**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:514
+
+Checks whether the given node is equal to this node.
+
+Two nodes are equal when they have the same type, defining characteristics (for the type),
+and the same `childNodes`. The comparison is iterative to avoid stack overflows on deeply
+nested trees. `Attribute` nodes of each `Element` pair are also compared iteratively.
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`boolean`
+
+##### See
+
+- [https://dom.spec.whatwg.org/#concept-node-equals](https://dom.spec.whatwg.org/#concept-node-equals)
+- [https://developer.mozilla.org/en-US/docs/Web/API/Node/isEqualNode](https://developer.mozilla.org/en-US/docs/Web/API/Node/isEqualNode)
+
+##### Inherited from
+
+`Node.isEqualNode`
+
+#### isSameNode()
+
+> **isSameNode**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:521
+
+Checks whether the given node is this node.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/isSameNode)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.isSameNode`
+
+#### ~~isSupported()~~
+
+> **isSupported**(`feature`, `version`): `true`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:568
+
+Checks whether the DOM implementation implements a specific feature and its version.
+
+##### Parameters
+
+| Parameter | Type     | Description                                                                                                                          |
+| --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `feature` | `string` | The package name of the feature to test. This is the same name that can be passed to the method `hasFeature` on `DOMImplementation`. |
+| `version` | `string` | This is the version number of the package name to test.                                                                              |
+
+##### Returns
+
+`true`
+
+##### Deprecated
+
+Since `DOMImplementation.hasFeature` is deprecated and always returns true.
+
+##### Since
+
+Introduced in DOM Level 2
+
+##### See
+
+DOMImplementation.hasFeature
+
+##### Inherited from
+
+`Node.isSupported`
+
+#### lookupNamespaceURI()
+
+> **lookupNamespaceURI**(`prefix`): `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:571
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lookupNamespaceURI)
+
+##### Parameters
+
+| Parameter | Type               |
+| --------- | ------------------ |
+| `prefix`  | `string` \| `null` |
+
+##### Returns
+
+`string` \| `null`
+
+##### Inherited from
+
+`Node.lookupNamespaceURI`
+
+#### lookupPrefix()
+
+> **lookupPrefix**(`namespace`): `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:574
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lookupPrefix)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+
+##### Returns
+
+`string` \| `null`
+
+##### Inherited from
+
+`Node.lookupPrefix`
+
+#### normalize()
+
+> **normalize**(): `void`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:582
+
+Removes empty exclusive Text nodes and concatenates the data of remaining contiguous
+exclusive Text nodes into the first of their nodes.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/normalize)
+
+##### Returns
+
+`void`
+
+##### Inherited from
+
+`Node.normalize`
+
+#### removeChild()
+
+> **removeChild**(`child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:585
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/removeChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `child`   | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.removeChild`
+
+#### replaceChild()
+
+> **replaceChild**(`node`, `child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:588
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/replaceChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `node`    | [`Node`](#node-1) |
+| `child`   | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.replaceChild`
 
 ---
 
 ## Collection
 
-Defined in:
-[libraries/epub/index.ts:178](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L178)
+Defined in: [libraries/epub/src/index.tsx:201](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L201)
 
 ### Properties
 
@@ -3952,29 +4636,25 @@ Defined in:
 
 > **name**: `string`
 
-Defined in:
-[libraries/epub/index.ts:179](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L179)
+Defined in: [libraries/epub/src/index.tsx:202](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L202)
 
 #### position?
 
 > `optional` **position**: `string`
 
-Defined in:
-[libraries/epub/index.ts:181](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L181)
+Defined in: [libraries/epub/src/index.tsx:204](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L204)
 
 #### type?
 
 > `optional` **type**: `string`
 
-Defined in:
-[libraries/epub/index.ts:180](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L180)
+Defined in: [libraries/epub/src/index.tsx:203](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L203)
 
 ---
 
 ## DcCreator
 
-Defined in:
-[libraries/epub/index.ts:159](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L159)
+Defined in: [libraries/epub/src/index.tsx:182](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L182)
 
 ### Properties
 
@@ -3982,43 +4662,37 @@ Defined in:
 
 > `optional` **alternateScripts**: [`AlternateScript`](#alternatescript)[]
 
-Defined in:
-[libraries/epub/index.ts:164](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L164)
+Defined in: [libraries/epub/src/index.tsx:187](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L187)
 
 #### fileAs?
 
 > `optional` **fileAs**: `string`
 
-Defined in:
-[libraries/epub/index.ts:163](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L163)
+Defined in: [libraries/epub/src/index.tsx:186](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L186)
 
 #### name
 
 > **name**: `string`
 
-Defined in:
-[libraries/epub/index.ts:160](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L160)
+Defined in: [libraries/epub/src/index.tsx:183](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L183)
 
 #### role?
 
 > `optional` **role**: `string`
 
-Defined in:
-[libraries/epub/index.ts:161](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L161)
+Defined in: [libraries/epub/src/index.tsx:184](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L184)
 
 #### roleScheme?
 
 > `optional` **roleScheme**: `string`
 
-Defined in:
-[libraries/epub/index.ts:162](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L162)
+Defined in: [libraries/epub/src/index.tsx:185](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L185)
 
 ---
 
 ## DcSubject
 
-Defined in:
-[libraries/epub/index.ts:121](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L121)
+Defined in: [libraries/epub/src/index.tsx:144](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L144)
 
 ### Properties
 
@@ -4026,29 +4700,2315 @@ Defined in:
 
 > **authority**: `string`
 
-Defined in:
-[libraries/epub/index.ts:123](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L123)
+Defined in: [libraries/epub/src/index.tsx:146](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L146)
 
 #### term
 
 > **term**: `string`
 
-Defined in:
-[libraries/epub/index.ts:124](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L124)
+Defined in: [libraries/epub/src/index.tsx:147](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L147)
 
 #### value
 
 > **value**: `string`
 
-Defined in:
-[libraries/epub/index.ts:122](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L122)
+Defined in: [libraries/epub/src/index.tsx:145](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L145)
+
+---
+
+## Document
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1188
+
+### Extends
+
+- [`Node`](#node-1)
+
+### Properties
+
+#### ATTRIBUTE_NODE
+
+> `readonly` **ATTRIBUTE_NODE**: `2`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:592
+
+##### Inherited from
+
+`Node.ATTRIBUTE_NODE`
+
+#### baseURI
+
+> `readonly` **baseURI**: `"about:blank"`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:396
+
+Always returns `about:blank` currently.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/baseURI)
+
+##### Inherited from
+
+`Node.baseURI`
+
+#### CDATA_SECTION_NODE
+
+> `readonly` **CDATA_SECTION_NODE**: `4`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:596
+
+node is a CDATASection node.
+
+##### Inherited from
+
+`Node.CDATA_SECTION_NODE`
+
+#### childNodes
+
+> `readonly` **childNodes**: `NodeList`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:374
+
+Returns the children.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/childNodes)
+
+##### Inherited from
+
+`Node.childNodes`
+
+#### children
+
+> `readonly` **children**: `LiveNodeList`\<[`Element`](#element-1)\>
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1226
+
+Returns a live collection of the direct child elements of this document.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Document/children)
+
+##### See
+
+https://dom.spec.whatwg.org/#dom-parentnode-children
+
+#### columnNumber?
+
+> `optional` **columnNumber**: `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:479
+
+One based column position inside the parsed source,
+if the `locator` was not disabled.
+
+##### Inherited from
+
+`Node.columnNumber`
+
+#### COMMENT_NODE
+
+> `readonly` **COMMENT_NODE**: `8`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:602
+
+node is a Comment node.
+
+##### Inherited from
+
+`Node.COMMENT_NODE`
+
+#### contentType
+
+> `readonly` **contentType**: `MIME_TYPE`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1196
+
+The mime type of the document is determined at creation time and can not be modified.
+
+##### See
+
+- https://dom.spec.whatwg.org/#concept-document-content-type
+- DOMImplementation
+- MIME_TYPE
+
+#### doctype
+
+> `readonly` **doctype**: [`DocumentType`](#documenttype-2) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1211
+
+#### DOCUMENT_FRAGMENT_NODE
+
+> `readonly` **DOCUMENT_FRAGMENT_NODE**: `11`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:608
+
+node is a DocumentFragment node.
+
+##### Inherited from
+
+`Node.DOCUMENT_FRAGMENT_NODE`
+
+#### DOCUMENT_NODE
+
+> `readonly` **DOCUMENT_NODE**: `9`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:604
+
+node is a document.
+
+##### Inherited from
+
+`Node.DOCUMENT_NODE`
+
+#### DOCUMENT_POSITION_CONTAINED_BY
+
+> `readonly` **DOCUMENT_POSITION_CONTAINED_BY**: `16`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:619
+
+Set when other is a descendant of node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_CONTAINED_BY`
+
+#### DOCUMENT_POSITION_CONTAINS
+
+> `readonly` **DOCUMENT_POSITION_CONTAINS**: `8`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:617
+
+Set when other is an ancestor of node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_CONTAINS`
+
+#### DOCUMENT_POSITION_DISCONNECTED
+
+> `readonly` **DOCUMENT_POSITION_DISCONNECTED**: `1`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:611
+
+Set when node and other are not in the same tree.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_DISCONNECTED`
+
+#### DOCUMENT_POSITION_FOLLOWING
+
+> `readonly` **DOCUMENT_POSITION_FOLLOWING**: `4`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:615
+
+Set when other is following node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_FOLLOWING`
+
+#### DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC
+
+> `readonly` **DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC**: `32`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:620
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC`
+
+#### DOCUMENT_POSITION_PRECEDING
+
+> `readonly` **DOCUMENT_POSITION_PRECEDING**: `2`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:613
+
+Set when other is preceding node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_PRECEDING`
+
+#### DOCUMENT_TYPE_NODE
+
+> `readonly` **DOCUMENT_TYPE_NODE**: `10`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:606
+
+node is a doctype.
+
+##### Inherited from
+
+`Node.DOCUMENT_TYPE_NODE`
+
+#### documentElement
+
+> `readonly` **documentElement**: [`Element`](#element-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1217
+
+Gets a reference to the root node of the document.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Document/documentElement)
+
+#### ELEMENT_NODE
+
+> `readonly` **ELEMENT_NODE**: `1`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:591
+
+node is an element.
+
+##### Inherited from
+
+`Node.ELEMENT_NODE`
+
+#### ENTITY_NODE
+
+> `readonly` **ENTITY_NODE**: `6`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:598
+
+##### Inherited from
+
+`Node.ENTITY_NODE`
+
+#### ENTITY_REFERENCE_NODE
+
+> `readonly` **ENTITY_REFERENCE_NODE**: `5`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:597
+
+##### Inherited from
+
+`Node.ENTITY_REFERENCE_NODE`
+
+#### firstChild
+
+> `readonly` **firstChild**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:380
+
+Returns the first child.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/firstChild)
+
+##### Inherited from
+
+`Node.firstChild`
+
+#### implementation
+
+> `readonly` **implementation**: `DOMImplementation`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1207
+
+The implementation that created this document.
+
+#### isConnected
+
+> `readonly` **isConnected**: `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:402
+
+Returns true if this node is inside of a document or is the document node itself.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/isConnected)
+
+##### Inherited from
+
+`Node.isConnected`
+
+#### lastChild
+
+> `readonly` **lastChild**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:386
+
+Returns the last child.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lastChild)
+
+##### Inherited from
+
+`Node.lastChild`
+
+#### lineNumber?
+
+> `optional` **lineNumber**: `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:474
+
+Zero based line position inside the parsed source,
+if the `locator` was not disabled.
+
+##### Inherited from
+
+`Node.lineNumber`
+
+#### localName
+
+> **localName**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:390
+
+The local part of the qualified name of this node.
+
+##### Inherited from
+
+`Node.localName`
+
+#### namespaceURI
+
+> `readonly` **namespaceURI**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:406
+
+The namespace URI of this node.
+
+##### Inherited from
+
+`Node.namespaceURI`
+
+#### nextSibling
+
+> `readonly` **nextSibling**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:412
+
+Returns the next sibling.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nextSibling)
+
+##### Inherited from
+
+`Node.nextSibling`
+
+#### nodeName
+
+> `readonly` **nodeName**: `"#document"`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1209
+
+Returns a string appropriate for the type of node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeName)
+
+##### Overrides
+
+`Node.nodeName`
+
+#### nodeType
+
+> `readonly` **nodeType**: `9`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1210
+
+Returns the type of node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeType)
+
+##### Overrides
+
+`Node.nodeType`
+
+#### nodeValue
+
+> **nodeValue**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:426
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeValue)
+
+##### Inherited from
+
+`Node.nodeValue`
+
+#### NOTATION_NODE
+
+> `readonly` **NOTATION_NODE**: `12`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:609
+
+##### Inherited from
+
+`Node.NOTATION_NODE`
+
+#### ownerDocument
+
+> `readonly` **ownerDocument**: [`Document`](#document-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1208
+
+Returns the node document. Returns null for documents.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/ownerDocument)
+
+##### Overrides
+
+`Node.ownerDocument`
+
+#### parentElement
+
+> `readonly` **parentElement**: [`Element`](#element-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:444
+
+Returns the parent `Node` if it is of type `Element`, otherwise `null`.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/parentElement)
+
+##### Inherited from
+
+`Node.parentElement`
+
+#### parentNode
+
+> `readonly` **parentNode**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:438
+
+Returns the parent.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/parentNode)
+
+##### Inherited from
+
+`Node.parentNode`
+
+#### prefix
+
+> **prefix**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:448
+
+The prefix of the namespace for this node.
+
+##### Inherited from
+
+`Node.prefix`
+
+#### previousSibling
+
+> `readonly` **previousSibling**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:454
+
+Returns the previous sibling.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/previousSibling)
+
+##### Inherited from
+
+`Node.previousSibling`
+
+#### PROCESSING_INSTRUCTION_NODE
+
+> `readonly` **PROCESSING_INSTRUCTION_NODE**: `7`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:600
+
+node is a ProcessingInstruction node.
+
+##### Inherited from
+
+`Node.PROCESSING_INSTRUCTION_NODE`
+
+#### TEXT_NODE
+
+> `readonly` **TEXT_NODE**: `3`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:594
+
+node is a Text node.
+
+##### Inherited from
+
+`Node.TEXT_NODE`
+
+#### textContent
+
+> **textContent**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:468
+
+The text content of this node and its descendants.
+
+For [Element](#element-1) and DocumentFragment nodes, returns the concatenation of the
+`nodeValue` of every descendant text node, excluding processing instruction and comment
+nodes. For all other node types, returns `nodeValue`.
+
+Setting `textContent` on an element or document fragment replaces all child nodes with a
+single text node; on other nodes it sets `data`, `value`, and `nodeValue` directly.
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/textContent)
+
+##### See
+
+[https://dom.spec.whatwg.org/#dom-node-textcontent](https://dom.spec.whatwg.org/#dom-node-textcontent)
+
+##### Inherited from
+
+`Node.textContent`
+
+#### type
+
+> `readonly` **type**: `"xml"` \| `"html"`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1201
+
+##### See
+
+- https://dom.spec.whatwg.org/#concept-document-type
+- DOMImplementation
+
+### Methods
+
+#### appendChild()
+
+> **appendChild**(`node`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:482
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/appendChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `node`    | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.appendChild`
+
+#### cloneNode()
+
+> **cloneNode**(`deep?`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:533
+
+Returns a copy of node. If deep is true, the copy also includes the node's descendants.
+
+##### Parameters
+
+| Parameter | Type      |
+| --------- | --------- |
+| `deep?`   | `boolean` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Throws
+
+May throw a DOMException if operations within [Element#setAttributeNode](#setattributenode) or
+[Node#appendChild](#appendchild-8) (which are potentially invoked in this method) do not meet their
+specific constraints.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/cloneNode)
+
+##### Inherited from
+
+`Node.cloneNode`
+
+#### compareDocumentPosition()
+
+> **compareDocumentPosition**(`other`): `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:540
+
+Returns a bitmask indicating the position of other relative to node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/compareDocumentPosition)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`number`
+
+##### Inherited from
+
+`Node.compareDocumentPosition`
+
+#### contains()
+
+> **contains**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:489
+
+Checks whether `other` is an inclusive descendant of this node.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/contains)
+
+##### Parameters
+
+| Parameter | Type                                       |
+| --------- | ------------------------------------------ |
+| `other`   | [`Node`](#node-1) \| `null` \| `undefined` |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.contains`
+
+#### createAttribute()
+
+> **createAttribute**(`localName`): [`Attr`](#attr-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1233
+
+Creates an attribute object with a specified name.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Document/createAttribute)
+
+##### Parameters
+
+| Parameter   | Type     |
+| ----------- | -------- |
+| `localName` | `string` |
+
+##### Returns
+
+[`Attr`](#attr-1)
+
+#### createAttributeNS()
+
+> **createAttributeNS**(`namespace`, `qualifiedName`): [`Attr`](#attr-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1236
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Document/createAttributeNS)
+
+##### Parameters
+
+| Parameter       | Type               |
+| --------------- | ------------------ |
+| `namespace`     | `string` \| `null` |
+| `qualifiedName` | `string`           |
+
+##### Returns
+
+[`Attr`](#attr-1)
+
+#### createCDATASection()
+
+> **createCDATASection**(`data`): `CDATASection`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1249
+
+Returns a new CDATASection node whose data is `data`.
+
+**This implementation differs from the specification:** - calling this method on an HTML
+document does not throw `NotSupportedError`.
+
+##### Parameters
+
+| Parameter | Type     |
+| --------- | -------- |
+| `data`    | `string` |
+
+##### Returns
+
+`CDATASection`
+
+##### Throws
+
+With code `INVALID_CHARACTER_ERR` if `data` contains `"]]>"`.
+
+##### See
+
+- https://developer.mozilla.org/en-US/docs/Web/API/Document/createCDATASection
+- https://dom.spec.whatwg.org/#dom-document-createcdatasection
+
+#### createComment()
+
+> **createComment**(`data`): `Comment`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1261
+
+Creates a comment object with the specified data.
+
+No validation is performed at creation time. When the resulting document is serialized
+with `requireWellFormed: true`, the serializer throws `InvalidStateError` if the comment
+data contains `--` anywhere, ends with `-`, or contains characters outside the XML Char
+production (W3C DOM Parsing §3.2.1.3). Without that option the data is emitted verbatim.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Document/createComment)
+
+##### Parameters
+
+| Parameter | Type     |
+| --------- | -------- |
+| `data`    | `string` |
+
+##### Returns
+
+`Comment`
+
+#### createDocumentFragment()
+
+> **createDocumentFragment**(): `DocumentFragment`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1268
+
+Creates a new document.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Document/createDocumentFragment)
+
+##### Returns
+
+`DocumentFragment`
+
+#### createElement()
+
+> **createElement**(`tagName`): [`Element`](#element-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1270
+
+##### Parameters
+
+| Parameter | Type     |
+| --------- | -------- |
+| `tagName` | `string` |
+
+##### Returns
+
+[`Element`](#element-1)
+
+#### createElementNS()
+
+> **createElementNS**(`namespace`, `qualifiedName`): [`Element`](#element-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1292
+
+Returns an element with namespace namespace. Its namespace prefix will be everything before
+":" (U+003E) in qualifiedName or null. Its local name will be everything after ":" (U+003E)
+in qualifiedName or qualifiedName.
+
+If localName does not match the Name production an "InvalidCharacterError" DOMException will
+be thrown.
+
+If one of the following conditions is true a "NamespaceError" DOMException will be thrown:
+
+localName does not match the QName production.
+Namespace prefix is not null and namespace is the empty string.
+Namespace prefix is "xml" and namespace is not the XML namespace.
+qualifiedName or namespace prefix is "xmlns" and namespace is not the XMLNS namespace.
+namespace is the XMLNS namespace and neither qualifiedName nor namespace prefix is "xmlns".
+
+When supplied, options's is can be used to create a customized built-in element.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Document/createElementNS)
+
+##### Parameters
+
+| Parameter       | Type               |
+| --------------- | ------------------ |
+| `namespace`     | `string` \| `null` |
+| `qualifiedName` | `string`           |
+
+##### Returns
+
+[`Element`](#element-1)
+
+#### ~~createEntityReference()~~
+
+> **createEntityReference**(`name`): `EntityReference`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1319
+
+Creates an EntityReference object.
+The current implementation does not fill the `childNodes` with those of the corresponding
+`Entity`
+
+The name of the entity to reference. No namespace well-formedness checks are performed.
+
+The `name` is validated against the XML `Name` production at creation time; an invalid
+name throws `InvalidCharacterError`. When the resulting node is serialized with
+`requireWellFormed: true`, the serializer re-validates `nodeName` against the XML `Name`
+production and throws `InvalidStateError` if a later `nodeName` mutation made it invalid;
+without that option the name is emitted verbatim.
+
+**This implementation differs from the specification:** xmldom does not expand entities —
+the parser resolves entity references inline and never constructs `EntityReference` nodes,
+so this method is the only producer.
+
+##### Parameters
+
+| Parameter | Type     |
+| --------- | -------- |
+| `name`    | `string` |
+
+##### Returns
+
+`EntityReference`
+
+##### Deprecated
+
+In DOM Level 4.
+
+##### Throws
+
+With code `INVALID_CHARACTER_ERR` when `name` is not a valid XML `Name`.
+
+##### Throws
+
+with code `NOT_SUPPORTED_ERR` when the document is of type `html`
+
+##### See
+
+https://www.w3.org/TR/DOM-Level-3-Core/core.html#ID-392B75AE
+
+#### createProcessingInstruction()
+
+> **createProcessingInstruction**(`target`, `data`): `ProcessingInstruction`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1338
+
+Returns a ProcessingInstruction node whose target is target and data is data.
+
+**This behavior is slightly different from the in the specs**:
+
+- it does not do any input validation on the arguments and doesn't throw
+  "InvalidCharacterError".
+
+Note: When the resulting document is serialized with `requireWellFormed: true`, the
+serializer throws `InvalidStateError` if `.target` is not a valid XML `NCName` (a `Name`
+with no colon) or is an ASCII case-insensitive match for `"xml"`, or if `.data` contains
+`?>` or characters outside the XML Char production (W3C DOM Parsing §3.2.1.7). Without
+that option the target and data are emitted verbatim.
+
+##### Parameters
+
+| Parameter | Type     |
+| --------- | -------- |
+| `target`  | `string` |
+| `data`    | `string` |
+
+##### Returns
+
+`ProcessingInstruction`
+
+##### See
+
+- https://developer.mozilla.org/docs/Web/API/Document/createProcessingInstruction
+- https://dom.spec.whatwg.org/#dom-document-createprocessinginstruction
+- https://www.w3.org/TR/DOM-Parsing/#dfn-concept-serialize-xml §3.2.1.7
+
+#### createTextNode()
+
+> **createTextNode**(`data`): [`Text`](#text-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1351
+
+Creates a text string from the specified value.
+
+##### Parameters
+
+| Parameter | Type     | Description                                                                                                                                        |
+| --------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data`    | `string` | String that specifies the nodeValue property of the text node. [MDN Reference](https://developer.mozilla.org/docs/Web/API/Document/createTextNode) |
+
+##### Returns
+
+[`Text`](#text-1)
+
+#### getElementById()
+
+> **getElementById**(`elementId`): [`Element`](#element-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1356
+
+Returns a reference to the first object with the specified value of the ID attribute.
+
+##### Parameters
+
+| Parameter   | Type     |
+| ----------- | -------- |
+| `elementId` | `string` |
+
+##### Returns
+
+[`Element`](#element-1) \| `null`
+
+#### getElementsByClassName()
+
+> **getElementsByClassName**(`classNames`): `LiveNodeList`\<[`Element`](#element-1)\>
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1373
+
+Returns a LiveNodeList of all child elements which have **all** of the given class
+name(s).
+
+Returns an empty list if `classNames` is an empty string or only contains HTML white space
+characters.
+
+Warning: This returns a live LiveNodeList.
+Changes in the DOM will reflect in the array as the changes occur.
+If an element selected by this array no longer qualifies for the selector,
+it will automatically be removed. Be aware of this for iteration purposes.
+
+##### Parameters
+
+| Parameter    | Type     |
+| ------------ | -------- |
+| `classNames` | `string` |
+
+##### Returns
+
+`LiveNodeList`\<[`Element`](#element-1)\>
+
+##### See
+
+- https://developer.mozilla.org/en-US/docs/Web/API/Document/getElementsByClassName
+- https://dom.spec.whatwg.org/#concept-getelementsbyclassname
+
+#### getElementsByTagName()
+
+> **getElementsByTagName**(`qualifiedName`): `LiveNodeList`\<[`Element`](#element-1)\>
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1397
+
+Returns a LiveNodeList of elements with the given qualifiedName.
+Searching for all descendants can be done by passing `*` as `qualifiedName`.
+
+The complete document is searched, including the root node.
+The returned list is live, which means it updates itself with the DOM tree automatically.
+Therefore, there is no need to call `Element.getElementsByTagName()`
+with the same element and arguments repeatedly if the DOM changes in between calls.
+
+When called on an HTML element in an HTML document,
+`getElementsByTagName` lower-cases the argument before searching for it.
+This is undesirable when trying to match camel-cased SVG elements (such as
+`<linearGradient>`) in an HTML document.
+Instead, use `Element.getElementsByTagNameNS()`,
+which preserves the capitalization of the tag name.
+
+`Element.getElementsByTagName` is similar to `Document.getElementsByTagName()`,
+except that it only searches for elements that are descendants of the specified element.
+
+##### Parameters
+
+| Parameter       | Type     |
+| --------------- | -------- |
+| `qualifiedName` | `string` |
+
+##### Returns
+
+`LiveNodeList`\<[`Element`](#element-1)\>
+
+##### See
+
+- https://developer.mozilla.org/en-US/docs/Web/API/Element/getElementsByTagName
+- https://dom.spec.whatwg.org/#concept-getelementsbytagname
+
+#### getElementsByTagNameNS()
+
+> **getElementsByTagNameNS**(`namespaceURI`, `localName`): `LiveNodeList`\<[`Element`](#element-1)\>
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1409
+
+Returns a `LiveNodeList` of elements with the given tag name belonging to the given
+namespace. The complete document is searched, including the root node.
+
+The returned list is live, which means it updates itself with the DOM tree automatically.
+Therefore, there is no need to call `Element.getElementsByTagName()`
+with the same element and arguments repeatedly if the DOM changes in between calls.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/getElementsByTagNameNS)
+
+##### Parameters
+
+| Parameter      | Type               |
+| -------------- | ------------------ |
+| `namespaceURI` | `string` \| `null` |
+| `localName`    | `string`           |
+
+##### Returns
+
+`LiveNodeList`\<[`Element`](#element-1)\>
+
+#### getRootNode()
+
+> **getRootNode**(`options`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:502
+
+Searches for the root node of this node.
+
+**This behavior is slightly different from the one in the specs**:
+
+- ignores `options.composed`, since `ShadowRoot`s are unsupported, therefore always
+  returning root.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/getRootNode)
+
+##### Parameters
+
+| Parameter | Type                 |
+| --------- | -------------------- |
+| `options` | `GetRootNodeOptions` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### See
+
+- https://dom.spec.whatwg.org/#dom-node-getrootnode
+- https://dom.spec.whatwg.org/#concept-shadow-including-root
+
+##### Inherited from
+
+`Node.getRootNode`
+
+#### hasChildNodes()
+
+> **hasChildNodes**(): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:547
+
+Returns whether node has children.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/hasChildNodes)
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.hasChildNodes`
+
+#### importNode()
+
+> **importNode**\<`T`\>(`node`, `deep?`): `T`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1421
+
+Imports a node from another document into this document, creating a new copy owned by this
+document. If `deep` is true, the copy also includes the node's descendants.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Document/importNode)
+
+##### Type Parameters
+
+| Type Parameter                  |
+| ------------------------------- |
+| `T` _extends_ [`Node`](#node-1) |
+
+##### Parameters
+
+| Parameter | Type      |
+| --------- | --------- |
+| `node`    | `T`       |
+| `deep?`   | `boolean` |
+
+##### Returns
+
+`T`
+
+##### See
+
+[https://dom.spec.whatwg.org/#dom-document-importnode](https://dom.spec.whatwg.org/#dom-document-importnode)
+
+#### insertBefore()
+
+> **insertBefore**(`node`, `child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:550
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/insertBefore)
+
+##### Parameters
+
+| Parameter | Type                        |
+| --------- | --------------------------- |
+| `node`    | [`Node`](#node-1)           |
+| `child`   | [`Node`](#node-1) \| `null` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.insertBefore`
+
+#### isDefaultNamespace()
+
+> **isDefaultNamespace**(`namespace`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:553
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/isDefaultNamespace)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.isDefaultNamespace`
+
+#### isEqualNode()
+
+> **isEqualNode**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:514
+
+Checks whether the given node is equal to this node.
+
+Two nodes are equal when they have the same type, defining characteristics (for the type),
+and the same `childNodes`. The comparison is iterative to avoid stack overflows on deeply
+nested trees. `Attribute` nodes of each `Element` pair are also compared iteratively.
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`boolean`
+
+##### See
+
+- [https://dom.spec.whatwg.org/#concept-node-equals](https://dom.spec.whatwg.org/#concept-node-equals)
+- [https://developer.mozilla.org/en-US/docs/Web/API/Node/isEqualNode](https://developer.mozilla.org/en-US/docs/Web/API/Node/isEqualNode)
+
+##### Inherited from
+
+`Node.isEqualNode`
+
+#### isSameNode()
+
+> **isSameNode**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:521
+
+Checks whether the given node is this node.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/isSameNode)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.isSameNode`
+
+#### ~~isSupported()~~
+
+> **isSupported**(`feature`, `version`): `true`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:568
+
+Checks whether the DOM implementation implements a specific feature and its version.
+
+##### Parameters
+
+| Parameter | Type     | Description                                                                                                                          |
+| --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `feature` | `string` | The package name of the feature to test. This is the same name that can be passed to the method `hasFeature` on `DOMImplementation`. |
+| `version` | `string` | This is the version number of the package name to test.                                                                              |
+
+##### Returns
+
+`true`
+
+##### Deprecated
+
+Since `DOMImplementation.hasFeature` is deprecated and always returns true.
+
+##### Since
+
+Introduced in DOM Level 2
+
+##### See
+
+DOMImplementation.hasFeature
+
+##### Inherited from
+
+`Node.isSupported`
+
+#### lookupNamespaceURI()
+
+> **lookupNamespaceURI**(`prefix`): `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:571
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lookupNamespaceURI)
+
+##### Parameters
+
+| Parameter | Type               |
+| --------- | ------------------ |
+| `prefix`  | `string` \| `null` |
+
+##### Returns
+
+`string` \| `null`
+
+##### Inherited from
+
+`Node.lookupNamespaceURI`
+
+#### lookupPrefix()
+
+> **lookupPrefix**(`namespace`): `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:574
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lookupPrefix)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+
+##### Returns
+
+`string` \| `null`
+
+##### Inherited from
+
+`Node.lookupPrefix`
+
+#### normalize()
+
+> **normalize**(): `void`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:582
+
+Removes empty exclusive Text nodes and concatenates the data of remaining contiguous
+exclusive Text nodes into the first of their nodes.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/normalize)
+
+##### Returns
+
+`void`
+
+##### Inherited from
+
+`Node.normalize`
+
+#### removeChild()
+
+> **removeChild**(`child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:585
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/removeChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `child`   | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.removeChild`
+
+#### replaceChild()
+
+> **replaceChild**(`node`, `child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:588
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/replaceChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `node`    | [`Node`](#node-1) |
+| `child`   | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.replaceChild`
+
+---
+
+## DocumentType
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1431
+
+A Node containing a doctype.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/DocumentType)
+
+### Extends
+
+- [`Node`](#node-1)
+
+### Properties
+
+#### ATTRIBUTE_NODE
+
+> `readonly` **ATTRIBUTE_NODE**: `2`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:592
+
+##### Inherited from
+
+`Node.ATTRIBUTE_NODE`
+
+#### baseURI
+
+> `readonly` **baseURI**: `"about:blank"`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:396
+
+Always returns `about:blank` currently.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/baseURI)
+
+##### Inherited from
+
+`Node.baseURI`
+
+#### CDATA_SECTION_NODE
+
+> `readonly` **CDATA_SECTION_NODE**: `4`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:596
+
+node is a CDATASection node.
+
+##### Inherited from
+
+`Node.CDATA_SECTION_NODE`
+
+#### childNodes
+
+> `readonly` **childNodes**: `NodeList`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:374
+
+Returns the children.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/childNodes)
+
+##### Inherited from
+
+`Node.childNodes`
+
+#### columnNumber?
+
+> `optional` **columnNumber**: `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:479
+
+One based column position inside the parsed source,
+if the `locator` was not disabled.
+
+##### Inherited from
+
+`Node.columnNumber`
+
+#### COMMENT_NODE
+
+> `readonly` **COMMENT_NODE**: `8`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:602
+
+node is a Comment node.
+
+##### Inherited from
+
+`Node.COMMENT_NODE`
+
+#### DOCUMENT_FRAGMENT_NODE
+
+> `readonly` **DOCUMENT_FRAGMENT_NODE**: `11`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:608
+
+node is a DocumentFragment node.
+
+##### Inherited from
+
+`Node.DOCUMENT_FRAGMENT_NODE`
+
+#### DOCUMENT_NODE
+
+> `readonly` **DOCUMENT_NODE**: `9`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:604
+
+node is a document.
+
+##### Inherited from
+
+`Node.DOCUMENT_NODE`
+
+#### DOCUMENT_POSITION_CONTAINED_BY
+
+> `readonly` **DOCUMENT_POSITION_CONTAINED_BY**: `16`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:619
+
+Set when other is a descendant of node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_CONTAINED_BY`
+
+#### DOCUMENT_POSITION_CONTAINS
+
+> `readonly` **DOCUMENT_POSITION_CONTAINS**: `8`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:617
+
+Set when other is an ancestor of node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_CONTAINS`
+
+#### DOCUMENT_POSITION_DISCONNECTED
+
+> `readonly` **DOCUMENT_POSITION_DISCONNECTED**: `1`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:611
+
+Set when node and other are not in the same tree.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_DISCONNECTED`
+
+#### DOCUMENT_POSITION_FOLLOWING
+
+> `readonly` **DOCUMENT_POSITION_FOLLOWING**: `4`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:615
+
+Set when other is following node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_FOLLOWING`
+
+#### DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC
+
+> `readonly` **DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC**: `32`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:620
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC`
+
+#### DOCUMENT_POSITION_PRECEDING
+
+> `readonly` **DOCUMENT_POSITION_PRECEDING**: `2`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:613
+
+Set when other is preceding node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_PRECEDING`
+
+#### DOCUMENT_TYPE_NODE
+
+> `readonly` **DOCUMENT_TYPE_NODE**: `10`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:606
+
+node is a doctype.
+
+##### Inherited from
+
+`Node.DOCUMENT_TYPE_NODE`
+
+#### ELEMENT_NODE
+
+> `readonly` **ELEMENT_NODE**: `1`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:591
+
+node is an element.
+
+##### Inherited from
+
+`Node.ELEMENT_NODE`
+
+#### ENTITY_NODE
+
+> `readonly` **ENTITY_NODE**: `6`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:598
+
+##### Inherited from
+
+`Node.ENTITY_NODE`
+
+#### ENTITY_REFERENCE_NODE
+
+> `readonly` **ENTITY_REFERENCE_NODE**: `5`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:597
+
+##### Inherited from
+
+`Node.ENTITY_REFERENCE_NODE`
+
+#### firstChild
+
+> `readonly` **firstChild**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:380
+
+Returns the first child.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/firstChild)
+
+##### Inherited from
+
+`Node.firstChild`
+
+#### internalSubset
+
+> `readonly` **internalSubset**: `string`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1449
+
+The internal subset string (the raw content between `[` and `]`), or an empty string.
+Declared `readonly` by the WHATWG DOM spec; xmldom does not enforce this — direct
+property writes succeed and the written value is serialized verbatim.
+When serialized with `requireWellFormed: true`, throws `InvalidStateError` if the value
+contains `"]>"`.
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/DocumentType/internalSubset)
+
+#### isConnected
+
+> `readonly` **isConnected**: `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:402
+
+Returns true if this node is inside of a document or is the document node itself.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/isConnected)
+
+##### Inherited from
+
+`Node.isConnected`
+
+#### lastChild
+
+> `readonly` **lastChild**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:386
+
+Returns the last child.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lastChild)
+
+##### Inherited from
+
+`Node.lastChild`
+
+#### lineNumber?
+
+> `optional` **lineNumber**: `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:474
+
+Zero based line position inside the parsed source,
+if the `locator` was not disabled.
+
+##### Inherited from
+
+`Node.lineNumber`
+
+#### localName
+
+> **localName**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:390
+
+The local part of the qualified name of this node.
+
+##### Inherited from
+
+`Node.localName`
+
+#### name
+
+> `readonly` **name**: `string`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1440
+
+The doctype name, stored verbatim.
+Declared `readonly` by the WHATWG DOM spec; xmldom does not enforce this — direct
+property writes succeed and the written value is serialized verbatim.
+When serialized with `requireWellFormed: true`, throws `InvalidStateError` if the value
+is not a valid XML `Name` production (XML 1.0 [5]).
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/DocumentType/name)
+
+#### namespaceURI
+
+> `readonly` **namespaceURI**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:406
+
+The namespace URI of this node.
+
+##### Inherited from
+
+`Node.namespaceURI`
+
+#### nextSibling
+
+> `readonly` **nextSibling**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:412
+
+Returns the next sibling.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nextSibling)
+
+##### Inherited from
+
+`Node.nextSibling`
+
+#### nodeName
+
+> `readonly` **nodeName**: `string`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:418
+
+Returns a string appropriate for the type of node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeName)
+
+##### Inherited from
+
+`Node.nodeName`
+
+#### nodeType
+
+> `readonly` **nodeType**: `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:424
+
+Returns the type of node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeType)
+
+##### Inherited from
+
+`Node.nodeType`
+
+#### nodeValue
+
+> **nodeValue**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:426
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeValue)
+
+##### Inherited from
+
+`Node.nodeValue`
+
+#### NOTATION_NODE
+
+> `readonly` **NOTATION_NODE**: `12`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:609
+
+##### Inherited from
+
+`Node.NOTATION_NODE`
+
+#### ownerDocument
+
+> `readonly` **ownerDocument**: [`Document`](#document-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:432
+
+Returns the node document. Returns null for documents.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/ownerDocument)
+
+##### Inherited from
+
+`Node.ownerDocument`
+
+#### parentElement
+
+> `readonly` **parentElement**: [`Element`](#element-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:444
+
+Returns the parent `Node` if it is of type `Element`, otherwise `null`.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/parentElement)
+
+##### Inherited from
+
+`Node.parentElement`
+
+#### parentNode
+
+> `readonly` **parentNode**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:438
+
+Returns the parent.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/parentNode)
+
+##### Inherited from
+
+`Node.parentNode`
+
+#### prefix
+
+> **prefix**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:448
+
+The prefix of the namespace for this node.
+
+##### Inherited from
+
+`Node.prefix`
+
+#### previousSibling
+
+> `readonly` **previousSibling**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:454
+
+Returns the previous sibling.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/previousSibling)
+
+##### Inherited from
+
+`Node.previousSibling`
+
+#### PROCESSING_INSTRUCTION_NODE
+
+> `readonly` **PROCESSING_INSTRUCTION_NODE**: `7`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:600
+
+node is a ProcessingInstruction node.
+
+##### Inherited from
+
+`Node.PROCESSING_INSTRUCTION_NODE`
+
+#### publicId
+
+> `readonly` **publicId**: `string`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1458
+
+The external subset public identifier, stored verbatim including surrounding quotes.
+Declared `readonly` by the WHATWG DOM spec; xmldom does not enforce this — direct
+property writes succeed and the written value is serialized verbatim.
+When serialized with `requireWellFormed: true`, throws `InvalidStateError` if the value
+is non-empty and does not match the XML `PubidLiteral` production (XML 1.0 [12]).
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/DocumentType/publicId)
+
+#### systemId
+
+> `readonly` **systemId**: `string`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1467
+
+The external subset system identifier, stored verbatim including surrounding quotes.
+Declared `readonly` by the WHATWG DOM spec; xmldom does not enforce this — direct
+property writes succeed and the written value is serialized verbatim.
+When serialized with `requireWellFormed: true`, throws `InvalidStateError` if the value
+is non-empty and does not match the XML `SystemLiteral` production (XML 1.0 [11]).
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/DocumentType/systemId)
+
+#### TEXT_NODE
+
+> `readonly` **TEXT_NODE**: `3`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:594
+
+node is a Text node.
+
+##### Inherited from
+
+`Node.TEXT_NODE`
+
+#### textContent
+
+> **textContent**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:468
+
+The text content of this node and its descendants.
+
+For [Element](#element-1) and DocumentFragment nodes, returns the concatenation of the
+`nodeValue` of every descendant text node, excluding processing instruction and comment
+nodes. For all other node types, returns `nodeValue`.
+
+Setting `textContent` on an element or document fragment replaces all child nodes with a
+single text node; on other nodes it sets `data`, `value`, and `nodeValue` directly.
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/textContent)
+
+##### See
+
+[https://dom.spec.whatwg.org/#dom-node-textcontent](https://dom.spec.whatwg.org/#dom-node-textcontent)
+
+##### Inherited from
+
+`Node.textContent`
+
+### Methods
+
+#### appendChild()
+
+> **appendChild**(`node`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:482
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/appendChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `node`    | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.appendChild`
+
+#### cloneNode()
+
+> **cloneNode**(`deep?`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:533
+
+Returns a copy of node. If deep is true, the copy also includes the node's descendants.
+
+##### Parameters
+
+| Parameter | Type      |
+| --------- | --------- |
+| `deep?`   | `boolean` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Throws
+
+May throw a DOMException if operations within [Element#setAttributeNode](#setattributenode) or
+[Node#appendChild](#appendchild-8) (which are potentially invoked in this method) do not meet their
+specific constraints.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/cloneNode)
+
+##### Inherited from
+
+`Node.cloneNode`
+
+#### compareDocumentPosition()
+
+> **compareDocumentPosition**(`other`): `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:540
+
+Returns a bitmask indicating the position of other relative to node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/compareDocumentPosition)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`number`
+
+##### Inherited from
+
+`Node.compareDocumentPosition`
+
+#### contains()
+
+> **contains**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:489
+
+Checks whether `other` is an inclusive descendant of this node.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/contains)
+
+##### Parameters
+
+| Parameter | Type                                       |
+| --------- | ------------------------------------------ |
+| `other`   | [`Node`](#node-1) \| `null` \| `undefined` |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.contains`
+
+#### getRootNode()
+
+> **getRootNode**(`options`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:502
+
+Searches for the root node of this node.
+
+**This behavior is slightly different from the one in the specs**:
+
+- ignores `options.composed`, since `ShadowRoot`s are unsupported, therefore always
+  returning root.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/getRootNode)
+
+##### Parameters
+
+| Parameter | Type                 |
+| --------- | -------------------- |
+| `options` | `GetRootNodeOptions` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### See
+
+- https://dom.spec.whatwg.org/#dom-node-getrootnode
+- https://dom.spec.whatwg.org/#concept-shadow-including-root
+
+##### Inherited from
+
+`Node.getRootNode`
+
+#### hasChildNodes()
+
+> **hasChildNodes**(): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:547
+
+Returns whether node has children.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/hasChildNodes)
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.hasChildNodes`
+
+#### insertBefore()
+
+> **insertBefore**(`node`, `child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:550
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/insertBefore)
+
+##### Parameters
+
+| Parameter | Type                        |
+| --------- | --------------------------- |
+| `node`    | [`Node`](#node-1)           |
+| `child`   | [`Node`](#node-1) \| `null` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.insertBefore`
+
+#### isDefaultNamespace()
+
+> **isDefaultNamespace**(`namespace`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:553
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/isDefaultNamespace)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.isDefaultNamespace`
+
+#### isEqualNode()
+
+> **isEqualNode**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:514
+
+Checks whether the given node is equal to this node.
+
+Two nodes are equal when they have the same type, defining characteristics (for the type),
+and the same `childNodes`. The comparison is iterative to avoid stack overflows on deeply
+nested trees. `Attribute` nodes of each `Element` pair are also compared iteratively.
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`boolean`
+
+##### See
+
+- [https://dom.spec.whatwg.org/#concept-node-equals](https://dom.spec.whatwg.org/#concept-node-equals)
+- [https://developer.mozilla.org/en-US/docs/Web/API/Node/isEqualNode](https://developer.mozilla.org/en-US/docs/Web/API/Node/isEqualNode)
+
+##### Inherited from
+
+`Node.isEqualNode`
+
+#### isSameNode()
+
+> **isSameNode**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:521
+
+Checks whether the given node is this node.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/isSameNode)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.isSameNode`
+
+#### ~~isSupported()~~
+
+> **isSupported**(`feature`, `version`): `true`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:568
+
+Checks whether the DOM implementation implements a specific feature and its version.
+
+##### Parameters
+
+| Parameter | Type     | Description                                                                                                                          |
+| --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `feature` | `string` | The package name of the feature to test. This is the same name that can be passed to the method `hasFeature` on `DOMImplementation`. |
+| `version` | `string` | This is the version number of the package name to test.                                                                              |
+
+##### Returns
+
+`true`
+
+##### Deprecated
+
+Since `DOMImplementation.hasFeature` is deprecated and always returns true.
+
+##### Since
+
+Introduced in DOM Level 2
+
+##### See
+
+DOMImplementation.hasFeature
+
+##### Inherited from
+
+`Node.isSupported`
+
+#### lookupNamespaceURI()
+
+> **lookupNamespaceURI**(`prefix`): `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:571
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lookupNamespaceURI)
+
+##### Parameters
+
+| Parameter | Type               |
+| --------- | ------------------ |
+| `prefix`  | `string` \| `null` |
+
+##### Returns
+
+`string` \| `null`
+
+##### Inherited from
+
+`Node.lookupNamespaceURI`
+
+#### lookupPrefix()
+
+> **lookupPrefix**(`namespace`): `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:574
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lookupPrefix)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+
+##### Returns
+
+`string` \| `null`
+
+##### Inherited from
+
+`Node.lookupPrefix`
+
+#### normalize()
+
+> **normalize**(): `void`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:582
+
+Removes empty exclusive Text nodes and concatenates the data of remaining contiguous
+exclusive Text nodes into the first of their nodes.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/normalize)
+
+##### Returns
+
+`void`
+
+##### Inherited from
+
+`Node.normalize`
+
+#### removeChild()
+
+> **removeChild**(`child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:585
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/removeChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `child`   | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.removeChild`
+
+#### replaceChild()
+
+> **replaceChild**(`node`, `child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:588
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/replaceChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `node`    | [`Node`](#node-1) |
+| `child`   | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.replaceChild`
 
 ---
 
 ## DublinCore
 
-Defined in:
-[libraries/epub/index.ts:167](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L167)
+Defined in: [libraries/epub/src/index.tsx:190](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L190)
 
 ### Properties
 
@@ -4056,64 +7016,1406 @@ Defined in:
 
 > `optional` **contributors**: [`DcCreator`](#dccreator)[]
 
-Defined in:
-[libraries/epub/index.ts:174](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L174)
+Defined in: [libraries/epub/src/index.tsx:197](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L197)
 
 #### creators?
 
 > `optional` **creators**: [`DcCreator`](#dccreator)[]
 
-Defined in:
-[libraries/epub/index.ts:173](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L173)
+Defined in: [libraries/epub/src/index.tsx:196](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L196)
 
 #### date?
 
 > `optional` **date**: `Date`
 
-Defined in:
-[libraries/epub/index.ts:171](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L171)
+Defined in: [libraries/epub/src/index.tsx:194](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L194)
 
 #### identifier
 
 > **identifier**: `string`
 
-Defined in:
-[libraries/epub/index.ts:170](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L170)
+Defined in: [libraries/epub/src/index.tsx:193](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L193)
 
 #### language
 
 > **language**: `Locale`
 
-Defined in:
-[libraries/epub/index.ts:169](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L169)
+Defined in: [libraries/epub/src/index.tsx:192](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L192)
 
 #### subjects?
 
 > `optional` **subjects**: (`string` \| [`DcSubject`](#dcsubject))[]
 
-Defined in:
-[libraries/epub/index.ts:172](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L172)
+Defined in: [libraries/epub/src/index.tsx:195](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L195)
 
 #### title
 
 > **title**: `string`
 
-Defined in:
-[libraries/epub/index.ts:168](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L168)
+Defined in: [libraries/epub/src/index.tsx:191](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L191)
 
 #### type?
 
 > `optional` **type**: `string`
 
-Defined in:
-[libraries/epub/index.ts:175](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L175)
+Defined in: [libraries/epub/src/index.tsx:198](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L198)
+
+---
+
+## Element
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:842
+
+Element is the most general base class from which all objects in a Document inherit. It only
+has methods and properties common to all kinds of elements. More specific classes inherit from
+Element.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element)
+
+### Extends
+
+- [`Node`](#node-1)
+
+### Properties
+
+#### ATTRIBUTE_NODE
+
+> `readonly` **ATTRIBUTE_NODE**: `2`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:592
+
+##### Inherited from
+
+`Node.ATTRIBUTE_NODE`
+
+#### attributes
+
+> `readonly` **attributes**: `NamedNodeMap`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:846
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/attributes)
+
+#### baseURI
+
+> `readonly` **baseURI**: `"about:blank"`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:396
+
+Always returns `about:blank` currently.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/baseURI)
+
+##### Inherited from
+
+`Node.baseURI`
+
+#### CDATA_SECTION_NODE
+
+> `readonly` **CDATA_SECTION_NODE**: `4`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:596
+
+node is a CDATASection node.
+
+##### Inherited from
+
+`Node.CDATA_SECTION_NODE`
+
+#### childNodes
+
+> `readonly` **childNodes**: `NodeList`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:374
+
+Returns the children.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/childNodes)
+
+##### Inherited from
+
+`Node.childNodes`
+
+#### children
+
+> `readonly` **children**: `LiveNodeList`\<[`Element`](#element-1)\>
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:861
+
+Returns a live collection of the direct child elements of this element.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/children)
+
+##### See
+
+https://dom.spec.whatwg.org/#dom-parentnode-children
+
+#### columnNumber?
+
+> `optional` **columnNumber**: `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:479
+
+One based column position inside the parsed source,
+if the `locator` was not disabled.
+
+##### Inherited from
+
+`Node.columnNumber`
+
+#### COMMENT_NODE
+
+> `readonly` **COMMENT_NODE**: `8`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:602
+
+node is a Comment node.
+
+##### Inherited from
+
+`Node.COMMENT_NODE`
+
+#### DOCUMENT_FRAGMENT_NODE
+
+> `readonly` **DOCUMENT_FRAGMENT_NODE**: `11`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:608
+
+node is a DocumentFragment node.
+
+##### Inherited from
+
+`Node.DOCUMENT_FRAGMENT_NODE`
+
+#### DOCUMENT_NODE
+
+> `readonly` **DOCUMENT_NODE**: `9`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:604
+
+node is a document.
+
+##### Inherited from
+
+`Node.DOCUMENT_NODE`
+
+#### DOCUMENT_POSITION_CONTAINED_BY
+
+> `readonly` **DOCUMENT_POSITION_CONTAINED_BY**: `16`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:619
+
+Set when other is a descendant of node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_CONTAINED_BY`
+
+#### DOCUMENT_POSITION_CONTAINS
+
+> `readonly` **DOCUMENT_POSITION_CONTAINS**: `8`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:617
+
+Set when other is an ancestor of node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_CONTAINS`
+
+#### DOCUMENT_POSITION_DISCONNECTED
+
+> `readonly` **DOCUMENT_POSITION_DISCONNECTED**: `1`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:611
+
+Set when node and other are not in the same tree.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_DISCONNECTED`
+
+#### DOCUMENT_POSITION_FOLLOWING
+
+> `readonly` **DOCUMENT_POSITION_FOLLOWING**: `4`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:615
+
+Set when other is following node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_FOLLOWING`
+
+#### DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC
+
+> `readonly` **DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC**: `32`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:620
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC`
+
+#### DOCUMENT_POSITION_PRECEDING
+
+> `readonly` **DOCUMENT_POSITION_PRECEDING**: `2`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:613
+
+Set when other is preceding node.
+
+##### Inherited from
+
+`Node.DOCUMENT_POSITION_PRECEDING`
+
+#### DOCUMENT_TYPE_NODE
+
+> `readonly` **DOCUMENT_TYPE_NODE**: `10`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:606
+
+node is a doctype.
+
+##### Inherited from
+
+`Node.DOCUMENT_TYPE_NODE`
+
+#### ELEMENT_NODE
+
+> `readonly` **ELEMENT_NODE**: `1`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:591
+
+node is an element.
+
+##### Inherited from
+
+`Node.ELEMENT_NODE`
+
+#### ENTITY_NODE
+
+> `readonly` **ENTITY_NODE**: `6`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:598
+
+##### Inherited from
+
+`Node.ENTITY_NODE`
+
+#### ENTITY_REFERENCE_NODE
+
+> `readonly` **ENTITY_REFERENCE_NODE**: `5`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:597
+
+##### Inherited from
+
+`Node.ENTITY_REFERENCE_NODE`
+
+#### firstChild
+
+> `readonly` **firstChild**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:380
+
+Returns the first child.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/firstChild)
+
+##### Inherited from
+
+`Node.firstChild`
+
+#### isConnected
+
+> `readonly` **isConnected**: `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:402
+
+Returns true if this node is inside of a document or is the document node itself.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/isConnected)
+
+##### Inherited from
+
+`Node.isConnected`
+
+#### lastChild
+
+> `readonly` **lastChild**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:386
+
+Returns the last child.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lastChild)
+
+##### Inherited from
+
+`Node.lastChild`
+
+#### lineNumber?
+
+> `optional` **lineNumber**: `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:474
+
+Zero based line position inside the parsed source,
+if the `locator` was not disabled.
+
+##### Inherited from
+
+`Node.lineNumber`
+
+#### localName
+
+> **localName**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:390
+
+The local part of the qualified name of this node.
+
+##### Inherited from
+
+`Node.localName`
+
+#### namespaceURI
+
+> `readonly` **namespaceURI**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:406
+
+The namespace URI of this node.
+
+##### Inherited from
+
+`Node.namespaceURI`
+
+#### nextSibling
+
+> `readonly` **nextSibling**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:412
+
+Returns the next sibling.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nextSibling)
+
+##### Inherited from
+
+`Node.nextSibling`
+
+#### nodeName
+
+> `readonly` **nodeName**: `string`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:418
+
+Returns a string appropriate for the type of node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeName)
+
+##### Inherited from
+
+`Node.nodeName`
+
+#### nodeType
+
+> `readonly` **nodeType**: `1`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:843
+
+Returns the type of node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeType)
+
+##### Overrides
+
+`Node.nodeType`
+
+#### nodeValue
+
+> **nodeValue**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:426
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeValue)
+
+##### Inherited from
+
+`Node.nodeValue`
+
+#### NOTATION_NODE
+
+> `readonly` **NOTATION_NODE**: `12`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:609
+
+##### Inherited from
+
+`Node.NOTATION_NODE`
+
+#### ownerDocument
+
+> `readonly` **ownerDocument**: [`Document`](#document-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:432
+
+Returns the node document. Returns null for documents.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/ownerDocument)
+
+##### Inherited from
+
+`Node.ownerDocument`
+
+#### parentElement
+
+> `readonly` **parentElement**: [`Element`](#element-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:444
+
+Returns the parent `Node` if it is of type `Element`, otherwise `null`.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/parentElement)
+
+##### Inherited from
+
+`Node.parentElement`
+
+#### parentNode
+
+> `readonly` **parentNode**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:438
+
+Returns the parent.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/parentNode)
+
+##### Inherited from
+
+`Node.parentNode`
+
+#### prefix
+
+> **prefix**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:448
+
+The prefix of the namespace for this node.
+
+##### Inherited from
+
+`Node.prefix`
+
+#### previousSibling
+
+> `readonly` **previousSibling**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:454
+
+Returns the previous sibling.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/previousSibling)
+
+##### Inherited from
+
+`Node.previousSibling`
+
+#### PROCESSING_INSTRUCTION_NODE
+
+> `readonly` **PROCESSING_INSTRUCTION_NODE**: `7`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:600
+
+node is a ProcessingInstruction node.
+
+##### Inherited from
+
+`Node.PROCESSING_INSTRUCTION_NODE`
+
+#### tagName
+
+> `readonly` **tagName**: `string`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:852
+
+Returns the HTML-uppercased qualified name.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/tagName)
+
+#### TEXT_NODE
+
+> `readonly` **TEXT_NODE**: `3`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:594
+
+node is a Text node.
+
+##### Inherited from
+
+`Node.TEXT_NODE`
+
+#### textContent
+
+> **textContent**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:468
+
+The text content of this node and its descendants.
+
+For [Element](#element-1) and DocumentFragment nodes, returns the concatenation of the
+`nodeValue` of every descendant text node, excluding processing instruction and comment
+nodes. For all other node types, returns `nodeValue`.
+
+Setting `textContent` on an element or document fragment replaces all child nodes with a
+single text node; on other nodes it sets `data`, `value`, and `nodeValue` directly.
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/textContent)
+
+##### See
+
+[https://dom.spec.whatwg.org/#dom-node-textcontent](https://dom.spec.whatwg.org/#dom-node-textcontent)
+
+##### Inherited from
+
+`Node.textContent`
+
+### Methods
+
+#### appendChild()
+
+> **appendChild**(`node`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:482
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/appendChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `node`    | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.appendChild`
+
+#### cloneNode()
+
+> **cloneNode**(`deep?`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:533
+
+Returns a copy of node. If deep is true, the copy also includes the node's descendants.
+
+##### Parameters
+
+| Parameter | Type      |
+| --------- | --------- |
+| `deep?`   | `boolean` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Throws
+
+May throw a DOMException if operations within [Element#setAttributeNode](#setattributenode) or
+[Node#appendChild](#appendchild-8) (which are potentially invoked in this method) do not meet their
+specific constraints.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/cloneNode)
+
+##### Inherited from
+
+`Node.cloneNode`
+
+#### compareDocumentPosition()
+
+> **compareDocumentPosition**(`other`): `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:540
+
+Returns a bitmask indicating the position of other relative to node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/compareDocumentPosition)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`number`
+
+##### Inherited from
+
+`Node.compareDocumentPosition`
+
+#### contains()
+
+> **contains**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:489
+
+Checks whether `other` is an inclusive descendant of this node.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/contains)
+
+##### Parameters
+
+| Parameter | Type                                       |
+| --------- | ------------------------------------------ |
+| `other`   | [`Node`](#node-1) \| `null` \| `undefined` |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.contains`
+
+#### getAttribute()
+
+> **getAttribute**(`qualifiedName`): `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:869
+
+Returns element's first attribute whose qualified name is qualifiedName, and null if there
+is no such attribute otherwise.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/getAttribute)
+
+##### Parameters
+
+| Parameter       | Type     |
+| --------------- | -------- |
+| `qualifiedName` | `string` |
+
+##### Returns
+
+`string` \| `null`
+
+#### getAttributeNames()
+
+> **getAttributeNames**(): `string`[]
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:882
+
+Returns the qualified names of all element's attributes. Can contain duplicates.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/getAttributeNames)
+
+##### Returns
+
+`string`[]
+
+#### getAttributeNode()
+
+> **getAttributeNode**(`qualifiedName`): [`Attr`](#attr-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:884
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/getAttributeNode)
+
+##### Parameters
+
+| Parameter       | Type     |
+| --------------- | -------- |
+| `qualifiedName` | `string` |
+
+##### Returns
+
+[`Attr`](#attr-1) \| `null`
+
+#### getAttributeNodeNS()
+
+> **getAttributeNodeNS**(`namespace`, `localName`): [`Attr`](#attr-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:886
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/getAttributeNodeNS)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+| `localName` | `string`           |
+
+##### Returns
+
+[`Attr`](#attr-1) \| `null`
+
+#### getAttributeNS()
+
+> **getAttributeNS**(`namespace`, `localName`): `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:876
+
+Returns element's attribute whose namespace is namespace and local name is localName, and
+null if there is no such attribute otherwise.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/getAttributeNS)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+| `localName` | `string`           |
+
+##### Returns
+
+`string` \| `null`
+
+#### getElementsByClassName()
+
+> **getElementsByClassName**(`classNames`): `LiveNodeList`\<[`Element`](#element-1)\>
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:905
+
+Returns a LiveNodeList of all child elements which have **all** of the given class
+name(s).
+
+Returns an empty list if `classNames` is an empty string or only contains HTML white space
+characters.
+
+Warning: This returns a live LiveNodeList.
+Changes in the DOM will reflect in the array as the changes occur.
+If an element selected by this array no longer qualifies for the selector,
+it will automatically be removed. Be aware of this for iteration purposes.
+
+##### Parameters
+
+| Parameter    | Type     |
+| ------------ | -------- |
+| `classNames` | `string` |
+
+##### Returns
+
+`LiveNodeList`\<[`Element`](#element-1)\>
+
+##### See
+
+- https://developer.mozilla.org/en-US/docs/Web/API/Element/getElementsByClassName
+- https://dom.spec.whatwg.org/#concept-getelementsbyclassname
+
+#### getElementsByTagName()
+
+> **getElementsByTagName**(`qualifiedName`): `LiveNodeList`\<[`Element`](#element-1)\>
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:929
+
+Returns a LiveNodeList of elements with the given qualifiedName.
+Searching for all descendants can be done by passing `*` as `qualifiedName`.
+
+All descendants of the specified element are searched, but not the element itself.
+The returned list is live, which means it updates itself with the DOM tree automatically.
+Therefore, there is no need to call `Element.getElementsByTagName()`
+with the same element and arguments repeatedly if the DOM changes in between calls.
+
+When called on an HTML element in an HTML document,
+`getElementsByTagName` lower-cases the argument before searching for it.
+This is undesirable when trying to match camel-cased SVG elements (such as
+`<linearGradient>`) in an HTML document.
+Instead, use `Element.getElementsByTagNameNS()`,
+which preserves the capitalization of the tag name.
+
+`Element.getElementsByTagName` is similar to `Document.getElementsByTagName()`,
+except that it only searches for elements that are descendants of the specified element.
+
+##### Parameters
+
+| Parameter       | Type     |
+| --------------- | -------- |
+| `qualifiedName` | `string` |
+
+##### Returns
+
+`LiveNodeList`\<[`Element`](#element-1)\>
+
+##### See
+
+- https://developer.mozilla.org/en-US/docs/Web/API/Element/getElementsByTagName
+- https://dom.spec.whatwg.org/#concept-getelementsbytagname
+
+#### getElementsByTagNameNS()
+
+> **getElementsByTagNameNS**(`namespaceURI`, `localName`): `LiveNodeList`\<[`Element`](#element-1)\>
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:938
+
+Returns a `LiveNodeList` of elements with the given tag name belonging to the given
+namespace. It is similar to `Document.getElementsByTagNameNS`, except that its search is
+restricted to descendants of the specified element.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/getElementsByTagNameNS)
+
+##### Parameters
+
+| Parameter      | Type               |
+| -------------- | ------------------ |
+| `namespaceURI` | `string` \| `null` |
+| `localName`    | `string`           |
+
+##### Returns
+
+`LiveNodeList`\<[`Element`](#element-1)\>
+
+#### getQualifiedName()
+
+> **getQualifiedName**(): `string`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:943
+
+##### Returns
+
+`string`
+
+#### getRootNode()
+
+> **getRootNode**(`options`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:502
+
+Searches for the root node of this node.
+
+**This behavior is slightly different from the one in the specs**:
+
+- ignores `options.composed`, since `ShadowRoot`s are unsupported, therefore always
+  returning root.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/getRootNode)
+
+##### Parameters
+
+| Parameter | Type                 |
+| --------- | -------------------- |
+| `options` | `GetRootNodeOptions` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### See
+
+- https://dom.spec.whatwg.org/#dom-node-getrootnode
+- https://dom.spec.whatwg.org/#concept-shadow-including-root
+
+##### Inherited from
+
+`Node.getRootNode`
+
+#### hasAttribute()
+
+> **hasAttribute**(`qualifiedName`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:950
+
+Returns true if element has an attribute whose qualified name is qualifiedName, and false
+otherwise.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/hasAttribute)
+
+##### Parameters
+
+| Parameter       | Type     |
+| --------------- | -------- |
+| `qualifiedName` | `string` |
+
+##### Returns
+
+`boolean`
+
+#### hasAttributeNS()
+
+> **hasAttributeNS**(`namespace`, `localName`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:957
+
+Returns true if element has an attribute whose namespace is namespace and local name is
+localName.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/hasAttributeNS)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+| `localName` | `string`           |
+
+##### Returns
+
+`boolean`
+
+#### hasAttributes()
+
+> **hasAttributes**(): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:963
+
+Returns true if element has attributes, and false otherwise.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/hasAttributes)
+
+##### Returns
+
+`boolean`
+
+#### hasChildNodes()
+
+> **hasChildNodes**(): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:547
+
+Returns whether node has children.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/hasChildNodes)
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.hasChildNodes`
+
+#### insertBefore()
+
+> **insertBefore**(`node`, `child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:550
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/insertBefore)
+
+##### Parameters
+
+| Parameter | Type                        |
+| --------- | --------------------------- |
+| `node`    | [`Node`](#node-1)           |
+| `child`   | [`Node`](#node-1) \| `null` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.insertBefore`
+
+#### isDefaultNamespace()
+
+> **isDefaultNamespace**(`namespace`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:553
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/isDefaultNamespace)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.isDefaultNamespace`
+
+#### isEqualNode()
+
+> **isEqualNode**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:514
+
+Checks whether the given node is equal to this node.
+
+Two nodes are equal when they have the same type, defining characteristics (for the type),
+and the same `childNodes`. The comparison is iterative to avoid stack overflows on deeply
+nested trees. `Attribute` nodes of each `Element` pair are also compared iteratively.
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`boolean`
+
+##### See
+
+- [https://dom.spec.whatwg.org/#concept-node-equals](https://dom.spec.whatwg.org/#concept-node-equals)
+- [https://developer.mozilla.org/en-US/docs/Web/API/Node/isEqualNode](https://developer.mozilla.org/en-US/docs/Web/API/Node/isEqualNode)
+
+##### Inherited from
+
+`Node.isEqualNode`
+
+#### isSameNode()
+
+> **isSameNode**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:521
+
+Checks whether the given node is this node.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/isSameNode)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`Node.isSameNode`
+
+#### ~~isSupported()~~
+
+> **isSupported**(`feature`, `version`): `true`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:568
+
+Checks whether the DOM implementation implements a specific feature and its version.
+
+##### Parameters
+
+| Parameter | Type     | Description                                                                                                                          |
+| --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `feature` | `string` | The package name of the feature to test. This is the same name that can be passed to the method `hasFeature` on `DOMImplementation`. |
+| `version` | `string` | This is the version number of the package name to test.                                                                              |
+
+##### Returns
+
+`true`
+
+##### Deprecated
+
+Since `DOMImplementation.hasFeature` is deprecated and always returns true.
+
+##### Since
+
+Introduced in DOM Level 2
+
+##### See
+
+DOMImplementation.hasFeature
+
+##### Inherited from
+
+`Node.isSupported`
+
+#### lookupNamespaceURI()
+
+> **lookupNamespaceURI**(`prefix`): `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:571
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lookupNamespaceURI)
+
+##### Parameters
+
+| Parameter | Type               |
+| --------- | ------------------ |
+| `prefix`  | `string` \| `null` |
+
+##### Returns
+
+`string` \| `null`
+
+##### Inherited from
+
+`Node.lookupNamespaceURI`
+
+#### lookupPrefix()
+
+> **lookupPrefix**(`namespace`): `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:574
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lookupPrefix)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+
+##### Returns
+
+`string` \| `null`
+
+##### Inherited from
+
+`Node.lookupPrefix`
+
+#### normalize()
+
+> **normalize**(): `void`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:582
+
+Removes empty exclusive Text nodes and concatenates the data of remaining contiguous
+exclusive Text nodes into the first of their nodes.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/normalize)
+
+##### Returns
+
+`void`
+
+##### Inherited from
+
+`Node.normalize`
+
+#### removeAttribute()
+
+> **removeAttribute**(`qualifiedName`): `void`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:969
+
+Removes element's first attribute whose qualified name is qualifiedName.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/removeAttribute)
+
+##### Parameters
+
+| Parameter       | Type     |
+| --------------- | -------- |
+| `qualifiedName` | `string` |
+
+##### Returns
+
+`void`
+
+#### removeAttributeNode()
+
+> **removeAttributeNode**(`attr`): [`Attr`](#attr-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:977
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/removeAttributeNode)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `attr`    | [`Attr`](#attr-1) |
+
+##### Returns
+
+[`Attr`](#attr-1)
+
+#### removeAttributeNS()
+
+> **removeAttributeNS**(`namespace`, `localName`): `void`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:975
+
+Removes element's attribute whose namespace is namespace and local name is localName.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/removeAttributeNS)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+| `localName` | `string`           |
+
+##### Returns
+
+`void`
+
+#### removeChild()
+
+> **removeChild**(`child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:585
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/removeChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `child`   | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.removeChild`
+
+#### replaceChild()
+
+> **replaceChild**(`node`, `child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:588
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/replaceChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `node`    | [`Node`](#node-1) |
+| `child`   | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`Node.replaceChild`
+
+#### setAttribute()
+
+> **setAttribute**(`qualifiedName`, `value`): `void`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:983
+
+Sets the value of element's first attribute whose qualified name is qualifiedName to value.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/setAttribute)
+
+##### Parameters
+
+| Parameter       | Type     |
+| --------------- | -------- |
+| `qualifiedName` | `string` |
+| `value`         | `string` |
+
+##### Returns
+
+`void`
+
+#### setAttributeNode()
+
+> **setAttributeNode**(`attr`): [`Attr`](#attr-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:996
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/setAttributeNode)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `attr`    | [`Attr`](#attr-1) |
+
+##### Returns
+
+[`Attr`](#attr-1) \| `null`
+
+#### setAttributeNodeNS()
+
+> **setAttributeNodeNS**(`attr`): [`Attr`](#attr-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:998
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/setAttributeNodeNS)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `attr`    | [`Attr`](#attr-1) |
+
+##### Returns
+
+[`Attr`](#attr-1) \| `null`
+
+#### setAttributeNS()
+
+> **setAttributeNS**(`namespace`, `qualifiedName`, `value`): `void`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:990
+
+Sets the value of element's attribute whose namespace is namespace and local name is
+localName to value.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Element/setAttributeNS)
+
+##### Parameters
+
+| Parameter       | Type               |
+| --------------- | ------------------ |
+| `namespace`     | `string` \| `null` |
+| `qualifiedName` | `string`           |
+| `value`         | `string`           |
+
+##### Returns
+
+`void`
+
+---
+
+## EncryptionSummary
+
+Defined in: [libraries/epub/src/encryption.ts:5](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/encryption.ts#L5)
+
+### Properties
+
+#### contentAlgorithms
+
+> **contentAlgorithms**: `string`[]
+
+Defined in: [libraries/epub/src/encryption.ts:6](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/encryption.ts#L6)
+
+#### encryptedContentCount
+
+> **encryptedContentCount**: `number`
+
+Defined in: [libraries/epub/src/encryption.ts:10](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/encryption.ts#L10)
+
+#### encryptedKeyCount
+
+> **encryptedKeyCount**: `number`
+
+Defined in: [libraries/epub/src/encryption.ts:9](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/encryption.ts#L9)
+
+#### keyRetrievalTypes
+
+> **keyRetrievalTypes**: `string`[]
+
+Defined in: [libraries/epub/src/encryption.ts:8](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/encryption.ts#L8)
+
+#### keyWrappingAlgorithms
+
+> **keyWrappingAlgorithms**: `string`[]
+
+Defined in: [libraries/epub/src/encryption.ts:7](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/encryption.ts#L7)
 
 ---
 
 ## Epub2UpgradeOptions
 
-Defined in:
-[libraries/epub/upgrade.ts:93](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/upgrade.ts#L93)
+Defined in: [libraries/epub/src/upgrade.tsx:76](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/upgrade.tsx#L76)
 
 ### Properties
 
@@ -4121,18 +8423,15 @@ Defined in:
 
 > `optional` **outputPath**: `string`
 
-Defined in:
-[libraries/epub/upgrade.ts:97](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/upgrade.ts#L97)
+Defined in: [libraries/epub/src/upgrade.tsx:80](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/upgrade.tsx#L80)
 
-The path to the output file. If provided, the input file will be copied to the
-output path.
+The path to the output file. If provided, the input file will be copied to the output path.
 
 #### removeNcx?
 
 > `optional` **removeNcx**: `boolean`
 
-Defined in:
-[libraries/epub/upgrade.ts:101](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/upgrade.ts#L101)
+Defined in: [libraries/epub/src/upgrade.tsx:84](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/upgrade.tsx#L84)
 
 Whether to remove the NCX file, as it's technically optional in EPUB 3.
 
@@ -4140,8 +8439,7 @@ Whether to remove the NCX file, as it's technically optional in EPUB 3.
 
 ## EpubIdentifier
 
-Defined in:
-[libraries/epub/index.ts:127](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L127)
+Defined in: [libraries/epub/src/index.tsx:150](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L150)
 
 ### Properties
 
@@ -4149,15 +8447,13 @@ Defined in:
 
 > `optional` **id**: `string`
 
-Defined in:
-[libraries/epub/index.ts:129](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L129)
+Defined in: [libraries/epub/src/index.tsx:152](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L152)
 
 #### identifierType?
 
 > `optional` **identifierType**: `string`
 
-Defined in:
-[libraries/epub/index.ts:131](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L131)
+Defined in: [libraries/epub/src/index.tsx:154](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L154)
 
 the value of a refining `identifier-type` meta, if present
 
@@ -4165,25 +8461,21 @@ the value of a refining `identifier-type` meta, if present
 
 > `optional` **scheme**: `string`
 
-Defined in:
-[libraries/epub/index.ts:133](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L133)
+Defined in: [libraries/epub/src/index.tsx:156](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L156)
 
-the `scheme` of a refining `identifier-type` meta, or a legacy `opf:scheme`
-attribute
+the `scheme` of a refining `identifier-type` meta, or a legacy `opf:scheme` attribute
 
 #### value
 
 > **value**: `string`
 
-Defined in:
-[libraries/epub/index.ts:128](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L128)
+Defined in: [libraries/epub/src/index.tsx:151](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L151)
 
 ---
 
 ## EpubListEntry
 
-Defined in:
-[libraries/epub/adapters/interface.ts:17](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L17)
+Defined in: [libraries/epub/src/adapters/interface.ts:39](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L39)
 
 ### Properties
 
@@ -4191,26 +8483,23 @@ Defined in:
 
 > **absolutePath**: `string`
 
-Defined in:
-[libraries/epub/adapters/interface.ts:19](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L19)
+Defined in: [libraries/epub/src/adapters/interface.ts:41](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L41)
 
-absolute path under [EpubStorageAdapter.rootPath](#rootpath-2)
+location the adapter can read the entry back from, in whatever form it stores
 
 #### relativePath
 
 > **relativePath**: `string`
 
-Defined in:
-[libraries/epub/adapters/interface.ts:21](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L21)
+Defined in: [libraries/epub/src/adapters/interface.ts:43](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L43)
 
-path relative to [EpubStorageAdapter.rootPath](#rootpath-2), slash-separated
+the entry name, as it appears in the archive
 
 ---
 
 ## EpubSource
 
-Defined in:
-[libraries/epub/index.ts:136](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L136)
+Defined in: [libraries/epub/src/index.tsx:159](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L159)
 
 ### Properties
 
@@ -4218,15 +8507,13 @@ Defined in:
 
 > `optional` **id**: `string`
 
-Defined in:
-[libraries/epub/index.ts:138](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L138)
+Defined in: [libraries/epub/src/index.tsx:161](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L161)
 
 #### identifierType?
 
 > `optional` **identifierType**: `string`
 
-Defined in:
-[libraries/epub/index.ts:140](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L140)
+Defined in: [libraries/epub/src/index.tsx:163](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L163)
 
 the value of a refining `identifier-type` meta, if present
 
@@ -4234,70 +8521,69 @@ the value of a refining `identifier-type` meta, if present
 
 > `optional` **isPageBreakSource**: `boolean`
 
-Defined in:
-[libraries/epub/index.ts:151](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L151)
+Defined in: [libraries/epub/src/index.tsx:174](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L174)
 
-whether this source has a `source-of="pagination"` refinement or of a
-`<meta property="pageBreakSource">` element
+whether this source has a `source-of="pagination"` refinement
+or of a `<meta property="pageBreakSource">` element
 
 as of EPUB 3.4 `source-of` is advised-deprecated in favour of the
-publication-level `pageBreakSource` property. if you want to be sure to get the
-source of pagination, use [Epub.getPageBreakSource](#getpagebreaksource)
+publication-level `pageBreakSource` property. if you want to
+be sure to get the source of pagination, use [Epub.getPageBreakSource](#getpagebreaksource)
 
 #### scheme?
 
 > `optional` **scheme**: `string`
 
-Defined in:
-[libraries/epub/index.ts:142](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L142)
+Defined in: [libraries/epub/src/index.tsx:165](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L165)
 
-the `scheme` of a refining `identifier-type` meta, or a legacy `opf:scheme`
-attribute
+the `scheme` of a refining `identifier-type` meta, or a legacy `opf:scheme` attribute
 
 #### value
 
 > **value**: `string`
 
-Defined in:
-[libraries/epub/index.ts:137](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L137)
+Defined in: [libraries/epub/src/index.tsx:160](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L160)
 
 ---
 
 ## EpubStorageAdapter
 
-Defined in:
-[libraries/epub/adapters/interface.ts:24](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L24)
+Defined in: [libraries/epub/src/adapters/interface.ts:56](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L56)
+
+Adapters only receive entry names, which is:
+
+- the name a file has in the archive itself
+- relative to the container root, slash-separated,
+- already percent-decoded (eg `OEBPS/a b.xhtml`, not `OEBPS/a%20b.xhtml`)
+
+Adapter decides where to store files under what name
+In previous versions of the EPUB lib, this was a little bit more muddled, leading to
+eg the TmpFsAdapter trying to read `OEBPS/a%20b.xhtml`, whereas it was stored as `OEBPS/a b.xhtml`
 
 ### Properties
 
 #### rootPath
 
-> `readonly` **rootPath**: `string`
+> `readonly` **rootPath**: `string` \| `null`
 
-Defined in:
-[libraries/epub/adapters/interface.ts:30](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L30)
-
-Opaque path prefix used by `resolveInternalHref` to anchor absolute paths within
-the archive. For TmpFsAdapter this is the tmp dir; for MemoryAdapter it's a
-virtual prefix that's never written to disk
+Defined in: [libraries/epub/src/adapters/interface.ts:57](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L57)
 
 ### Methods
 
 #### archiveLength()
 
-> **archiveLength**(`path`): `Promise`\<`number`\>
+> **archiveLength**(`entry`): `Promise`\<`number`\>
 
-Defined in:
-[libraries/epub/adapters/interface.ts:39](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L39)
+Defined in: [libraries/epub/src/adapters/interface.ts:72](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L72)
 
-Length of an entry in bytes, for the readium page-count heuristic which expects
-compressed size when available
+Length of an entry in bytes, for the readium page-count heuristic
+which expects compressed size when available
 
 ##### Parameters
 
 | Parameter | Type     |
 | --------- | -------- |
-| `path`    | `string` |
+| `entry`   | `string` |
 
 ##### Returns
 
@@ -4307,8 +8593,7 @@ compressed size when available
 
 > **dispose**(): `void` \| `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/adapters/interface.ts:58](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L58)
+Defined in: [libraries/epub/src/adapters/interface.ts:91](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L91)
 
 Always called on close or error
 
@@ -4318,11 +8603,9 @@ Always called on close or error
 
 #### duplicate()?
 
-> `optional` **duplicate**():
-> `Promise`\<[`EpubStorageAdapter`](#epubstorageadapter)\>
+> `optional` **duplicate**(): `Promise`\<[`EpubStorageAdapter`](#epubstorageadapter)\>
 
-Defined in:
-[libraries/epub/adapters/interface.ts:52](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L52)
+Defined in: [libraries/epub/src/adapters/interface.ts:85](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L85)
 
 Required for Epub.copy
 
@@ -4330,12 +8613,31 @@ Required for Epub.copy
 
 `Promise`\<[`EpubStorageAdapter`](#epubstorageadapter)\>
 
+#### exists()
+
+> **exists**(`entry`): `Promise`\<`boolean`\>
+
+Defined in: [libraries/epub/src/adapters/interface.ts:66](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L66)
+
+Whether the archive holds an entry under exactly this name.
+Used to choose between different canditates for an href
+so should be exact
+
+##### Parameters
+
+| Parameter | Type     |
+| --------- | -------- |
+| `entry`   | `string` |
+
+##### Returns
+
+`Promise`\<`boolean`\>
+
 #### list()?
 
 > `optional` **list**(): `AsyncIterable`\<[`EpubListEntry`](#epublistentry)\>
 
-Defined in:
-[libraries/epub/adapters/interface.ts:49](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L49)
+Defined in: [libraries/epub/src/adapters/interface.ts:82](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L82)
 
 Required for Epub.saveAndClose to walk the contents
 
@@ -4347,16 +8649,15 @@ Required for Epub.saveAndClose to walk the contents
 
 ##### Call Signature
 
-> **read**(`path`): `Promise`\<`Uint8Array`\<`ArrayBufferLike`\>\>
+> **read**(`entry`): `Promise`\<`Uint8Array`\<`ArrayBufferLike`\>\>
 
-Defined in:
-[libraries/epub/adapters/interface.ts:32](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L32)
+Defined in: [libraries/epub/src/adapters/interface.ts:58](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L58)
 
 ###### Parameters
 
 | Parameter | Type     |
 | --------- | -------- |
-| `path`    | `string` |
+| `entry`   | `string` |
 
 ###### Returns
 
@@ -4364,16 +8665,15 @@ Defined in:
 
 ##### Call Signature
 
-> **read**(`path`, `encoding`): `Promise`\<`string`\>
+> **read**(`entry`, `encoding`): `Promise`\<`string`\>
 
-Defined in:
-[libraries/epub/adapters/interface.ts:33](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L33)
+Defined in: [libraries/epub/src/adapters/interface.ts:59](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L59)
 
 ###### Parameters
 
 | Parameter  | Type      |
 | ---------- | --------- |
-| `path`     | `string`  |
+| `entry`    | `string`  |
 | `encoding` | `"utf-8"` |
 
 ###### Returns
@@ -4382,10 +8682,9 @@ Defined in:
 
 #### remove()?
 
-> `optional` **remove**(`path`): `Promise`\<`void`\>
+> `optional` **remove**(`entry`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/adapters/interface.ts:46](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L46)
+Defined in: [libraries/epub/src/adapters/interface.ts:79](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L79)
 
 Required for removeManifestItem / setCoverImage replacement
 
@@ -4393,7 +8692,7 @@ Required for removeManifestItem / setCoverImage replacement
 
 | Parameter | Type     |
 | --------- | -------- |
-| `path`    | `string` |
+| `entry`   | `string` |
 
 ##### Returns
 
@@ -4403,8 +8702,7 @@ Required for removeManifestItem / setCoverImage replacement
 
 > `optional` **serialize**(`targetPath`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/adapters/interface.ts:55](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L55)
+Defined in: [libraries/epub/src/adapters/interface.ts:88](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L88)
 
 Required for Epub.saveAndClose
 
@@ -4422,10 +8720,9 @@ Required for Epub.saveAndClose
 
 ##### Call Signature
 
-> `optional` **write**(`path`, `data`): `Promise`\<`void`\>
+> `optional` **write**(`entry`, `data`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/adapters/interface.ts:42](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L42)
+Defined in: [libraries/epub/src/adapters/interface.ts:75](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L75)
 
 Required for any mutation method on Epub
 
@@ -4433,7 +8730,7 @@ Required for any mutation method on Epub
 
 | Parameter | Type         |
 | --------- | ------------ |
-| `path`    | `string`     |
+| `entry`   | `string`     |
 | `data`    | `Uint8Array` |
 
 ###### Returns
@@ -4442,16 +8739,15 @@ Required for any mutation method on Epub
 
 ##### Call Signature
 
-> `optional` **write**(`path`, `data`, `encoding`): `Promise`\<`void`\>
+> `optional` **write**(`entry`, `data`, `encoding`): `Promise`\<`void`\>
 
-Defined in:
-[libraries/epub/adapters/interface.ts:43](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L43)
+Defined in: [libraries/epub/src/adapters/interface.ts:76](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L76)
 
 ###### Parameters
 
 | Parameter  | Type      |
 | ---------- | --------- |
-| `path`     | `string`  |
+| `entry`    | `string`  |
 | `data`     | `string`  |
 | `encoding` | `"utf-8"` |
 
@@ -4463,8 +8759,7 @@ Defined in:
 
 ## EpubStorageAdapterClass\<Opts\>
 
-Defined in:
-[libraries/epub/adapters/interface.ts:61](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L61)
+Defined in: [libraries/epub/src/adapters/interface.ts:94](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L94)
 
 ### Type Parameters
 
@@ -4476,38 +8771,33 @@ Defined in:
 
 #### capabilities
 
-> `readonly` **capabilities**:
-> [`EpubStorageCapabilities`](#epubstoragecapabilities)
+> `readonly` **capabilities**: [`EpubStorageCapabilities`](#epubstoragecapabilities)
 
-Defined in:
-[libraries/epub/adapters/interface.ts:63](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L63)
+Defined in: [libraries/epub/src/adapters/interface.ts:96](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L96)
 
 #### kind
 
 > `readonly` **kind**: [`EpubStorageKind`](#epubstoragekind)
 
-Defined in:
-[libraries/epub/adapters/interface.ts:62](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L62)
+Defined in: [libraries/epub/src/adapters/interface.ts:95](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L95)
 
 ### Methods
 
 #### init()
 
-> **init**(`source`, `opts?`):
-> `Promise`\<[`EpubStorageAdapter`](#epubstorageadapter)\>
+> **init**(`source`, `opts?`): `Promise`\<[`EpubStorageAdapter`](#epubstorageadapter)\>
 
-Defined in:
-[libraries/epub/adapters/interface.ts:70](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L70)
+Defined in: [libraries/epub/src/adapters/interface.ts:102](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L102)
 
-Open an archive from a path or buffer. The returned adapter is ready to read;
-the Epub class will assert it's a valid EPUB 3 afterwards.
+Open an archive from a path or buffer.
+Will throw if the archive is not a valid EPUB 3
 
 ##### Parameters
 
-| Parameter | Type                                          |
-| --------- | --------------------------------------------- |
-| `source`  | `string` \| `Uint8Array`\<`ArrayBufferLike`\> |
-| `opts?`   | `Opts`                                        |
+| Parameter | Type                              |
+| --------- | --------------------------------- |
+| `source`  | [`ArchiveSource`](#archivesource) |
+| `opts?`   | `Opts`                            |
 
 ##### Returns
 
@@ -4515,16 +8805,12 @@ the Epub class will assert it's a valid EPUB 3 afterwards.
 
 #### initEmpty()?
 
-> `optional` **initEmpty**(`opts?`):
-> `Promise`\<[`EpubStorageAdapter`](#epubstorageadapter)\>
+> `optional` **initEmpty**(`opts?`): `Promise`\<[`EpubStorageAdapter`](#epubstorageadapter)\>
 
-Defined in:
-[libraries/epub/adapters/interface.ts:79](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L79)
+Defined in: [libraries/epub/src/adapters/interface.ts:108](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L108)
 
 Initialize an empty extract root for [Epub.create](#create).
-
-Optional — adapters that can't be written to from scratch (e.g. read-only zip
-handles) should leave this off, and `Epub.using(...).create(...)` will throw.
+Only necessary for adapters that can write
 
 ##### Parameters
 
@@ -4540,8 +8826,7 @@ handles) should leave this off, and `Epub.using(...).create(...)` will throw.
 
 ## EpubStorageCapabilities
 
-Defined in:
-[libraries/epub/adapters/interface.ts:12](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L12)
+Defined in: [libraries/epub/src/adapters/interface.ts:34](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L34)
 
 ### Properties
 
@@ -4549,8 +8834,7 @@ Defined in:
 
 > `readonly` **writable**: `boolean`
 
-Defined in:
-[libraries/epub/adapters/interface.ts:14](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L14)
+Defined in: [libraries/epub/src/adapters/interface.ts:36](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/interface.ts#L36)
 
 when false, the Epub class refuses every mutation method at runtime
 
@@ -4558,8 +8842,7 @@ when false, the Epub class refuses every mutation method at runtime
 
 ## FromOptions
 
-Defined in:
-[libraries/epub/index.ts:205](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L205)
+Defined in: [libraries/epub/src/index.tsx:228](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L228)
 
 ### Properties
 
@@ -4567,24 +8850,21 @@ Defined in:
 
 > `optional` **readonly**: `boolean`
 
-Defined in:
-[libraries/epub/index.ts:210](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L210)
+Defined in: [libraries/epub/src/index.tsx:233](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L233)
 
-when true, mutation methods throw [EpubReadOnlyError](#epubreadonlyerror) at
-runtime
+when true, mutation methods throw [EpubReadOnlyError](#epubreadonlyerror) at runtime
 
 ##### Default
 
 ```ts
-false
+false;
 ```
 
 ---
 
-## Landmark
+## GuideItem
 
-Defined in:
-[libraries/epub/upgrade.ts:87](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/upgrade.ts#L87)
+Defined in: [libraries/epub/src/index.tsx:222](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L222)
 
 ### Properties
 
@@ -4592,29 +8872,51 @@ Defined in:
 
 > **href**: `string`
 
-Defined in:
-[libraries/epub/upgrade.ts:88](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/upgrade.ts#L88)
+Defined in: [libraries/epub/src/index.tsx:223](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L223)
 
 #### title
 
 > **title**: `string`
 
-Defined in:
-[libraries/epub/upgrade.ts:89](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/upgrade.ts#L89)
+Defined in: [libraries/epub/src/index.tsx:224](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L224)
 
 #### type
 
 > **type**: `string`
 
-Defined in:
-[libraries/epub/upgrade.ts:90](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/upgrade.ts#L90)
+Defined in: [libraries/epub/src/index.tsx:225](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L225)
+
+---
+
+## Landmark
+
+Defined in: [libraries/epub/src/upgrade.tsx:70](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/upgrade.tsx#L70)
+
+### Properties
+
+#### href
+
+> **href**: `string`
+
+Defined in: [libraries/epub/src/upgrade.tsx:71](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/upgrade.tsx#L71)
+
+#### title
+
+> **title**: `string`
+
+Defined in: [libraries/epub/src/upgrade.tsx:72](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/upgrade.tsx#L72)
+
+#### type
+
+> **type**: `string`
+
+Defined in: [libraries/epub/src/upgrade.tsx:73](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/upgrade.tsx#L73)
 
 ---
 
 ## MemoryAdapterOptions
 
-Defined in:
-[libraries/epub/adapters/memory.ts:14](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/memory.ts#L14)
+Defined in: [libraries/epub/src/adapters/memory.ts:13](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/memory.ts#L13)
 
 ### Properties
 
@@ -4622,32 +8924,29 @@ Defined in:
 
 > `optional` **cache**: `boolean`
 
-Defined in:
-[libraries/epub/adapters/memory.ts:21](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/memory.ts#L21)
+Defined in: [libraries/epub/src/adapters/memory.ts:20](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/memory.ts#L20)
 
-per-entry decompressed buffer cache turn it off when opening many EPUBs and
-reading each entry at most once keeps resident size bounded by the entry index,
-not the decompressed payload sum
+per-entry decompressed buffer cache
+turn it off when opening many EPUBs and reading each entry at most once
+keeps resident size bounded by the entry index, not the decompressed payload sum
 
 ##### Default
 
 ```ts
-true
+true;
 ```
 
 #### signal?
 
 > `optional` **signal**: `AbortSignal`
 
-Defined in:
-[libraries/epub/adapters/memory.ts:22](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/memory.ts#L22)
+Defined in: [libraries/epub/src/adapters/memory.ts:21](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/adapters/memory.ts#L21)
 
 ---
 
 ## Navigation
 
-Defined in:
-[libraries/epub/index.ts:192](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L192)
+Defined in: [libraries/epub/src/index.tsx:216](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L216)
 
 ### Properties
 
@@ -4655,22 +8954,25 @@ Defined in:
 
 > **children**: [`NavigationList`](#navigationlist)
 
-Defined in:
-[libraries/epub/index.ts:194](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L194)
+Defined in: [libraries/epub/src/index.tsx:219](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L219)
+
+#### role
+
+> **role**: `string`
+
+Defined in: [libraries/epub/src/index.tsx:218](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L218)
 
 #### title?
 
 > `optional` **title**: `string`
 
-Defined in:
-[libraries/epub/index.ts:193](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L193)
+Defined in: [libraries/epub/src/index.tsx:217](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L217)
 
 ---
 
 ## NavigationItem
 
-Defined in:
-[libraries/epub/index.ts:184](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L184)
+Defined in: [libraries/epub/src/index.tsx:207](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L207)
 
 ### Properties
 
@@ -4678,305 +8980,1698 @@ Defined in:
 
 > `optional` **children**: [`NavigationList`](#navigationlist)
 
-Defined in:
-[libraries/epub/index.ts:187](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L187)
+Defined in: [libraries/epub/src/index.tsx:211](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L211)
 
 #### href?
 
 > `optional` **href**: `string`
 
-Defined in:
-[libraries/epub/index.ts:186](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L186)
+Defined in: [libraries/epub/src/index.tsx:209](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L209)
+
+#### role?
+
+> `optional` **role**: `string`
+
+Defined in: [libraries/epub/src/index.tsx:210](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L210)
 
 #### title
 
 > **title**: `string`
 
-Defined in:
-[libraries/epub/index.ts:185](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L185)
+Defined in: [libraries/epub/src/index.tsx:208](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/src/index.tsx#L208)
 
 ---
 
-## AdapterOptions\<A\>
+## Node
 
-> **AdapterOptions**\<`A`\> = `A` _extends_
-> [`EpubStorageAdapterClass`](#epubstorageadapterclass)\<infer Opts\> ? `Opts` :
-> `object`
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:368
 
-Defined in:
-[libraries/epub/adapters/interface.ts:82](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L82)
+The DOM Node interface is an abstract base class upon which many other DOM API objects are
+based, thus letting those object types to be used similarly and often interchangeably. As an
+abstract class, there is no such thing as a plain Node object. All objects that implement
+Node functionality are based on one of its subclasses. Most notable are Document, Element,
+and DocumentFragment.
 
-### Type Parameters
+In addition, every kind of DOM node is represented by an interface based on Node. These
+include Attr, CharacterData (which Text, Comment, CDATASection and ProcessingInstruction are
+all based on), and DocumentType.
 
-| Type Parameter |
-| -------------- |
-| `A`            |
+In some cases, a particular feature of the base Node interface may not apply to one of its
+child interfaces; in that case, the inheriting node may return null or throw an exception,
+depending on circumstances. For example, attempting to add children to a node type that
+cannot have children will throw an exception.
 
----
+**This behavior is slightly different from the in the specs**:
 
-## ElementName
+- unimplemented interfaces: EventTarget
 
-> **ElementName** =
-> \`$\{Letter \| Uppercase\<Letter\> \| QuestionMark\}$\{string\}\`
+### See
 
-Defined in:
-[libraries/epub/index.ts:82](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L82)
+- http://www.w3.org/TR/2000/REC-DOM-Level-2-Core-20001113/core.html#ID-1950641247
+- https://dom.spec.whatwg.org/#node
 
-A valid name for an XML element (must start with a letter)
-
----
-
-## EpubInstanceFor\<A\>
-
-> **EpubInstanceFor**\<`A`\> = `A`\[`"capabilities"`\]\[`"writable"`\] _extends_
-> `true` ? [`Epub`](#epub) : [`EpubReader`](#epubreader)
-
-Defined in:
-[libraries/epub/index.ts:3532](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L3532)
-
-Resolves to [Epub](#epub) for writable adapters, [EpubReader](#epubreader) for
-read-only ones.
-
-The conditional pivots on `capabilities.writable`, which must be a literal
-`true`/`false` on the adapter class (use `as const`) for inference to work.
-
-### Type Parameters
-
-| Type Parameter                                                      |
-| ------------------------------------------------------------------- |
-| `A` _extends_ [`EpubStorageAdapterClass`](#epubstorageadapterclass) |
-
----
-
-## EpubMetadata
-
-> **EpubMetadata** = [`MetadataEntry`](#metadataentry)[]
-
-Defined in:
-[libraries/epub/index.ts:119](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L119)
-
----
-
-## EpubReader
-
-> **EpubReader** = `Pick`\<[`Epub`](#epub), `"storage"` \| `"findMetadataItem"`
-> \| `"findAllMetadataItems"` \| `"resolveHref"` \| `"readFileContents"` \|
-> `"readItemContents"` \| `"readXhtmlItemContents"` \| `"discardAndClose"` \|
-> `Extract`\<keyof [`Epub`](#epub), `` `get${string}` ``\>\> & `Disposable`
-
-Defined in:
-[libraries/epub/index.ts:217](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L217)
-
-Read-only view of an EPUB Returned by Epub.using(MemoryAdapter).from(...) and by
-Epub.from(path, { readonly: true })
-
----
-
-## EpubStorageKind
-
-> **EpubStorageKind** = `"tmp-dir"` \| `"in-memory"` \| `string` & `object`
-
-Defined in:
-[libraries/epub/adapters/interface.ts:10](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/adapters/interface.ts#L10)
-
-Pluggable storage backend for an Epub instance
-
-Built-in adapters:
-
-- [TmpFsAdapter](#tmpfsadapter) extracts the archive to a tmp directory and
-  supports the full read/write/save/upgrade
-- [MemoryAdapter](#memoryadapter) keeps an in-memory zip handle and supports
-  reads only
-
----
-
-## InMemoryEpubReader
-
-> **InMemoryEpubReader** = [`EpubReader`](#epubreader) & `object`
-
-Defined in:
-[libraries/epub/index.ts:235](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L235)
-
-Readonly Epub-instance backed by an in-memory zip handle Returned by
-`Epub.using(MemoryAdapter).from(...)`
-
-### Type Declaration
-
-#### storage
-
-> `readonly` **storage**: `"in-memory"`
-
----
-
-## ManifestItem
-
-> **ManifestItem** = `object`
-
-Defined in:
-[libraries/epub/index.ts:103](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L103)
+### Prettierignore
 
 ### Properties
 
-#### fallback?
+#### ATTRIBUTE_NODE
 
-> `optional` **fallback**: `string`
+> `readonly` **ATTRIBUTE_NODE**: `2`
 
-Defined in:
-[libraries/epub/index.ts:107](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L107)
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:592
 
-#### href
+#### baseURI
 
-> **href**: `string`
+> `readonly` **baseURI**: `"about:blank"`
 
-Defined in:
-[libraries/epub/index.ts:105](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L105)
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:396
 
-#### id
+Always returns `about:blank` currently.
 
-> **id**: `string`
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/baseURI)
 
-Defined in:
-[libraries/epub/index.ts:104](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L104)
+#### CDATA_SECTION_NODE
 
-#### mediaOverlay?
+> `readonly` **CDATA_SECTION_NODE**: `4`
 
-> `optional` **mediaOverlay**: `string`
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:596
 
-Defined in:
-[libraries/epub/index.ts:108](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L108)
+node is a CDATASection node.
 
-#### mediaType?
+#### childNodes
 
-> `optional` **mediaType**: `string`
+> `readonly` **childNodes**: `NodeList`
 
-Defined in:
-[libraries/epub/index.ts:106](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L106)
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:374
 
-#### properties?
+Returns the children.
 
-> `optional` **properties**: `string`[]
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/childNodes)
 
-Defined in:
-[libraries/epub/index.ts:109](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L109)
+#### columnNumber?
+
+> `optional` **columnNumber**: `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:479
+
+One based column position inside the parsed source,
+if the `locator` was not disabled.
+
+#### COMMENT_NODE
+
+> `readonly` **COMMENT_NODE**: `8`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:602
+
+node is a Comment node.
+
+#### DOCUMENT_FRAGMENT_NODE
+
+> `readonly` **DOCUMENT_FRAGMENT_NODE**: `11`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:608
+
+node is a DocumentFragment node.
+
+#### DOCUMENT_NODE
+
+> `readonly` **DOCUMENT_NODE**: `9`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:604
+
+node is a document.
+
+#### DOCUMENT_POSITION_CONTAINED_BY
+
+> `readonly` **DOCUMENT_POSITION_CONTAINED_BY**: `16`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:619
+
+Set when other is a descendant of node.
+
+#### DOCUMENT_POSITION_CONTAINS
+
+> `readonly` **DOCUMENT_POSITION_CONTAINS**: `8`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:617
+
+Set when other is an ancestor of node.
+
+#### DOCUMENT_POSITION_DISCONNECTED
+
+> `readonly` **DOCUMENT_POSITION_DISCONNECTED**: `1`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:611
+
+Set when node and other are not in the same tree.
+
+#### DOCUMENT_POSITION_FOLLOWING
+
+> `readonly` **DOCUMENT_POSITION_FOLLOWING**: `4`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:615
+
+Set when other is following node.
+
+#### DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC
+
+> `readonly` **DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC**: `32`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:620
+
+#### DOCUMENT_POSITION_PRECEDING
+
+> `readonly` **DOCUMENT_POSITION_PRECEDING**: `2`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:613
+
+Set when other is preceding node.
+
+#### DOCUMENT_TYPE_NODE
+
+> `readonly` **DOCUMENT_TYPE_NODE**: `10`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:606
+
+node is a doctype.
+
+#### ELEMENT_NODE
+
+> `readonly` **ELEMENT_NODE**: `1`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:591
+
+node is an element.
+
+#### ENTITY_NODE
+
+> `readonly` **ENTITY_NODE**: `6`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:598
+
+#### ENTITY_REFERENCE_NODE
+
+> `readonly` **ENTITY_REFERENCE_NODE**: `5`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:597
+
+#### firstChild
+
+> `readonly` **firstChild**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:380
+
+Returns the first child.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/firstChild)
+
+#### isConnected
+
+> `readonly` **isConnected**: `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:402
+
+Returns true if this node is inside of a document or is the document node itself.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/isConnected)
+
+#### lastChild
+
+> `readonly` **lastChild**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:386
+
+Returns the last child.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lastChild)
+
+#### lineNumber?
+
+> `optional` **lineNumber**: `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:474
+
+Zero based line position inside the parsed source,
+if the `locator` was not disabled.
+
+#### localName
+
+> **localName**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:390
+
+The local part of the qualified name of this node.
+
+#### namespaceURI
+
+> `readonly` **namespaceURI**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:406
+
+The namespace URI of this node.
+
+#### nextSibling
+
+> `readonly` **nextSibling**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:412
+
+Returns the next sibling.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nextSibling)
+
+#### nodeName
+
+> `readonly` **nodeName**: `string`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:418
+
+Returns a string appropriate for the type of node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeName)
+
+#### nodeType
+
+> `readonly` **nodeType**: `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:424
+
+Returns the type of node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeType)
+
+#### nodeValue
+
+> **nodeValue**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:426
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeValue)
+
+#### NOTATION_NODE
+
+> `readonly` **NOTATION_NODE**: `12`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:609
+
+#### ownerDocument
+
+> `readonly` **ownerDocument**: [`Document`](#document-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:432
+
+Returns the node document. Returns null for documents.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/ownerDocument)
+
+#### parentElement
+
+> `readonly` **parentElement**: [`Element`](#element-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:444
+
+Returns the parent `Node` if it is of type `Element`, otherwise `null`.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/parentElement)
+
+#### parentNode
+
+> `readonly` **parentNode**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:438
+
+Returns the parent.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/parentNode)
+
+#### prefix
+
+> **prefix**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:448
+
+The prefix of the namespace for this node.
+
+#### previousSibling
+
+> `readonly` **previousSibling**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:454
+
+Returns the previous sibling.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/previousSibling)
+
+#### PROCESSING_INSTRUCTION_NODE
+
+> `readonly` **PROCESSING_INSTRUCTION_NODE**: `7`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:600
+
+node is a ProcessingInstruction node.
+
+#### TEXT_NODE
+
+> `readonly` **TEXT_NODE**: `3`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:594
+
+node is a Text node.
+
+#### textContent
+
+> **textContent**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:468
+
+The text content of this node and its descendants.
+
+For [Element](#element-1) and DocumentFragment nodes, returns the concatenation of the
+`nodeValue` of every descendant text node, excluding processing instruction and comment
+nodes. For all other node types, returns `nodeValue`.
+
+Setting `textContent` on an element or document fragment replaces all child nodes with a
+single text node; on other nodes it sets `data`, `value`, and `nodeValue` directly.
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/textContent)
+
+##### See
+
+[https://dom.spec.whatwg.org/#dom-node-textcontent](https://dom.spec.whatwg.org/#dom-node-textcontent)
+
+### Methods
+
+#### appendChild()
+
+> **appendChild**(`node`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:482
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/appendChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `node`    | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+#### cloneNode()
+
+> **cloneNode**(`deep?`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:533
+
+Returns a copy of node. If deep is true, the copy also includes the node's descendants.
+
+##### Parameters
+
+| Parameter | Type      |
+| --------- | --------- |
+| `deep?`   | `boolean` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Throws
+
+May throw a DOMException if operations within [Element#setAttributeNode](#setattributenode) or
+[Node#appendChild](#appendchild-8) (which are potentially invoked in this method) do not meet their
+specific constraints.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/cloneNode)
+
+#### compareDocumentPosition()
+
+> **compareDocumentPosition**(`other`): `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:540
+
+Returns a bitmask indicating the position of other relative to node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/compareDocumentPosition)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`number`
+
+#### contains()
+
+> **contains**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:489
+
+Checks whether `other` is an inclusive descendant of this node.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/contains)
+
+##### Parameters
+
+| Parameter | Type                                       |
+| --------- | ------------------------------------------ |
+| `other`   | [`Node`](#node-1) \| `null` \| `undefined` |
+
+##### Returns
+
+`boolean`
+
+#### getRootNode()
+
+> **getRootNode**(`options`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:502
+
+Searches for the root node of this node.
+
+**This behavior is slightly different from the one in the specs**:
+
+- ignores `options.composed`, since `ShadowRoot`s are unsupported, therefore always
+  returning root.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/getRootNode)
+
+##### Parameters
+
+| Parameter | Type                 |
+| --------- | -------------------- |
+| `options` | `GetRootNodeOptions` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### See
+
+- https://dom.spec.whatwg.org/#dom-node-getrootnode
+- https://dom.spec.whatwg.org/#concept-shadow-including-root
+
+#### hasChildNodes()
+
+> **hasChildNodes**(): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:547
+
+Returns whether node has children.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/hasChildNodes)
+
+##### Returns
+
+`boolean`
+
+#### insertBefore()
+
+> **insertBefore**(`node`, `child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:550
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/insertBefore)
+
+##### Parameters
+
+| Parameter | Type                        |
+| --------- | --------------------------- |
+| `node`    | [`Node`](#node-1)           |
+| `child`   | [`Node`](#node-1) \| `null` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+#### isDefaultNamespace()
+
+> **isDefaultNamespace**(`namespace`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:553
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/isDefaultNamespace)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+
+##### Returns
+
+`boolean`
+
+#### isEqualNode()
+
+> **isEqualNode**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:514
+
+Checks whether the given node is equal to this node.
+
+Two nodes are equal when they have the same type, defining characteristics (for the type),
+and the same `childNodes`. The comparison is iterative to avoid stack overflows on deeply
+nested trees. `Attribute` nodes of each `Element` pair are also compared iteratively.
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`boolean`
+
+##### See
+
+- [https://dom.spec.whatwg.org/#concept-node-equals](https://dom.spec.whatwg.org/#concept-node-equals)
+- [https://developer.mozilla.org/en-US/docs/Web/API/Node/isEqualNode](https://developer.mozilla.org/en-US/docs/Web/API/Node/isEqualNode)
+
+#### isSameNode()
+
+> **isSameNode**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:521
+
+Checks whether the given node is this node.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/isSameNode)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`boolean`
+
+#### ~~isSupported()~~
+
+> **isSupported**(`feature`, `version`): `true`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:568
+
+Checks whether the DOM implementation implements a specific feature and its version.
+
+##### Parameters
+
+| Parameter | Type     | Description                                                                                                                          |
+| --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `feature` | `string` | The package name of the feature to test. This is the same name that can be passed to the method `hasFeature` on `DOMImplementation`. |
+| `version` | `string` | This is the version number of the package name to test.                                                                              |
+
+##### Returns
+
+`true`
+
+##### Deprecated
+
+Since `DOMImplementation.hasFeature` is deprecated and always returns true.
+
+##### Since
+
+Introduced in DOM Level 2
+
+##### See
+
+DOMImplementation.hasFeature
+
+#### lookupNamespaceURI()
+
+> **lookupNamespaceURI**(`prefix`): `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:571
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lookupNamespaceURI)
+
+##### Parameters
+
+| Parameter | Type               |
+| --------- | ------------------ |
+| `prefix`  | `string` \| `null` |
+
+##### Returns
+
+`string` \| `null`
+
+#### lookupPrefix()
+
+> **lookupPrefix**(`namespace`): `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:574
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lookupPrefix)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+
+##### Returns
+
+`string` \| `null`
+
+#### normalize()
+
+> **normalize**(): `void`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:582
+
+Removes empty exclusive Text nodes and concatenates the data of remaining contiguous
+exclusive Text nodes into the first of their nodes.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/normalize)
+
+##### Returns
+
+`void`
+
+#### removeChild()
+
+> **removeChild**(`child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:585
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/removeChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `child`   | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+#### replaceChild()
+
+> **replaceChild**(`node`, `child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:588
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/replaceChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `node`    | [`Node`](#node-1) |
+| `child`   | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
 
 ---
 
-## MetadataEntry
+## Text
 
-> **MetadataEntry** = `object`
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1051
 
-Defined in:
-[libraries/epub/index.ts:112](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L112)
+The textual content of Element or Attr. If an element has no markup within its content, it has
+a single child implementing Text that contains the element's text. However, if the element
+contains markup, it is parsed into information items and Text nodes that form its children.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Text)
+
+### Extends
+
+- `CharacterData`
 
 ### Properties
 
-#### id?
+#### ATTRIBUTE_NODE
 
-> `optional` **id**: `string`
+> `readonly` **ATTRIBUTE_NODE**: `2`
 
-Defined in:
-[libraries/epub/index.ts:113](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L113)
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:592
 
-#### properties
+##### Inherited from
 
-> **properties**: `Record`\<`string`, `string`\>
+`CharacterData.ATTRIBUTE_NODE`
 
-Defined in:
-[libraries/epub/index.ts:115](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L115)
+#### baseURI
 
-#### type
+> `readonly` **baseURI**: `"about:blank"`
 
-> **type**: [`ElementName`](#elementname)
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:396
 
-Defined in:
-[libraries/epub/index.ts:114](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L114)
+Always returns `about:blank` currently.
 
-#### value
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/baseURI)
 
-> **value**: `string` \| `undefined`
+##### Inherited from
 
-Defined in:
-[libraries/epub/index.ts:116](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L116)
+`CharacterData.baseURI`
 
----
+#### CDATA_SECTION_NODE
 
-## NavigationList
+> `readonly` **CDATA_SECTION_NODE**: `4`
 
-> **NavigationList** = [`NavigationItem`](#navigationitem)[]
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:596
 
-Defined in:
-[libraries/epub/index.ts:190](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L190)
+node is a CDATASection node.
 
----
+##### Inherited from
 
-## PackageElement
+`CharacterData.CDATA_SECTION_NODE`
 
-> **PackageElement** = [`XmlElement`](#xmlelement)\<`"package"`\>
+#### childNodes
 
-Defined in:
-[libraries/epub/index.ts:203](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L203)
+> `readonly` **childNodes**: `NodeList`
 
----
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:374
 
-## ParsedXml
+Returns the children.
 
-> **ParsedXml** = [`XmlNode`](#xmlnode)[]
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/childNodes)
 
-Defined in:
-[libraries/epub/index.ts:101](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L101)
+##### Inherited from
 
-An XML structure
+`CharacterData.childNodes`
 
----
+#### columnNumber?
 
-## XmlElement\<Name\>
+> `optional` **columnNumber**: `number`
 
-> **XmlElement**\<`Name`\> = `object` & `{ [key in Name]: ParsedXml }`
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:479
 
-Defined in:
-[libraries/epub/index.ts:88](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L88)
+One based column position inside the parsed source,
+if the `locator` was not disabled.
 
-An XML element
+##### Inherited from
 
-### Type Declaration
+`CharacterData.columnNumber`
 
-#### :@?
+#### COMMENT_NODE
 
-> `optional` **:@**: `Record`\<`` `${PropertyPrefix}${string}` ``, `string`\>
+> `readonly` **COMMENT_NODE**: `8`
 
-### Type Parameters
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:602
 
-| Type Parameter                                 | Default type                  |
-| ---------------------------------------------- | ----------------------------- |
-| `Name` _extends_ [`ElementName`](#elementname) | [`ElementName`](#elementname) |
+node is a Comment node.
 
----
+##### Inherited from
 
-## XmlNode
+`CharacterData.COMMENT_NODE`
 
-> **XmlNode** = [`XmlElement`](#xmlelement) \| [`XmlTextNode`](#xmltextnode)
+#### data
 
-Defined in:
-[libraries/epub/index.ts:98](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L98)
+> **data**: `string`
 
-A valid XML node. May be either an element or a text node.
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1019
 
----
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/CharacterData/data)
 
-## XmlTextNode
+##### Inherited from
 
-> **XmlTextNode** = `object`
+`CharacterData.data`
 
-Defined in:
-[libraries/epub/index.ts:95](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L95)
+#### DOCUMENT_FRAGMENT_NODE
 
-A text node in an XML document
+> `readonly` **DOCUMENT_FRAGMENT_NODE**: `11`
 
-### Properties
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:608
 
-#### #text
+node is a DocumentFragment node.
 
-> **#text**: `string`
+##### Inherited from
 
-Defined in:
-[libraries/epub/index.ts:95](https://gitlab.com/storyteller-platform/storyteller/-/blob/main/libraries/epub/index.ts#L95)
+`CharacterData.DOCUMENT_FRAGMENT_NODE`
+
+#### DOCUMENT_NODE
+
+> `readonly` **DOCUMENT_NODE**: `9`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:604
+
+node is a document.
+
+##### Inherited from
+
+`CharacterData.DOCUMENT_NODE`
+
+#### DOCUMENT_POSITION_CONTAINED_BY
+
+> `readonly` **DOCUMENT_POSITION_CONTAINED_BY**: `16`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:619
+
+Set when other is a descendant of node.
+
+##### Inherited from
+
+`CharacterData.DOCUMENT_POSITION_CONTAINED_BY`
+
+#### DOCUMENT_POSITION_CONTAINS
+
+> `readonly` **DOCUMENT_POSITION_CONTAINS**: `8`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:617
+
+Set when other is an ancestor of node.
+
+##### Inherited from
+
+`CharacterData.DOCUMENT_POSITION_CONTAINS`
+
+#### DOCUMENT_POSITION_DISCONNECTED
+
+> `readonly` **DOCUMENT_POSITION_DISCONNECTED**: `1`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:611
+
+Set when node and other are not in the same tree.
+
+##### Inherited from
+
+`CharacterData.DOCUMENT_POSITION_DISCONNECTED`
+
+#### DOCUMENT_POSITION_FOLLOWING
+
+> `readonly` **DOCUMENT_POSITION_FOLLOWING**: `4`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:615
+
+Set when other is following node.
+
+##### Inherited from
+
+`CharacterData.DOCUMENT_POSITION_FOLLOWING`
+
+#### DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC
+
+> `readonly` **DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC**: `32`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:620
+
+##### Inherited from
+
+`CharacterData.DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC`
+
+#### DOCUMENT_POSITION_PRECEDING
+
+> `readonly` **DOCUMENT_POSITION_PRECEDING**: `2`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:613
+
+Set when other is preceding node.
+
+##### Inherited from
+
+`CharacterData.DOCUMENT_POSITION_PRECEDING`
+
+#### DOCUMENT_TYPE_NODE
+
+> `readonly` **DOCUMENT_TYPE_NODE**: `10`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:606
+
+node is a doctype.
+
+##### Inherited from
+
+`CharacterData.DOCUMENT_TYPE_NODE`
+
+#### ELEMENT_NODE
+
+> `readonly` **ELEMENT_NODE**: `1`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:591
+
+node is an element.
+
+##### Inherited from
+
+`CharacterData.ELEMENT_NODE`
+
+#### ENTITY_NODE
+
+> `readonly` **ENTITY_NODE**: `6`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:598
+
+##### Inherited from
+
+`CharacterData.ENTITY_NODE`
+
+#### ENTITY_REFERENCE_NODE
+
+> `readonly` **ENTITY_REFERENCE_NODE**: `5`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:597
+
+##### Inherited from
+
+`CharacterData.ENTITY_REFERENCE_NODE`
+
+#### firstChild
+
+> `readonly` **firstChild**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:380
+
+Returns the first child.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/firstChild)
+
+##### Inherited from
+
+`CharacterData.firstChild`
+
+#### isConnected
+
+> `readonly` **isConnected**: `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:402
+
+Returns true if this node is inside of a document or is the document node itself.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/isConnected)
+
+##### Inherited from
+
+`CharacterData.isConnected`
+
+#### lastChild
+
+> `readonly` **lastChild**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:386
+
+Returns the last child.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lastChild)
+
+##### Inherited from
+
+`CharacterData.lastChild`
+
+#### length
+
+> `readonly` **length**: `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1021
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/CharacterData/length)
+
+##### Inherited from
+
+`CharacterData.length`
+
+#### lineNumber?
+
+> `optional` **lineNumber**: `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:474
+
+Zero based line position inside the parsed source,
+if the `locator` was not disabled.
+
+##### Inherited from
+
+`CharacterData.lineNumber`
+
+#### localName
+
+> **localName**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:390
+
+The local part of the qualified name of this node.
+
+##### Inherited from
+
+`CharacterData.localName`
+
+#### namespaceURI
+
+> `readonly` **namespaceURI**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:406
+
+The namespace URI of this node.
+
+##### Inherited from
+
+`CharacterData.namespaceURI`
+
+#### nextSibling
+
+> `readonly` **nextSibling**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:412
+
+Returns the next sibling.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nextSibling)
+
+##### Inherited from
+
+`CharacterData.nextSibling`
+
+#### nodeName
+
+> **nodeName**: `"#text"` \| `"#cdata-section"`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1052
+
+Returns a string appropriate for the type of node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeName)
+
+##### Overrides
+
+`CharacterData.nodeName`
+
+#### nodeType
+
+> **nodeType**: `3` \| `4`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1053
+
+Returns the type of node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeType)
+
+##### Overrides
+
+`CharacterData.nodeType`
+
+#### nodeValue
+
+> **nodeValue**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:426
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/nodeValue)
+
+##### Inherited from
+
+`CharacterData.nodeValue`
+
+#### NOTATION_NODE
+
+> `readonly` **NOTATION_NODE**: `12`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:609
+
+##### Inherited from
+
+`CharacterData.NOTATION_NODE`
+
+#### ownerDocument
+
+> `readonly` **ownerDocument**: [`Document`](#document-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1022
+
+Returns the node document. Returns null for documents.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/ownerDocument)
+
+##### Inherited from
+
+`CharacterData.ownerDocument`
+
+#### parentElement
+
+> `readonly` **parentElement**: [`Element`](#element-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:444
+
+Returns the parent `Node` if it is of type `Element`, otherwise `null`.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/parentElement)
+
+##### Inherited from
+
+`CharacterData.parentElement`
+
+#### parentNode
+
+> `readonly` **parentNode**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:438
+
+Returns the parent.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/parentNode)
+
+##### Inherited from
+
+`CharacterData.parentNode`
+
+#### prefix
+
+> **prefix**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:448
+
+The prefix of the namespace for this node.
+
+##### Inherited from
+
+`CharacterData.prefix`
+
+#### previousSibling
+
+> `readonly` **previousSibling**: [`Node`](#node-1) \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:454
+
+Returns the previous sibling.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/previousSibling)
+
+##### Inherited from
+
+`CharacterData.previousSibling`
+
+#### PROCESSING_INSTRUCTION_NODE
+
+> `readonly` **PROCESSING_INSTRUCTION_NODE**: `7`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:600
+
+node is a ProcessingInstruction node.
+
+##### Inherited from
+
+`CharacterData.PROCESSING_INSTRUCTION_NODE`
+
+#### TEXT_NODE
+
+> `readonly` **TEXT_NODE**: `3`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:594
+
+node is a Text node.
+
+##### Inherited from
+
+`CharacterData.TEXT_NODE`
+
+#### textContent
+
+> **textContent**: `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:468
+
+The text content of this node and its descendants.
+
+For [Element](#element-1) and DocumentFragment nodes, returns the concatenation of the
+`nodeValue` of every descendant text node, excluding processing instruction and comment
+nodes. For all other node types, returns `nodeValue`.
+
+Setting `textContent` on an element or document fragment replaces all child nodes with a
+single text node; on other nodes it sets `data`, `value`, and `nodeValue` directly.
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/textContent)
+
+##### See
+
+[https://dom.spec.whatwg.org/#dom-node-textcontent](https://dom.spec.whatwg.org/#dom-node-textcontent)
+
+##### Inherited from
+
+`CharacterData.textContent`
+
+### Methods
+
+#### appendChild()
+
+> **appendChild**(`node`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:482
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/appendChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `node`    | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`CharacterData.appendChild`
+
+#### appendData()
+
+> **appendData**(`data`): `void`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1024
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/CharacterData/appendData)
+
+##### Parameters
+
+| Parameter | Type     |
+| --------- | -------- |
+| `data`    | `string` |
+
+##### Returns
+
+`void`
+
+##### Inherited from
+
+`CharacterData.appendData`
+
+#### cloneNode()
+
+> **cloneNode**(`deep?`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:533
+
+Returns a copy of node. If deep is true, the copy also includes the node's descendants.
+
+##### Parameters
+
+| Parameter | Type      |
+| --------- | --------- |
+| `deep?`   | `boolean` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Throws
+
+May throw a DOMException if operations within [Element#setAttributeNode](#setattributenode) or
+[Node#appendChild](#appendchild-8) (which are potentially invoked in this method) do not meet their
+specific constraints.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/cloneNode)
+
+##### Inherited from
+
+`CharacterData.cloneNode`
+
+#### compareDocumentPosition()
+
+> **compareDocumentPosition**(`other`): `number`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:540
+
+Returns a bitmask indicating the position of other relative to node.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/compareDocumentPosition)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`number`
+
+##### Inherited from
+
+`CharacterData.compareDocumentPosition`
+
+#### contains()
+
+> **contains**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:489
+
+Checks whether `other` is an inclusive descendant of this node.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/contains)
+
+##### Parameters
+
+| Parameter | Type                                       |
+| --------- | ------------------------------------------ |
+| `other`   | [`Node`](#node-1) \| `null` \| `undefined` |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`CharacterData.contains`
+
+#### deleteData()
+
+> **deleteData**(`offset`, `count`): `void`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1026
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/CharacterData/deleteData)
+
+##### Parameters
+
+| Parameter | Type     |
+| --------- | -------- |
+| `offset`  | `number` |
+| `count`   | `number` |
+
+##### Returns
+
+`void`
+
+##### Inherited from
+
+`CharacterData.deleteData`
+
+#### getRootNode()
+
+> **getRootNode**(`options`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:502
+
+Searches for the root node of this node.
+
+**This behavior is slightly different from the one in the specs**:
+
+- ignores `options.composed`, since `ShadowRoot`s are unsupported, therefore always
+  returning root.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/getRootNode)
+
+##### Parameters
+
+| Parameter | Type                 |
+| --------- | -------------------- |
+| `options` | `GetRootNodeOptions` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### See
+
+- https://dom.spec.whatwg.org/#dom-node-getrootnode
+- https://dom.spec.whatwg.org/#concept-shadow-including-root
+
+##### Inherited from
+
+`CharacterData.getRootNode`
+
+#### hasChildNodes()
+
+> **hasChildNodes**(): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:547
+
+Returns whether node has children.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/hasChildNodes)
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`CharacterData.hasChildNodes`
+
+#### insertBefore()
+
+> **insertBefore**(`node`, `child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:550
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/insertBefore)
+
+##### Parameters
+
+| Parameter | Type                        |
+| --------- | --------------------------- |
+| `node`    | [`Node`](#node-1)           |
+| `child`   | [`Node`](#node-1) \| `null` |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`CharacterData.insertBefore`
+
+#### insertData()
+
+> **insertData**(`offset`, `data`): `void`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:1028
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/CharacterData/insertData)
+
+##### Parameters
+
+| Parameter | Type     |
+| --------- | -------- |
+| `offset`  | `number` |
+| `data`    | `string` |
+
+##### Returns
+
+`void`
+
+##### Inherited from
+
+`CharacterData.insertData`
+
+#### isDefaultNamespace()
+
+> **isDefaultNamespace**(`namespace`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:553
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/isDefaultNamespace)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`CharacterData.isDefaultNamespace`
+
+#### isEqualNode()
+
+> **isEqualNode**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:514
+
+Checks whether the given node is equal to this node.
+
+Two nodes are equal when they have the same type, defining characteristics (for the type),
+and the same `childNodes`. The comparison is iterative to avoid stack overflows on deeply
+nested trees. `Attribute` nodes of each `Element` pair are also compared iteratively.
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`boolean`
+
+##### See
+
+- [https://dom.spec.whatwg.org/#concept-node-equals](https://dom.spec.whatwg.org/#concept-node-equals)
+- [https://developer.mozilla.org/en-US/docs/Web/API/Node/isEqualNode](https://developer.mozilla.org/en-US/docs/Web/API/Node/isEqualNode)
+
+##### Inherited from
+
+`CharacterData.isEqualNode`
+
+#### isSameNode()
+
+> **isSameNode**(`other`): `boolean`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:521
+
+Checks whether the given node is this node.
+
+[MDN Reference](https://developer.mozilla.org/en-US/docs/Web/API/Node/isSameNode)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `other`   | [`Node`](#node-1) |
+
+##### Returns
+
+`boolean`
+
+##### Inherited from
+
+`CharacterData.isSameNode`
+
+#### ~~isSupported()~~
+
+> **isSupported**(`feature`, `version`): `true`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:568
+
+Checks whether the DOM implementation implements a specific feature and its version.
+
+##### Parameters
+
+| Parameter | Type     | Description                                                                                                                          |
+| --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `feature` | `string` | The package name of the feature to test. This is the same name that can be passed to the method `hasFeature` on `DOMImplementation`. |
+| `version` | `string` | This is the version number of the package name to test.                                                                              |
+
+##### Returns
+
+`true`
+
+##### Deprecated
+
+Since `DOMImplementation.hasFeature` is deprecated and always returns true.
+
+##### Since
+
+Introduced in DOM Level 2
+
+##### See
+
+DOMImplementation.hasFeature
+
+##### Inherited from
+
+`CharacterData.isSupported`
+
+#### lookupNamespaceURI()
+
+> **lookupNamespaceURI**(`prefix`): `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:571
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lookupNamespaceURI)
+
+##### Parameters
+
+| Parameter | Type               |
+| --------- | ------------------ |
+| `prefix`  | `string` \| `null` |
+
+##### Returns
+
+`string` \| `null`
+
+##### Inherited from
+
+`CharacterData.lookupNamespaceURI`
+
+#### lookupPrefix()
+
+> **lookupPrefix**(`namespace`): `string` \| `null`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:574
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/lookupPrefix)
+
+##### Parameters
+
+| Parameter   | Type               |
+| ----------- | ------------------ |
+| `namespace` | `string` \| `null` |
+
+##### Returns
+
+`string` \| `null`
+
+##### Inherited from
+
+`CharacterData.lookupPrefix`
+
+#### normalize()
+
+> **normalize**(): `void`
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:582
+
+Removes empty exclusive Text nodes and concatenates the data of remaining contiguous
+exclusive Text nodes into the first of their nodes.
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/normalize)
+
+##### Returns
+
+`void`
+
+##### Inherited from
+
+`CharacterData.normalize`
+
+#### removeChild()
+
+> **removeChild**(`child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:585
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/removeChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `child`   | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`CharacterData.removeChild`
+
+#### replaceChild()
+
+> **replaceChild**(`node`, `child`): [`Node`](#node-1)
+
+Defined in: node_modules/@xmldom/xmldom/index.d.ts:588
+
+[MDN Reference](https://developer.mozilla.org/docs/Web/API/Node/replaceChild)
+
+##### Parameters
+
+| Parameter | Type              |
+| --------- | ----------------- |
+| `node`    | [`Node`](#node-1) |
+| `child`   | [`Node`](#node-1) |
+
+##### Returns
+
+[`Node`](#node-1)
+
+##### Inherited from
+
+`CharacterData.replaceChild`
+
+#### replaceData()
+
+> **replaceData**(`offset`, `count`, `data`): `void`
+
+Def

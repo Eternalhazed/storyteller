@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server"
 
+import { OPENSEARCH_XML } from "@storyteller/opds"
+
 import { withHasPermission } from "@/auth/auth"
 import { OPDS_AUTH_OPTIONS } from "@/opds/auth"
-import { createOpenSearchDescription } from "@/opds/search"
+import { createOpenSearchDescription } from "@/opds/builders"
 import { getOPDSConfig } from "@/opds/utils"
 
 export const dynamic = "force-dynamic"
@@ -19,7 +21,7 @@ export const GET = withHasPermission(
 
   return new NextResponse(createOpenSearchDescription(), {
     headers: {
-      "Content-Type": "application/opensearchdescription+xml",
+      "Content-Type": OPENSEARCH_XML,
     },
   })
 })

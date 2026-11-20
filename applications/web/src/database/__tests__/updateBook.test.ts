@@ -2,8 +2,9 @@ import assert from "node:assert"
 import { randomUUID } from "node:crypto"
 import { mkdir, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { describe, it } from "node:test"
 import { setTimeout } from "node:timers/promises"
+
+import { describe, it } from "vitest"
 
 import {
   type TestDbContext,
@@ -53,8 +54,8 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-void describe("updateBook auto-rename", () => {
-  void it("moves the asset folder when title changes", async () => {
+describe("updateBook auto-rename", () => {
+  it("moves the asset folder when title changes", async () => {
     using _db = setupTestDb()
     await rm(ASSETS_DIR, { recursive: true, force: true })
     await mkdir(ASSETS_DIR, { recursive: true })
@@ -84,7 +85,7 @@ void describe("updateBook auto-rename", () => {
     )
   })
 
-  void it("leaves the asset folder alone when title is unchanged", async () => {
+  it("leaves the asset folder alone when title is unchanged", async () => {
     using _db = setupTestDb()
     await rm(ASSETS_DIR, { recursive: true, force: true })
     await mkdir(ASSETS_DIR, { recursive: true })
@@ -105,8 +106,8 @@ void describe("updateBook auto-rename", () => {
   })
 })
 
-void describe("updateBook merge positions", () => {
-  void it("keeps the most recent position per user across merged books", async () => {
+describe("updateBook merge positions", () => {
+  it("keeps the most recent position per user across merged books", async () => {
     using db = setupTestDb()
     const userId = seedUser(db)
     const userId2 = seedUser(db)
@@ -151,7 +152,7 @@ void describe("updateBook merge positions", () => {
     )
   })
 
-  void it("promotes the merged position when target has none", async () => {
+  it("promotes the merged position when target has none", async () => {
     using db = setupTestDb()
     const userId = seedUser(db)
     const [targetUuid, mergedUuid] = seedBooks(db, [
@@ -170,7 +171,7 @@ void describe("updateBook merge positions", () => {
     assert.deepStrictEqual(book.position.locator, { href: "only" })
   })
 
-  void it("does not crash when only target book has a position", async () => {
+  it("does not crash when only target book has a position", async () => {
     using db = setupTestDb()
     const userId = seedUser(db)
     const [targetUuid, mergedUuid] = seedBooks(db, [
@@ -185,5 +186,50 @@ void describe("updateBook merge positions", () => {
 
     const book = await getBook(targetUuid, userId)
     assert.ok(book?.position, "target should have a position after merge")
+  })
+})
+
+describe("updateBook merge identifiers", () => {
+  it("moves the merged books' identifiers and ratings onto the target", async () => {
+    using db = setupTestDb()
+    const [targetUuid, mergedUuid] = seedBooks(db, [
+      { title: "target", ebook: "/tmp/target.epub" },
+      { title: "merged", audiobook: "/tmp/merged" },
+    ]) as [UUID, UUID]
+    db.sqlite.exec(`
+      INSERT INTO external_source (name, kind) VALUES ('Audible', 'audible');
+      INSERT INTO identifier_type (name, kind) VALUES ('Audible ASIN', 'audible'), ('ISBN-13', 'isbn-13');
+      INSERT INTO identifier (uuid, book_uuid, identifier_type_uuid, value)
+      SELECT 'target-asin', '${targetUuid}', uuid, 'B002V1OF70' FROM identifier_type WHERE kind = 'audible';
+      INSERT INTO identifier (uuid, book_uuid, identifier_type_uuid, value)
+      SELECT 'merged-asin', '${mergedUuid}', uuid, 'B002V1OF70' FROM identifier_type WHERE kind = 'audible';
+      INSERT INTO identifier (book_uuid, identifier_type_uuid, value)
+      SELECT '${mergedUuid}', uuid, '9780441013593' FROM identifier_type WHERE kind = 'isbn-13';
+      INSERT INTO identifier (book_uuid, identifier_type_uuid, value, audiobook_uuid)
+      SELECT '${mergedUuid}', identifier_type.uuid, 'B002V1OF70', audiobook.uuid
+      FROM identifier_type, audiobook
+      WHERE identifier_type.kind = 'audible' AND audiobook.book_uuid = '${mergedUuid}';
+      INSERT INTO external_data (identifier_uuid, external_source_uuid, rating)
+      SELECT 'merged-asin', uuid, 4.5 FROM external_source WHERE kind = 'audible';
+    `)
+
+    await updateBook(targetUuid, null, { books: [mergedUuid] })
+
+    const book = await getBook(targetUuid)
+    assert.ok(book)
+    assert.deepStrictEqual(
+      book.identifiers.map((entry) => `${entry.kind}:${entry.value}`).sort(),
+      ["audible:B002V1OF70", "isbn-13:9780441013593"],
+    )
+    assert.deepStrictEqual(
+      book.audiobook?.identifiers.map(
+        (entry) => `${entry.kind}:${entry.value}`,
+      ),
+      ["audible:B002V1OF70"],
+    )
+    assert.deepStrictEqual(
+      book.externalData.map((entry) => [entry.identifierValue, entry.rating]),
+      [["B002V1OF70", 4.5]],
+    )
   })
 })

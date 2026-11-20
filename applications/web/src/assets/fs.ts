@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto"
-import { cp, link, mkdir, readdir, rm, stat } from "node:fs/promises"
+import { cp, link, lstat, mkdir, readdir, rm, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
 import { reflinkFile } from "@reflink/reflink"
 
-import { getFileChunks } from "@storyteller-platform/fs"
+import { getFileChunks } from "@storyteller/fs"
 
+import { pathBelongsTo } from "@/assets/library/paths"
 import { isAudioFile } from "@/audio"
 import {
   type Book,
@@ -18,14 +19,14 @@ import { ASSETS_DIR } from "@/directories"
 import { logger } from "@/logging"
 import { type UUID } from "@/uuid"
 
-import { pathBelongsTo } from "./library/scanner/folder"
 import {
+  releasePrefixAfterSettle,
   suppressPrefix,
-  unsuppressPrefix,
 } from "./library/scanner/write-intent"
 import {
   getCoverImageCacheDirectory,
   getDefaultSuffix,
+  getEmissionsFilepath,
   getInternalAudioDirectory,
   getInternalBookDirectory,
   getInternalEpubDirectory,
@@ -264,8 +265,8 @@ export async function changeBookAssetDir(
     try {
       await move(oldDir, targetDir)
     } finally {
-      unsuppressPrefix(oldDir)
-      unsuppressPrefix(targetDir)
+      releasePrefixAfterSettle(oldDir)
+      releasePrefixAfterSettle(targetDir)
     }
   } else {
     await mkdir(targetDir, { recursive: true })
@@ -308,8 +309,8 @@ async function mergeIntoTarget(
 
     await rm(oldDir, { recursive: true, force: true })
   } finally {
-    unsuppressPrefix(oldDir)
-    unsuppressPrefix(targetDir)
+    releasePrefixAfterSettle(oldDir)
+    releasePrefixAfterSettle(targetDir)
   }
 }
 
@@ -537,8 +538,8 @@ export async function relocateAssetsIntoBook(
     try {
       await move(from, to)
     } finally {
-      unsuppressPrefix(from)
-      unsuppressPrefix(to)
+      releasePrefixAfterSettle(from)
+      releasePrefixAfterSettle(to)
     }
   }
 
@@ -548,6 +549,37 @@ export async function relocateAssetsIntoBook(
 export async function deleteProcessed(book: BookWithRelations) {
   await deleteProcessedAudio(book)
   await deleteTranscriptions(book)
+}
+
+export async function getDirectorySize(directory: string) {
+  const entries = await readdir(directory, {
+    recursive: true,
+    withFileTypes: true,
+  }).catch(() => [])
+
+  const seen = new Set<number>()
+  let total = 0
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+
+    const info = await lstat(join(entry.parentPath, entry.name)).catch(
+      () => null,
+    )
+    if (!info || seen.has(info.ino)) continue
+
+    seen.add(info.ino)
+    total += info.size
+  }
+  return total
+}
+
+export async function getProcessedUsage(book: BookWithRelations) {
+  const [transcodedAudio, transcriptions, emissions] = await Promise.all([
+    getDirectorySize(getProcessedAudioFilepath(book)),
+    getDirectorySize(getTranscriptionsFilepath(book)),
+    getDirectorySize(getEmissionsFilepath(book)),
+  ])
+  return { transcodedAudio, transcriptions, emissions }
 }
 
 export function isReadaloudInFlight(book: BookWithRelations) {
@@ -590,7 +622,18 @@ export async function deleteTranscriptions(book: BookWithRelations) {
     recursive: true,
     force: true,
   })
-  unsuppressPrefix(transcriptionsDir)
+  releasePrefixAfterSettle(transcriptionsDir)
+  await deleteEmissions(book)
+}
+
+export async function deleteEmissions(book: BookWithRelations) {
+  const emissionsDir = getEmissionsFilepath(book)
+  suppressPrefix(emissionsDir)
+  await rm(emissionsDir, {
+    recursive: true,
+    force: true,
+  })
+  releasePrefixAfterSettle(emissionsDir)
 }
 
 export async function deleteProcessedAudio(book: BookWithRelations) {
@@ -600,14 +643,14 @@ export async function deleteProcessedAudio(book: BookWithRelations) {
     recursive: true,
     force: true,
   })
-  unsuppressPrefix(processedAudioDir)
+  releasePrefixAfterSettle(processedAudioDir)
 }
 
 export async function deleteOriginals(book: BookWithRelations) {
   if (book.ebook) {
     suppressPrefix(book.ebook.filepath)
     await rm(book.ebook.filepath, { force: true })
-    unsuppressPrefix(book.ebook.filepath)
+    releasePrefixAfterSettle(book.ebook.filepath)
   }
   if (book.audiobook) {
     suppressPrefix(book.audiobook.filepath)
@@ -615,7 +658,7 @@ export async function deleteOriginals(book: BookWithRelations) {
       recursive: true,
       force: true,
     })
-    unsuppressPrefix(book.audiobook.filepath)
+    releasePrefixAfterSettle(book.audiobook.filepath)
   }
 }
 
@@ -627,7 +670,7 @@ export async function deleteAssets(book: BookWithRelations) {
   const bookDir = getInternalBookDirectory(book)
   suppressPrefix(bookDir)
   await rm(bookDir, { recursive: true, force: true })
-  unsuppressPrefix(bookDir)
+  releasePrefixAfterSettle(bookDir)
 
   if (
     book.readaloud?.filepath &&
@@ -635,18 +678,18 @@ export async function deleteAssets(book: BookWithRelations) {
   ) {
     suppressPrefix(book.readaloud.filepath)
     await rm(book.readaloud.filepath, { force: true })
-    unsuppressPrefix(book.readaloud.filepath)
+    releasePrefixAfterSettle(book.readaloud.filepath)
   }
 
   if (book.ebook && pathBelongsTo(ASSETS_DIR, book.ebook.filepath)) {
     suppressPrefix(book.ebook.filepath)
     await rm(book.ebook.filepath, { force: true })
-    unsuppressPrefix(book.ebook.filepath)
+    releasePrefixAfterSettle(book.ebook.filepath)
   }
   if (book.audiobook && pathBelongsTo(ASSETS_DIR, book.audiobook.filepath)) {
     suppressPrefix(book.audiobook.filepath)
     await rm(book.audiobook.filepath, { recursive: true, force: true })
-    unsuppressPrefix(book.audiobook.filepath)
+    releasePrefixAfterSettle(book.audiobook.filepath)
   }
 
   await deleteCachedCoverImages(book.uuid)
@@ -660,7 +703,7 @@ export async function deleteCachedCoverImages(uuid: UUID) {
 export async function computeFileHash(filePath: string): Promise<string> {
   const hash = createHash("sha256")
 
-  // Use the stream from @storyteller-platform/fs
+  // Use the stream from @storyteller/fs
   // to avoid memory overhead and Node.js file limits.
   for await (const chunk of getFileChunks(filePath)) {
     hash.update(chunk)

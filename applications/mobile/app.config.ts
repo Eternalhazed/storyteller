@@ -1,5 +1,4 @@
 import { type ConfigContext, type ExpoConfig } from "expo/config"
-import "tsx/cjs"
 
 import packageInfo from "./package.json"
 
@@ -90,10 +89,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
             ],
           },
           android: {
-            compileSdkVersion: 36,
+            compileSdkVersion: 37,
             targetSdkVersion: 36,
             buildToolsVersion: "36.0.0",
             usesCleartextTraffic: true,
+            // Required for Play Store builds as of 02/27/2027
+            enableMinifyInReleaseBuilds: true,
           },
         },
       ],
@@ -137,7 +138,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           enforceContrast: false,
         },
       ],
-      ["./plugins/withAndroidJetifier.ts"],
       ["./plugins/withKeyDownEvents.ts", { keyCodes: [92, 93, 117] }],
       ["./plugins/withCoreLibraryDesugaring.ts"],
       ["./plugins/withAndroidAuto.ts"],

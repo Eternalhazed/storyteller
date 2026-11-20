@@ -1,4 +1,4 @@
-import { XRAY_SCHEMA_VERSION, type Xray } from "@storyteller-platform/xray/view"
+import { XRAY_SCHEMA_VERSION, type Xray } from "@storyteller/xray/view"
 
 export const XRAY_CACHE_METADATA_FILE = "xray.metadata.json"
 

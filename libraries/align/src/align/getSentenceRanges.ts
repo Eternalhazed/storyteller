@@ -3,8 +3,8 @@ import { distance } from "fastest-levenshtein"
 import { enumerate } from "itertools"
 import { runes } from "runes2"
 
-import { type TimelineEntry } from "@storyteller-platform/ghost-story"
-import { type Mapping } from "@storyteller-platform/mapping"
+import { type TimelineEntry } from "@storyteller/ghost-story"
+import { type Mapping } from "@storyteller/mapping"
 
 import { getTrackDuration } from "../common/ffmpeg.ts"
 import { errorAlign } from "../errorAlign/errorAlign.ts"
@@ -21,12 +21,45 @@ export type StorytellerTranscription = {
   timeline: StorytellerTimelineEntry[]
 }
 
-export type SentenceRange = {
-  id: number
-  chapterId: string
+export type RangeState = "matched" | "interpolated" | "unmatched" | "dropped"
+
+export type AudioRange = {
   start: number
   end: number
   audiofile: string
+}
+
+export class SentenceRange {
+  constructor(
+    public readonly id: number,
+    public readonly chapterId: string,
+    public readonly audioRanges: AudioRange[],
+    public readonly state: RangeState = "matched",
+  ) {
+    if (audioRanges.length === 0) {
+      throw new Error(
+        `Sentence ${chapterId}#${id} must have at least one audio range`,
+      )
+    }
+  }
+
+  get first(): AudioRange {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    return this.audioRanges[0]!
+  }
+
+  get last(): AudioRange {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    return this.audioRanges.at(-1)!
+  }
+
+  get audiofiles(): string[] {
+    return Array.from(new Set(this.audioRanges.map((r) => r.audiofile)))
+  }
+
+  withAudioRanges(audioRanges: AudioRange[]) {
+    return new SentenceRange(this.id, this.chapterId, audioRanges, this.state)
+  }
 }
 
 export type WordRange = {
@@ -36,6 +69,7 @@ export type WordRange = {
   start: number
   end: number
   audiofile: string
+  state: RangeState
 }
 
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
@@ -89,7 +123,9 @@ function getAlignmentsForSentence(sentence: string, alignments: Alignment[]) {
   }
   return {
     alignments: result,
-    score: result.some((a) => a.opType === "MATCH") ? score : -1,
+    score: result.some((a) => a.opType === "MATCH")
+      ? score / sentence.length
+      : -1,
   }
 }
 
@@ -172,7 +208,10 @@ function errorAlignWithNarrowing(
     narrowEnd,
   )
 
-  return { alignments, slice: [slice[0] + narrowed[0], slice[0] + narrowed[1]] }
+  return {
+    alignments,
+    slice: [slice[0] + narrowed[0], slice[0] + narrowed[1]],
+  }
 }
 
 export function mapTranscriptionTimeline(
@@ -211,6 +250,9 @@ export async function getSentenceRanges(
     const { result } = await slugify(s.text, locale)
     slugifiedChapterSentences.push(result)
   }
+
+  let totalScore = 0
+  let totalSentences = 0
 
   let firstFoundSentence = 0
   let lastFoundSentence = sentences.length - 1
@@ -289,6 +331,9 @@ export async function getSentenceRanges(
           alignments.slice(alignmentIndex),
         )
 
+      totalScore += score
+      totalSentences += 1
+
       const sentenceLengthInSlugifiedTranscript = sentenceAlignments
         .filter((a) => a.opType !== "DELETE")
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
@@ -313,23 +358,17 @@ export async function getSentenceRanges(
         const end = findEndTimestamp(chapterTranscriptEndIndex, mappedTimeline)
 
         if (start && end) {
-          if (start.audiofile !== end.audiofile) {
-            sentenceRanges.push({
-              id: j + chapterSentenceIndex + slice[0],
-              chapterId,
-              start: 0,
-              audiofile: end.audiofile,
-              end: end.end,
-            })
-          } else {
-            sentenceRanges.push({
-              id: j + chapterSentenceIndex + slice[0],
-              chapterId,
-              start: start.start,
-              audiofile: start.audiofile,
-              end: end.end,
-            })
-          }
+          sentenceRanges.push(
+            new SentenceRange(j + chapterSentenceIndex + slice[0], chapterId, [
+              start.audiofile !== end.audiofile
+                ? { start: 0, audiofile: end.audiofile, end: end.end }
+                : {
+                    start: start.start,
+                    audiofile: start.audiofile,
+                    end: end.end,
+                  },
+            ]),
+          )
         }
 
         if (granularity === "word") {
@@ -377,6 +416,7 @@ export async function getSentenceRanges(
                 start: end.audiofile === start.audiofile ? start.start : 0,
                 audiofile: end.audiofile,
                 end: end.end,
+                state: "matched",
               })
             }
 
@@ -416,6 +456,7 @@ export async function getSentenceRanges(
           firstFoundSentence,
           chapterSentenceIndex - 1,
         ),
+        score: (totalScore / totalSentences) * 100 + 50,
       }
     }
     chapterSentenceIndex += lastGoodSentenceIndex + 1
@@ -434,7 +475,99 @@ export async function getSentenceRanges(
     transcriptionOffset: chapterTranscriptEndIndex,
     firstFoundSentence,
     lastFoundSentence,
+    score: (totalScore / totalSentences) * 100 + 50,
   }
+}
+
+/**
+ * A clip may run this far back past the previous sentence's end before it is
+ * treated as an audiobook narrating text out of order rather than as an
+ * overlap. Overlaps come from a chapter's search pad and a straddling
+ * sentence's extrapolated tail, so they stay within a few seconds.
+ */
+const MAX_OVERLAP_SECONDS = 30
+
+/**
+ * Consecutive sentences must not run backwards through the audio by a small
+ * amount. Drop clips that end just before the previous sentence's last clip
+ * and trim clips that overlap it.
+ *
+ * A clip that jumps back further than MAX_OVERLAP_SECONDS is not an overlap
+ * but a block the audiobook narrates out of text order. Those are kept as
+ * they are and the sequence restarts from them.
+ */
+export function enforceMonotonicAudioRanges(
+  sentenceRanges: SentenceRange[],
+  audiofiles: string[],
+  audioFileDurations: Record<string, number>,
+) {
+  const fileOffsets = new Map<string, number>()
+  let offset = 0
+  for (const audiofile of audiofiles) {
+    fileOffsets.set(audiofile, offset)
+    offset += audioFileDurations[audiofile] ?? 0
+  }
+  const global = (audiofile: string, time: number) =>
+    (fileOffsets.get(audiofile) ?? 0) + time
+
+  let floor: AudioRange | null = null
+  return sentenceRanges.map((sentenceRange) => {
+    if (!floor) {
+      floor = sentenceRange.last
+      return sentenceRange
+    }
+    const floorEnd = global(floor.audiofile, floor.end)
+    const kept: AudioRange[] = []
+    for (const range of sentenceRange.audioRanges) {
+      const start = global(range.audiofile, range.start)
+      const end = global(range.audiofile, range.end)
+      if (floorEnd - start > MAX_OVERLAP_SECONDS) {
+        // Narrated out of order: keep, and measure what follows from here
+        kept.push(range)
+        floor = range
+        continue
+      }
+      if (end <= floorEnd) continue
+      kept.push(
+        start < floorEnd
+          ? { ...range, start: floor.end, audiofile: floor.audiofile }
+          : range,
+      )
+      floor = range
+    }
+    if (kept.length === 0) {
+      kept.push({
+        audiofile: floor.audiofile,
+        start: floor.end,
+        end: floor.end,
+      })
+    }
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    floor = kept[kept.length - 1]!
+    return sentenceRange.withAudioRanges(kept)
+  })
+}
+
+/**
+ * Apply a length-preserving transform to every clip of a list of sentence
+ * ranges, in book order, and pack the results back into their sentences. This
+ * lets the clip-level helpers below treat a sentence that spans several audio
+ * files as a run of consecutive clips.
+ */
+function mapAudioRanges(
+  sentenceRanges: SentenceRange[],
+  transform: (ranges: AudioRange[]) => AudioRange[],
+) {
+  const transformed = transform(
+    sentenceRanges.flatMap((sentenceRange) => sentenceRange.audioRanges),
+  )
+  let cursor = 0
+  return sentenceRanges.map((sentenceRange) => {
+    const count = sentenceRange.audioRanges.length
+    const audioRanges = transformed.slice(cursor, cursor + count)
+    cursor += count
+    return sentenceRange.withAudioRanges(audioRanges)
+  })
 }
 
 /**
@@ -443,22 +576,22 @@ export async function getSentenceRanges(
  * about these, so we nudge them out a bit to make sure that they're
  * not truly equal.
  */
-export function expandEmptySentenceRanges<
-  Range extends SentenceRange | WordRange,
->(sentenceRanges: Range[]) {
+export function expandEmptyAudioRanges<Range extends AudioRange>(
+  ranges: Range[],
+) {
   const expandedRanges: Range[] = []
-  for (const sentenceRange of sentenceRanges) {
-    const previousSentenceRange = expandedRanges[expandedRanges.length - 1]
-    if (!previousSentenceRange) {
-      expandedRanges.push(sentenceRange)
+  for (const range of ranges) {
+    const previousRange = expandedRanges[expandedRanges.length - 1]
+    if (!previousRange) {
+      expandedRanges.push(range)
       continue
     }
 
     const nudged =
-      previousSentenceRange.end > sentenceRange.start &&
-      previousSentenceRange.audiofile === sentenceRange.audiofile
-        ? { ...sentenceRange, start: previousSentenceRange.end }
-        : sentenceRange
+      previousRange.end > range.start &&
+      previousRange.audiofile === range.audiofile
+        ? { ...range, start: previousRange.end }
+        : range
 
     const expanded =
       nudged.end <= nudged.start
@@ -470,45 +603,45 @@ export function expandEmptySentenceRanges<
   return expandedRanges
 }
 
+export function expandEmptySentenceRanges(sentenceRanges: SentenceRange[]) {
+  return mapAudioRanges(sentenceRanges, expandEmptyAudioRanges)
+}
+
 export async function collapseSentenceRangeGaps(
   sentenceRanges: SentenceRange[],
 ) {
-  const collapsed: SentenceRange[] = []
-  for (const [i, sentenceRange] of enumerate(sentenceRanges)) {
-    const nextSentence = sentenceRanges[i + 1]
-    const prevSentence = sentenceRanges[i - 1]
+  const ranges = sentenceRanges.flatMap(
+    (sentenceRange) => sentenceRange.audioRanges,
+  )
+  const collapsed: AudioRange[] = []
+  for (const [i, range] of enumerate(ranges)) {
+    const nextRange = ranges[i + 1]
+    const prevRange = ranges[i - 1]
 
-    const start =
-      prevSentence?.audiofile !== sentenceRange.audiofile
-        ? 0
-        : sentenceRange.start
+    const start = prevRange?.audiofile !== range.audiofile ? 0 : range.start
     const end =
-      nextSentence?.audiofile !== sentenceRange.audiofile
-        ? await getTrackDuration(sentenceRange.audiofile)
-        : nextSentence.start
+      nextRange?.audiofile !== range.audiofile
+        ? await getTrackDuration(range.audiofile)
+        : nextRange.start
 
-    collapsed.push({ ...sentenceRange, start, end })
+    collapsed.push({ ...range, start, end })
   }
 
-  return collapsed
+  return mapAudioRanges(sentenceRanges, () => collapsed)
 }
 
-export function getChapterDuration(sentenceRanges: SentenceRange[]) {
-  let i = 0
+export function getChapterDuration(ranges: AudioRange[]) {
   let duration = 0
   let audiofile: string | null = null
   let start = 0
   let end = 0
-  while (i < sentenceRanges.length) {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    const sentenceRange = sentenceRanges[i]!
-    if (sentenceRange.audiofile !== audiofile) {
+  for (const range of ranges) {
+    if (range.audiofile !== audiofile) {
       duration += end - start
-      start = sentenceRange.start
-      audiofile = sentenceRange.audiofile
+      start = range.start
+      audiofile = range.audiofile
     }
-    end = sentenceRange.end
-    i++
+    end = range.end
   }
   duration += end - start
   return duration

@@ -1,6 +1,6 @@
 {
-  "name": "@storyteller-platform/tauri",
-  "version": "0.0.0-alpha.29",
+  "name": "@storyteller/tauri",
+  "version": "0.0.0-alpha.30",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,14 +13,9 @@
     "tauri": "tauri"
   },
   "devDependencies": {
-    "@storyteller-platform/web": "workspace:*",
+    "@storyteller/web": "workspace:*",
     "@tauri-apps/cli": "^2.5.0",
-    "@types/node": "^24.0.0",
-    "tsx": "^4.7.2"
-  },
-  "dependencies": {
-    "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-fs": "^2.5.1",
-    "@tauri-apps/plugin-os": "^2.3.2"
+    "@types/node": "catalog:",
+    "tsx": "catalog:"
   }
 }

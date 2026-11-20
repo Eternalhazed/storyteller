@@ -16,21 +16,28 @@ let
       ./scripts/whisper-sycl-compat-fix.patch
       ./scripts/whisper-utf8-json-fix.patch
     ];
+    doInstallCheck = false;
   });
 in
 {
   packages = with pkgs; [
+    cmake
+    dejavu_fonts
     ffmpeg
+    freetype
     # Order is important here — we need sqlite-interactive's
     # sqlite3 executable to come first in the path,
     # but we also want the development headers, which are
     # in the sqlite package.
     sqlite-interactive
     sqlite
+    git
     git-lfs
     vtsls
     google-cloud-sdk
     gcc
+    xxhash
+    zlib
   ] ++ [
     # https://github.com/NixOS/nixpkgs/pull/546525
     (pkgs.buildGoModule (finalAttrs: {
@@ -49,11 +56,28 @@ in
     patched-whisper
   ];
   env.WHISPER_CPP_PATH = "${patched-whisper}";
+  env.ORACLE_FONT = "${pkgs.dejavu_fonts}/share/fonts/truetype/DejaVuSans.ttf";
 
   languages.javascript = {
     enable = true;
-    package = pkgs.nodejs_24;
+    package = pkgs.nodejs_26 // {
+      corepack = pkgs.corepack.override { nodejs-slim = pkgs.nodejs-slim_26; };
+    };
     corepack.enable = true;
+  };
+
+  languages.java.enable = true;
+
+  # Android tooling is opt-in: the SDK, NDK, and emulator system images add
+  # over 20 GB to the environment. See
+  # applications/docs/contributing/environment-setup.md#android.
+  profiles.android.module = {
+    android = {
+      enable = true;
+      reactNative.enable = true;
+      sources.enable = true;
+      emulator.enable = true;
+    };
   };
 
   tasks."repo:init" = {
@@ -77,8 +101,7 @@ in
     "mkhl.direnv"
     # Copied from .vscode/extensions.json
     "arcanis.vscode-zipfs"
-    "dbaeumer.vscode-eslint"
-    "esbenp.prettier-vscode"
+    "oxc.oxc-vscode"
     "ms-python.python"
     "ms-python.vscode-pylance"
     "ms-azuretools.vscode-docker"

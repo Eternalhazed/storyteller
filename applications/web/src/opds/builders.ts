@@ -10,48 +10,115 @@ import {
   Subjects,
 } from "@readium/shared"
 import he from "he"
+import { createTranslator } from "next-intl"
+import { z } from "zod"
 
+import { MediaType } from "@storyteller/media-types"
 import {
   ATOM_ACQ,
   ATOM_NAV,
   AcquisitionLink,
+  Facet,
   Feed,
   FeedMetadata,
   NavigationLink,
   NavigationLinks,
+  ProgressionLink,
   OPDSPublication,
+  OPDS_AUTHENTICATION_JSON,
   OPDS_JSON,
+  OPENSEARCH_XML,
   THUMBNAIL_REL,
-} from "@storyteller-platform/opds"
+} from "@storyteller/opds"
 
-import { type BookWithRelations, booksQuery, getBooks } from "@/database/books"
 import {
-  type CollectionWithRelations,
-  getCollections,
-} from "@/database/collections"
-import { db } from "@/database/connection"
-import { type Series, getSeries } from "@/database/series"
-import type { OpdsFormat } from "@/database/settingsTypes"
-import { type Tag, getTags } from "@/database/tags"
-import { getCoverUrl } from "@/store/api"
+  type BookWithRelations,
+  type GetBooksOptions,
+  countBooks,
+  getBooks,
+} from "@/database/books"
+import {
+  type FacetValue,
+  type FacetViewer,
+  NONE_FACET_KEY,
+  getSectionFacets,
+} from "@/database/libraryCounts"
+import { type OpdsFormat, OpdsFormatSchema } from "@/database/settingsTypes"
+import { getShelfBooks } from "@/database/shelves"
+import {
+  FACET_BOOKS,
+  type FacetBooksDef,
+  type FacetBooksQuery,
+  facetBooksQuery,
+} from "@/facet-books"
+import {
+  FACET_SECTION_REGISTRY,
+  OPDS_FACET_SECTIONS,
+  type OpdsFacetSection,
+  opdsSectionPath,
+} from "@/facet-sections"
+import { getFieldDef } from "@/fields"
+import { type ShelfFilterNode } from "@/shelves"
+import { GENERAL_SORT_FIELDS, type SortDirection, type SortField } from "@/sort"
+import { getCoverUrl } from "@/store/urls"
 import type { UUID } from "@/uuid"
 
-export type OpdsVersion = "v1" | "v2"
+import messages from "../../messages/en.json"
+
+const t = createTranslator({ locale: "en", messages })
+
+const OpdsVersionSchema = z.enum(["v1", "v2"])
+export type OpdsVersion = z.infer<typeof OpdsVersionSchema>
+
+export interface OpdsSort {
+  field: SortField
+  direction: SortDirection
+}
 
 export interface BuildContext {
-  userId?: UUID
   version: OpdsVersion
-  /** which acquisition formats books expose, defaults to readaloud + audiobook */
-  format?: OpdsFormat
-}
-
-export interface PaginationInput {
+  viewer: FacetViewer
+  formats: OpdsFormat[]
+  sort: OpdsSort
+  pageSize: number | null
   page: number
-  pageSize: number | null | undefined
+  params: URLSearchParams
 }
 
-const baseFor = (version: OpdsVersion) =>
+export const SEARCH_PARAM = "query"
+const SORT_PARAM = "sort"
+const ORDER_PARAM = "order"
+const FORMAT_PARAM = "format"
+const PAGE_PARAM = "page"
+
+const KEPT_PARAMS = [SEARCH_PARAM, SORT_PARAM, ORDER_PARAM, FORMAT_PARAM]
+
+const OrderSchema = z.enum(["asc", "desc"])
+
+export const OpdsPageSchema = z.coerce.number().int().min(1).catch(1)
+
+export const parseVersion = (raw: string | undefined): OpdsVersion | null =>
+  OpdsVersionSchema.default("v1").safeParse(raw).data ?? null
+
+export const baseFor = (version: OpdsVersion) =>
   version === "v2" ? "/opds/v2" : "/opds/v1"
+
+export const searchPath = (version: OpdsVersion) => `${baseFor(version)}/search`
+
+export const OPENSEARCH_PATH = "/opds/search.xml"
+
+export const openSearchTemplate = () =>
+  `${searchPath("v1")}?${SEARCH_PARAM}={searchTerms}`
+
+export const createOpenSearchDescription = () => {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
+  <ShortName>${t("Opds.searchName")}</ShortName>
+  <Description>${t("Opds.searchDescription")}</Description>
+  <Url type="${ATOM_ACQ}"
+     template="${openSearchTemplate()}" />
+</OpenSearchDescription>`
+}
 
 const feedId = (selfPath: string): string => {
   const slug =
@@ -60,146 +127,119 @@ const feedId = (selfPath: string): string => {
 }
 
 const feedType = (version: OpdsVersion, kind: "navigation" | "acquisition") => {
-  if (version === "v2") return OPDS_JSON
+  if (version === "v2") {
+    return OPDS_JSON
+  }
+
   return kind === "navigation" ? ATOM_NAV : ATOM_ACQ
 }
 
-const searchLink = (version: OpdsVersion): Link => {
+const searchLinks = (version: OpdsVersion): Link[] => {
   if (version === "v2") {
-    return new Link({
-      href: `${baseFor(version)}/search{?query}`,
-      rels: new Set(["search"]),
-      type: OPDS_JSON,
-      templated: true,
-    })
+    return [
+      new Link({
+        href: `${searchPath(version)}{?${SEARCH_PARAM}}`,
+        rels: new Set(["search"]),
+        type: OPDS_JSON,
+        templated: true,
+      }),
+    ]
   }
-  return new Link({
-    href: "/opds/search.xml",
-    rels: new Set(["search"]),
-    type: "application/opensearchdescription+xml",
-  })
+
+  return [
+    new Link({
+      href: OPENSEARCH_PATH,
+      rels: new Set(["search"]),
+      type: OPENSEARCH_XML,
+    }),
+    new Link({
+      href: openSearchTemplate(),
+      rels: new Set(["search"]),
+      type: ATOM_ACQ,
+    }),
+  ]
 }
+
+const hrefWith = (
+  path: string,
+  params: URLSearchParams,
+  changes: Record<string, string | null> = {},
+): string => {
+  const next = new URLSearchParams(params)
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === null) {
+      next.delete(key)
+    } else {
+      next.set(key, value)
+    }
+  }
+
+  const query = next.toString()
+  return query ? `${path}?${query}` : path
+}
+
+const keptParams = (ctx: BuildContext): URLSearchParams => {
+  const kept = new URLSearchParams()
+  for (const key of KEPT_PARAMS) {
+    const value = ctx.params.get(key)
+    if (value) {
+      kept.set(key, value)
+    }
+  }
+
+  return kept
+}
+
+const defaultDirection = (field: SortField): SortDirection =>
+  getFieldDef(field).defaultSort ?? "asc"
+
+const parseSort = (
+  ctx: BuildContext,
+  allowed: readonly SortField[],
+): OpdsSort | null => {
+  const field = z.enum(allowed).safeParse(ctx.params.get(SORT_PARAM)).data
+  if (!field) {
+    return null
+  }
+
+  return {
+    field,
+    direction:
+      OrderSchema.safeParse(ctx.params.get(ORDER_PARAM)).data ??
+      defaultDirection(field),
+  }
+}
+
+const parseFormat = (
+  raw: string | null,
+  choices: readonly OpdsFormat[],
+): OpdsFormat | null => z.enum(choices).safeParse(raw).data ?? null
 
 const authenticate = () =>
   new Properties({
     authenticate: new Link({
       href: "/opds/auth/auth.json",
-      type: "application/opds-authentication+json",
+      type: OPDS_AUTHENTICATION_JSON,
     }),
   })
 
-/**
- * which formats to include
- */
-const includedFormats = (
-  format: OpdsFormat,
-  has: { readaloud: boolean; ebook: boolean; audiobook: boolean },
-) => {
+function formatSuffix(format: OpdsFormat) {
   switch (format) {
-    case "ebook":
-      // prefer the plain ebook, fall back to readaloud when it's the only epub
-      return {
-        readaloud: has.readaloud && !has.ebook,
-        ebook: has.ebook,
-        audiobook: has.audiobook,
-      }
-    case "both":
-      return {
-        readaloud: has.readaloud,
-        ebook: has.ebook,
-        audiobook: has.audiobook,
-      }
-    case "readaloud":
-    default:
-      // prefer the readaloud, fall back to the plain ebook
-      return {
-        readaloud: has.readaloud,
-        ebook: has.ebook && !has.readaloud,
-        audiobook: has.audiobook,
-      }
+    case "ebook": {
+      return ""
+    }
+    case "audiobook": {
+      return " (audiobook)"
+    }
+    case "readaloud": {
+      return " (readaloud)"
+    }
   }
 }
 
-/** maps a book row to an OPDS publication, shared by both projections */
-export const bookToPublication = (
-  book: BookWithRelations,
-  format: OpdsFormat = "readaloud",
-): OPDSPublication => {
-  const hasEbook = !!book.ebook && !book.ebook.missing
-  const hasAudiobook = !!book.audiobook && !book.audiobook.missing
-  const hasReadaloud =
-    !!book.readaloud &&
-    !book.readaloud.missing &&
-    book.readaloud.status === "ALIGNED"
-
-  const include = includedFormats(format, {
-    readaloud: hasReadaloud,
-    ebook: hasEbook,
-    audiobook: hasAudiobook,
-  })
-
-  const links: Link[] = []
-  if (include.readaloud) {
-    links.push(
-      new AcquisitionLink({
-        href: `/api/v2/books/${book.uuid}/files?format=readaloud`,
-        rel: "acquisition",
-        type: "application/epub+zip",
-      }),
-    )
-  }
-  if (include.ebook) {
-    links.push(
-      new AcquisitionLink({
-        href: `/api/v2/books/${book.uuid}/files?format=ebook`,
-        rel: "acquisition",
-        type: "application/epub+zip",
-      }),
-    )
-  }
-  if (include.audiobook) {
-    links.push(
-      new AcquisitionLink({
-        href: `/api/v2/books/${book.uuid}/files?format=audiobook-rpf`,
-        rel: "acquisition",
-        type: "application/audiobook+zip",
-      }),
-    )
-  }
-
-  // one cover: portrait for text, square for audio-only (matches legacy).
-  const images: Link[] = []
-  if (include.readaloud || include.ebook) {
-    images.push(
-      new Link({
-        href: getCoverUrl(book.uuid, {
-          height: 225,
-          width: 147,
-          updatedAt: book.updatedAt,
-        }),
-        rels: new Set([THUMBNAIL_REL]),
-        type: "image/jpeg",
-        properties: authenticate(),
-      }),
-    )
-  } else if (include.audiobook) {
-    images.push(
-      new Link({
-        href: getCoverUrl(book.uuid, {
-          height: 147,
-          width: 147,
-          updatedAt: book.updatedAt,
-          audio: true,
-        }),
-        rels: new Set([THUMBNAIL_REL]),
-        type: "image/jpeg",
-        properties: authenticate(),
-      }),
-    )
-  }
-
-  const metadata = new Metadata({
-    title: new LocalizedString(book.title),
+function bookToMetadata(book: BookWithRelations, format: OpdsFormat) {
+  return new Metadata({
+    title: new LocalizedString(book.title + formatSuffix(format)),
     identifier: `urn:uuid:${book.uuid}`,
     typeUri: "http://schema.org/Book",
     subtitle: book.subtitle ? new LocalizedString(book.subtitle) : undefined,
@@ -208,9 +248,12 @@ export const bookToPublication = (
     published: book.publicationDate
       ? new Date(book.publicationDate)
       : undefined,
-    duration: book.audiobook?.duration ?? book.readaloud?.duration ?? undefined,
+    duration:
+      format === "ebook" ? undefined : (book[format]?.duration ?? undefined),
     numberOfPages:
-      book.ebook?.pageCount ?? book.readaloud?.pageCount ?? undefined,
+      format === "audiobook"
+        ? undefined
+        : (book[format]?.pageCount ?? undefined),
     authors: new Contributors(
       book.authors.map(
         (author) =>
@@ -248,18 +291,86 @@ export const bookToPublication = (
         )
       : undefined,
   })
+}
 
-  return new OPDSPublication({
-    metadata,
-    links: new Links(links),
-    images: images.length ? new Links(images) : undefined,
-  })
+/** maps a book row to an OPDS publication, shared by both projections */
+export const bookToPublication = (
+  book: BookWithRelations,
+  formats: readonly OpdsFormat[] = OpdsFormatSchema.options,
+): OPDSPublication[] => {
+  const available: Record<OpdsFormat, boolean> = {
+    readaloud:
+      !!book.readaloud &&
+      !book.readaloud.missing &&
+      book.readaloud.status === "ALIGNED",
+    ebook: !!book.ebook && !book.ebook.missing,
+    audiobook: !!book.audiobook && !book.audiobook.missing,
+  }
+
+  const publications: OPDSPublication[] = []
+
+  for (const format of OpdsFormatSchema.options) {
+    if (!formats.includes(format) || !available[format]) {
+      continue
+    }
+
+    const metadata = bookToMetadata(book, format)
+
+    const links = [
+      new ProgressionLink({
+        href: `/api/v3/books/${book.uuid}/progress?format=${format}`,
+        properties: authenticate(),
+      }),
+      new AcquisitionLink({
+        href: `/api/v2/books/${book.uuid}/files?format=${format}`,
+        rel: "acquisition",
+        type:
+          format === "audiobook"
+            ? MediaType.AUDIOBOOK_PACKAGE.mime
+            : MediaType.EPUB.mime,
+      }),
+    ]
+
+    const images = [
+      new Link({
+        href: getCoverUrl(book.uuid, {
+          ...(format === "audiobook"
+            ? {
+                height: 147,
+                width: 147,
+              }
+            : {
+                height: 225,
+                width: 147,
+              }),
+          updatedAt: book.updatedAt,
+          audio: format === "audiobook",
+        }),
+        rels: new Set([THUMBNAIL_REL]),
+        type: MediaType.JPEG.mime,
+        properties: authenticate(),
+      }),
+    ]
+
+    publications.push(
+      new OPDSPublication({
+        metadata,
+        links: new Links(links),
+        images: new Links(images),
+      }),
+    )
+  }
+
+  return publications
 }
 
 const latestModified = (books: BookWithRelations[]): string => {
-  if (books.length === 0) return new Date().toISOString()
+  if (books.length === 0) {
+    return new Date().toISOString()
+  }
+
   const latest = books.reduce((acc, book) => {
-    const time = new Date(book.updatedAt as Date | string).getTime()
+    const time = new Date(book.updatedAt).getTime()
     return Math.max(acc, time)
   }, 0)
   return new Date(latest).toISOString()
@@ -271,382 +382,460 @@ interface ResolvedPagination {
   offset: number
 }
 
-const resolvePagination = (
-  input?: PaginationInput,
-): ResolvedPagination | null => {
-  if (!input?.pageSize) return null
-  const currentPage = Math.max(1, input.page)
+const resolvePagination = (ctx: BuildContext): ResolvedPagination | null => {
+  if (!ctx.pageSize) {
+    return null
+  }
+
   return {
-    currentPage,
-    pageSize: input.pageSize,
-    offset: (currentPage - 1) * input.pageSize,
+    currentPage: ctx.page,
+    pageSize: ctx.pageSize,
+    offset: (ctx.page - 1) * ctx.pageSize,
   }
 }
 
-/** self + first/previous/next/last links for a paginated acquisition feed */
-const paginationLinks = (
-  version: OpdsVersion,
+const pageLinks = (
+  ctx: BuildContext,
+  kind: "navigation" | "acquisition",
   selfPath: string,
-  pagination: ResolvedPagination,
+  pagination: ResolvedPagination | null,
   totalItems: number,
 ): Link[] => {
-  const type = feedType(version, "acquisition")
+  const type = feedType(ctx.version, kind)
+  const params = keptParams(ctx)
+  const at = (page: number) =>
+    hrefWith(selfPath, params, {
+      [PAGE_PARAM]: page > 1 ? String(page) : null,
+    })
+
+  if (!pagination) {
+    return [new Link({ href: at(1), rels: new Set(["self"]), type })]
+  }
+
   const { currentPage, pageSize } = pagination
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
-  const at = (page: number) => `${selfPath}?page=${page}`
-
   const links: Link[] = [
-    new Link({ href: selfPath, rels: new Set(["self"]), type }),
+    new Link({ href: at(currentPage), rels: new Set(["self"]), type }),
   ]
   if (currentPage > 1) {
     links.push(
+      new Link({ href: at(1), rels: new Set(["first"]), type }),
       new Link({
         href: at(currentPage - 1),
         rels: new Set(["previous"]),
         type,
       }),
-      new Link({ href: at(1), rels: new Set(["first"]), type }),
     )
   }
+
   if (currentPage < totalPages) {
     links.push(
       new Link({ href: at(currentPage + 1), rels: new Set(["next"]), type }),
       new Link({ href: at(totalPages), rels: new Set(["last"]), type }),
     )
   }
+
   return links
+}
+
+const andFilter = (
+  a: ShelfFilterNode | undefined,
+  b: ShelfFilterNode | undefined,
+): ShelfFilterNode | undefined =>
+  a && b ? { type: "and", children: [a, b] } : (a ?? b)
+
+const withTiebreak = (sort: OpdsSort): OpdsSort[] =>
+  sort.field === "title" ? [sort] : [sort, { field: "title", direction: "asc" }]
+
+type BooksSource =
+  | { kind: "query"; query: FacetBooksQuery & { search?: string } }
+  | { kind: "shelf"; shelfUuid: UUID }
+
+const fetchBooks = async (
+  ctx: BuildContext,
+  source: BooksSource,
+  sort: OpdsSort | null,
+  formats: readonly OpdsFormat[],
+  pagination: ResolvedPagination | null,
+): Promise<{ books: BookWithRelations[]; total: number }> => {
+  const formatFilter: ShelfFilterNode = {
+    type: "or",
+    children: formats.map((value) => ({
+      type: "condition",
+      field: "format",
+      operator: "is",
+      value,
+    })),
+  }
+
+  if (source.kind === "shelf") {
+    const all = await getShelfBooks(source.shelfUuid, ctx.viewer.id, {
+      filter: formatFilter,
+      ...(sort
+        ? { sortField: sort.field, orderDirection: sort.direction }
+        : {}),
+    })
+    return {
+      books: pagination
+        ? all.slice(pagination.offset, pagination.offset + pagination.pageSize)
+        : all,
+      total: all.length,
+    }
+  }
+
+  const filter = andFilter(source.query.filter, formatFilter)
+  const opts: GetBooksOptions = {
+    ...source.query,
+    ...(filter ? { filter } : {}),
+    ...(sort ? { sort: withTiebreak(sort) } : {}),
+  }
+  const [books, total] = await Promise.all([
+    getBooks(null, ctx.viewer.id, {
+      ...opts,
+      ...(pagination
+        ? { limit: pagination.pageSize, offset: pagination.offset }
+        : {}),
+    }),
+    countBooks(ctx.viewer.id, opts),
+  ])
+  return { books, total }
+}
+
+const sortLabel = (field: SortField) => t(`Common.fields.label.${field}`)
+
+const feedFacets = (
+  ctx: BuildContext,
+  selfPath: string,
+  activeSort: OpdsSort | null,
+  sortFields: readonly SortField[],
+  formatChoices: readonly OpdsFormat[],
+  format: OpdsFormat | null,
+): Facet[] => {
+  const params = keptParams(ctx)
+  const type = feedType(ctx.version, "acquisition")
+  const facetLink = (
+    changes: Record<string, string | null>,
+    title: string,
+    active: boolean,
+  ) =>
+    new Link({
+      href: hrefWith(selfPath, params, changes),
+      title,
+      type,
+      ...(active ? { rels: new Set(["self"]) } : {}),
+    })
+  const facet = (title: string, links: Link[]) =>
+    new Facet({
+      metadata: new FeedMetadata({ title }),
+      links: new Links(links),
+    })
+
+  const facets: Facet[] = []
+  if (sortFields.length > 0) {
+    facets.push(
+      facet(
+        t("Opds.sortBy"),
+        sortFields.map((field) =>
+          facetLink(
+            { [SORT_PARAM]: field, [ORDER_PARAM]: defaultDirection(field) },
+            sortLabel(field),
+            activeSort?.field === field,
+          ),
+        ),
+      ),
+    )
+  }
+
+  if (sortFields.length > 0 && activeSort) {
+    facets.push(
+      facet(
+        t("Opds.order"),
+        (["asc", "desc"] as const).map((direction) =>
+          facetLink(
+            { [SORT_PARAM]: activeSort.field, [ORDER_PARAM]: direction },
+            t(`Opds.${direction}`),
+            activeSort.direction === direction,
+          ),
+        ),
+      ),
+    )
+  }
+
+  if (formatChoices.length > 1) {
+    facets.push(
+      facet(t("Opds.format"), [
+        facetLink({ [FORMAT_PARAM]: null }, t("Opds.allFormats"), !format),
+        ...formatChoices.map((value) =>
+          facetLink(
+            { [FORMAT_PARAM]: value },
+            t(`Opds.formats.${value}`),
+            format === value,
+          ),
+        ),
+      ]),
+    )
+  }
+
+  return facets
 }
 
 interface BooksFeedOptions {
   title: string
   selfPath: string
-  pagination?: ResolvedPagination
-  totalItems?: number
-  format?: OpdsFormat
+  source: BooksSource
+  sort: OpdsSort | null
+  sortFields: readonly SortField[]
+  formats?: OpdsFormat[]
 }
 
-/** common acquisition-feed assembly shared by every book listing. */
-const booksFeed = (
-  version: OpdsVersion,
-  books: BookWithRelations[],
+const buildBooksFeed = async (
+  ctx: BuildContext,
   options: BooksFeedOptions,
-): Feed => {
-  const links: Link[] = []
-  if (options.pagination) {
-    links.push(
-      ...paginationLinks(
-        version,
-        options.selfPath,
-        options.pagination,
-        options.totalItems ?? books.length,
-      ),
-    )
-  } else {
-    links.push(
-      new Link({
-        href: options.selfPath,
-        rels: new Set(["self"]),
-        type: feedType(version, "acquisition"),
-      }),
-    )
-  }
-  links.push(searchLink(version))
+): Promise<Feed> => {
+  const pagination = resolvePagination(ctx)
+  const sort = parseSort(ctx, options.sortFields) ?? options.sort
+  const formatChoices = options.formats ?? ctx.formats
+  const format = parseFormat(ctx.params.get(FORMAT_PARAM), formatChoices)
+  const formats = format ? [format] : formatChoices
+  const { books, total } = await fetchBooks(
+    ctx,
+    options.source,
+    sort,
+    formats,
+    pagination,
+  )
 
   return new Feed({
     metadata: new FeedMetadata({
       title: options.title,
       identifier: feedId(options.selfPath),
       modified: latestModified(books),
-      ...(options.pagination
+      numberOfItems: total,
+      ...(pagination
         ? {
-            itemsPerPage: options.pagination.pageSize,
-            currentPage: options.pagination.currentPage,
-            numberOfItems: options.totalItems ?? books.length,
+            itemsPerPage: pagination.pageSize,
+            currentPage: pagination.currentPage,
           }
         : {}),
     }),
-    links: new Links(links),
-    publications: books.map((book) => bookToPublication(book, options.format)),
+    links: new Links([
+      ...pageLinks(ctx, "acquisition", options.selfPath, pagination, total),
+      ...searchLinks(ctx.version),
+    ]),
+    publications: books.flatMap((book) => bookToPublication(book, formats)),
+    facets: feedFacets(
+      ctx,
+      options.selfPath,
+      sort,
+      options.sortFields,
+      formatChoices,
+      format,
+    ),
   })
 }
 
 const navLink = (
-  version: OpdsVersion,
+  ctx: BuildContext,
   href: string,
   title: string,
   kind: "navigation" | "acquisition",
+  count?: number,
 ): NavigationLink =>
   new NavigationLink({
     href,
     title,
     rels: new Set(["subsection"]),
-    type: feedType(version, kind),
+    type: feedType(ctx.version, kind),
+    ...(count === undefined
+      ? {}
+      : { properties: new Properties({ numberOfItems: count }) }),
   })
 
-/** the root catalog: navigation to books/collections/series/tags. */
-export const buildRootCatalog = async (ctx: BuildContext): Promise<Feed> => {
-  const base = baseFor(ctx.version)
-  const collections = await getCollections(ctx.userId)
-
-  const navigation = new NavigationLinks([
-    navLink(ctx.version, `${base}/books`, "All Books", "navigation"),
-    navLink(ctx.version, `${base}/collections`, "Collections", "navigation"),
-    navLink(ctx.version, `${base}/series`, "Series", "navigation"),
-    navLink(ctx.version, `${base}/tags`, "Tags", "navigation"),
-    ...collections.map((collection) =>
-      navLink(
-        ctx.version,
-        `${base}/collections/${collection.uuid}/books`,
-        collection.name,
-        "navigation",
-      ),
-    ),
-  ])
-
-  return new Feed({
-    metadata: new FeedMetadata({
-      title: "Storyteller Catalog",
-      identifier: feedId(base),
-    }),
-    navigation,
-    links: new Links([
-      new Link({
-        href: base,
-        rels: new Set(["self"]),
-        type: feedType(ctx.version, "navigation"),
-      }),
-      searchLink(ctx.version),
-    ]),
-  })
-}
-
-/** a navigation feed listing sub-feeds (series/tags/collections) */
 const navFeed = (
   ctx: BuildContext,
   title: string,
   selfPath: string,
   entries: NavigationLink[],
-): Feed =>
-  new Feed({
-    metadata: new FeedMetadata({ title, identifier: feedId(selfPath) }),
-    navigation: new NavigationLinks(entries),
+  paginate: boolean,
+): Feed => {
+  const pagination = paginate ? resolvePagination(ctx) : null
+  const shown = pagination
+    ? entries.slice(pagination.offset, pagination.offset + pagination.pageSize)
+    : entries
+
+  return new Feed({
+    metadata: new FeedMetadata({
+      title,
+      identifier: feedId(selfPath),
+      ...(pagination
+        ? {
+            numberOfItems: entries.length,
+            itemsPerPage: pagination.pageSize,
+            currentPage: pagination.currentPage,
+          }
+        : {}),
+    }),
+    navigation: new NavigationLinks(shown),
     links: new Links([
-      new Link({
-        href: selfPath,
-        rels: new Set(["self"]),
-        type: feedType(ctx.version, "navigation"),
-      }),
-      searchLink(ctx.version),
+      ...pageLinks(ctx, "navigation", selfPath, pagination, entries.length),
+      ...searchLinks(ctx.version),
     ]),
   })
+}
 
-export const buildAllBooks = async (
-  ctx: BuildContext,
-  formatFilter?: "ebook" | "audiobook" | "readaloud",
-  pagination?: PaginationInput,
-): Promise<Feed> => {
-  const base = baseFor(ctx.version)
-  const resolved = resolvePagination(pagination)
+const sectionPath = (ctx: BuildContext, section: OpdsFacetSection) =>
+  `${baseFor(ctx.version)}/${opdsSectionPath(section)}`
 
-  const total = await db
-    .selectFrom("book")
-    .select((eb) => eb.fn.count<number>("book.uuid").as("count"))
-    .executeTakeFirst()
-  const totalItems = total?.count ?? 0
+const valuePath = (ctx: BuildContext, section: OpdsFacetSection, key: string) =>
+  `${sectionPath(ctx, section)}/${encodeURIComponent(key)}/books`
 
-  let query = booksQuery(ctx.userId)
-  if (resolved) query = query.limit(resolved.pageSize).offset(resolved.offset)
-  const allBooks = await query.selectAll("book").execute()
+const sectionTitle = (section: OpdsFacetSection) =>
+  t(`LibraryPage.${FACET_SECTION_REGISTRY[section].labelBase}.by`)
 
-  let books = allBooks
-  if (formatFilter === "ebook") {
-    books = allBooks.filter((book) => book.ebook && !book.ebook.missing)
-  } else if (formatFilter === "audiobook") {
-    books = allBooks.filter((book) => book.audiobook && !book.audiobook.missing)
-  } else if (formatFilter === "readaloud") {
-    books = allBooks.filter(
-      (book) =>
-        book.readaloud &&
-        !book.readaloud.missing &&
-        book.readaloud.status === "ALIGNED",
-    )
+const valueName = (section: OpdsFacetSection, value: FacetValue): string => {
+  const labelBase = FACET_SECTION_REGISTRY[section].labelBase
+  if (value.key === NONE_FACET_KEY && labelBase !== "Formats") {
+    return t(`LibraryPage.${labelBase}.none`)
   }
 
-  const label =
-    formatFilter === "readaloud"
-      ? "Read Aloud"
-      : formatFilter
-        ? formatFilter.charAt(0).toUpperCase() + formatFilter.slice(1)
-        : null
+  const format =
+    section === "formats"
+      ? parseFormat(value.key, OpdsFormatSchema.options)
+      : null
+  if (format) {
+    return t(`Opds.formats.${format}`)
+  }
 
-  return booksFeed(ctx.version, books, {
-    title: label ? `All ${label} Books` : "All Books",
-    selfPath: `${base}/books`,
-    pagination: resolved ?? undefined,
-    totalItems,
-    format: ctx.format,
-  })
+  return value.name
 }
 
-export const buildSeriesNav = async (ctx: BuildContext): Promise<Feed> => {
+const sectionValues = async (
+  ctx: BuildContext,
+  section: OpdsFacetSection,
+): Promise<FacetValue[]> =>
+  (await getSectionFacets(ctx.viewer, section)).filter(
+    (value) =>
+      value.bookCount > 0 &&
+      (section !== "formats" || parseFormat(value.key, ctx.formats) !== null),
+  )
+
+export const buildRootCatalog = async (ctx: BuildContext): Promise<Feed> => {
   const base = baseFor(ctx.version)
-  const series = await getSeries(ctx.userId)
+  const collections = await sectionValues(ctx, "collections")
+
   return navFeed(
     ctx,
-    "Series",
-    `${base}/series`,
-    series.map((entry) =>
-      navLink(
-        ctx.version,
-        `${base}/series/${entry.uuid}/books`,
-        entry.name,
-        "acquisition",
+    t("Opds.catalog"),
+    base,
+    [
+      navLink(ctx, `${base}/books`, t("Opds.allBooks"), "acquisition"),
+      ...OPDS_FACET_SECTIONS.map((section) =>
+        navLink(
+          ctx,
+          sectionPath(ctx, section),
+          sectionTitle(section),
+          "navigation",
+        ),
       ),
-    ),
+      ...collections
+        .filter((value) => value.key !== NONE_FACET_KEY)
+        .map((value) =>
+          navLink(
+            ctx,
+            valuePath(ctx, "collections", value.key),
+            value.name,
+            "acquisition",
+            value.bookCount,
+          ),
+        ),
+    ],
+    false,
   )
 }
 
-export const buildSeriesBooks = async (
+export const buildSectionNav = async (
   ctx: BuildContext,
-  series: Series,
-  pagination?: PaginationInput,
+  section: OpdsFacetSection,
 ): Promise<Feed> => {
-  const base = baseFor(ctx.version)
-  const resolved = resolvePagination(pagination)
-
-  let query = booksQuery(ctx.userId)
-    .innerJoin("bookToSeries", "book.uuid", "bookToSeries.bookUuid")
-    .where("bookToSeries.seriesUuid", "=", series.uuid)
-    .orderBy("updatedAt", "desc")
-
-  const total = await query
-    .select((eb) => eb.fn.countAll<number>().as("count"))
-    .executeTakeFirst()
-  const totalItems = total?.count ?? 0
-
-  if (resolved) query = query.limit(resolved.pageSize).offset(resolved.offset)
-  const books = await query.selectAll("book").execute()
-
-  return booksFeed(ctx.version, books, {
-    title: `${series.name} Books`,
-    selfPath: `${base}/series/${series.uuid}/books`,
-    pagination: resolved ?? undefined,
-    totalItems,
-    format: ctx.format,
-  })
-}
-
-export const buildTagsNav = async (ctx: BuildContext): Promise<Feed> => {
-  const base = baseFor(ctx.version)
-  const tags = await getTags(ctx.userId)
+  const values = await sectionValues(ctx, section)
   return navFeed(
     ctx,
-    "Tags",
-    `${base}/tags`,
-    tags.map((tag) =>
+    sectionTitle(section),
+    sectionPath(ctx, section),
+    values.map((value) =>
       navLink(
-        ctx.version,
-        `${base}/tags/${tag.uuid}/books`,
-        tag.name,
+        ctx,
+        valuePath(ctx, section, value.key),
+        valueName(section, value),
         "acquisition",
+        value.bookCount,
       ),
     ),
+    true,
   )
 }
 
-export const buildTagBooks = async (
+export const buildSectionBooks = async (
   ctx: BuildContext,
-  tag: Tag,
-  pagination?: PaginationInput,
-): Promise<Feed> => {
-  const base = baseFor(ctx.version)
-  const resolved = resolvePagination(pagination)
+  section: OpdsFacetSection,
+  key: string,
+): Promise<Feed | null> => {
+  const value = (await sectionValues(ctx, section)).find((v) => v.key === key)
+  if (!value) {
+    return null
+  }
 
-  let query = booksQuery(ctx.userId)
-    .innerJoin("bookToTag", "book.uuid", "bookToTag.bookUuid")
-    .where("bookToTag.tagUuid", "=", tag.uuid)
+  const def: FacetBooksDef = FACET_BOOKS[section]
+  const title = valueName(section, value)
+  const selfPath = valuePath(ctx, section, key)
 
-  const total = await query
-    .select((eb) => eb.fn.countAll<number>().as("count"))
-    .executeTakeFirst()
-  const totalItems = total?.count ?? 0
+  if (section === "shelves") {
+    return buildBooksFeed(ctx, {
+      title,
+      selfPath,
+      source: { kind: "shelf", shelfUuid: key as UUID },
+      sort: null,
+      sortFields: GENERAL_SORT_FIELDS,
+    })
+  }
 
-  if (resolved) query = query.limit(resolved.pageSize).offset(resolved.offset)
-  const books = await query.selectAll("book").execute()
+  const query = facetBooksQuery(def, key)
+  const format = section === "formats" ? parseFormat(key, ctx.formats) : null
+  const inSeries = !!query.series
+  const ownSort =
+    def.sort && (def.sort.field !== "seriesPosition" || inSeries)
+      ? def.sort
+      : null
 
-  return booksFeed(ctx.version, books, {
-    title: `${tag.name} Books`,
-    selfPath: `${base}/tags/${tag.uuid}/books`,
-    pagination: resolved ?? undefined,
-    totalItems,
-    format: ctx.format,
+  return buildBooksFeed(ctx, {
+    title,
+    selfPath,
+    source: { kind: "query", query },
+    ...(format ? { formats: [format] } : {}),
+    sort: ownSort ?? ctx.sort,
+    sortFields: GENERAL_SORT_FIELDS,
   })
 }
 
-export const buildCollectionsNav = async (ctx: BuildContext): Promise<Feed> => {
-  const base = baseFor(ctx.version)
-  const collections = await getCollections(ctx.userId)
-  return navFeed(
-    ctx,
-    "Collections",
-    `${base}/collections`,
-    collections.map((collection) =>
-      navLink(
-        ctx.version,
-        `${base}/collections/${collection.uuid}/books`,
-        collection.name,
-        "acquisition",
-      ),
-    ),
-  )
-}
-
-export const buildCollectionBooks = async (
-  ctx: BuildContext,
-  collection: CollectionWithRelations,
-  pagination?: PaginationInput,
-): Promise<Feed> => {
-  const base = baseFor(ctx.version)
-  const resolved = resolvePagination(pagination)
-
-  let query = booksQuery(ctx.userId)
-    .innerJoin("bookToCollection as btc", "book.uuid", "btc.bookUuid")
-    .where("btc.collectionUuid", "=", collection.uuid)
-
-  const total = await db
-    .selectFrom("bookToCollection")
-    .select((eb) => eb.fn.countAll<number>().as("count"))
-    .where("collectionUuid", "=", collection.uuid)
-    .executeTakeFirst()
-  const totalItems = total?.count ?? 0
-
-  if (resolved) query = query.limit(resolved.pageSize).offset(resolved.offset)
-  const books = await query.selectAll("book").execute()
-
-  return booksFeed(ctx.version, books, {
-    title: `${collection.name} Books`,
-    selfPath: `${base}/collections/${collection.uuid}/books`,
-    pagination: resolved ?? undefined,
-    totalItems,
-    format: ctx.format,
+export const buildAllBooks = (ctx: BuildContext): Promise<Feed> =>
+  buildBooksFeed(ctx, {
+    title: t("Opds.allBooks"),
+    selfPath: `${baseFor(ctx.version)}/books`,
+    source: { kind: "query", query: {} },
+    sort: ctx.sort,
+    sortFields: GENERAL_SORT_FIELDS,
   })
-}
 
-export const buildSearchResults = async (
+export const buildSearchResults = (
   ctx: BuildContext,
-  search: string | null,
+  term: string | null,
 ): Promise<Feed> => {
-  const base = baseFor(ctx.version)
-  // TODO: quite inefficient, replace with sqlite search at some point
-  // this will be added in v3, remember to update
-  const allBooks = await getBooks(null, ctx.userId)
-  const books = allBooks.filter((book) =>
-    book.title.toLowerCase().includes(search?.toLowerCase() ?? ""),
-  )
-
-  return booksFeed(ctx.version, books, {
-    title: `Search Results for ${search ?? ""}`,
-    selfPath: `${base}/search`,
-    format: ctx.format,
+  const search = term?.trim() || undefined
+  return buildBooksFeed(ctx, {
+    title: t("Opds.searchResults", { query: search ?? "" }),
+    selfPath: searchPath(ctx.version),
+    source: { kind: "query", query: search ? { search } : {} },
+    sort: search ? null : ctx.sort,
+    sortFields: search ? [] : GENERAL_SORT_FIELDS,
   })
 }

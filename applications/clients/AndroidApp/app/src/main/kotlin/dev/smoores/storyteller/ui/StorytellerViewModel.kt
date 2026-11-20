@@ -209,6 +209,8 @@ class StorytellerViewModel private constructor(
 
     suspend fun debugLog(): DebugLogState = client.debugLog()
 
+    suspend fun exportDebugLogFile(): String? = client.exportDebugLogFile()
+
     suspend fun clearDebugLog() = client.clearDebugLog()
 
     fun setVerboseLogging(enabled: Boolean) {
@@ -545,6 +547,8 @@ class StorytellerViewModel private constructor(
     fun appDidBecomeActive() {
         client.appDidBecomeActive()
     }
+
+    fun setLibraryRefreshDemand(needed: Boolean) = client.setLibraryRefreshDemand(needed)
 
     // sceneActive waits for onResume so the webview is resumed before any
     // re-anchor navigation is attempted.

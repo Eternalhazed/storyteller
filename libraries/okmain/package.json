@@ -1,6 +1,6 @@
 {
-  "name": "@storyteller-platform/okmain",
-  "version": "0.2.6",
+  "name": "@storyteller/okmain",
+  "version": "0.2.7",
   "description": "Dominant color extraction from images using okmain",
   "author": "Thomas F. K. Jorna",
   "license": "MIT",
@@ -43,15 +43,16 @@
     "artifacts": "napi artifacts",
     "build": "napi build --dts-cache --platform --release",
     "build:debug": "napi build --platform",
-    "test": "node --test __test__/index.test.ts",
-    "test:update-snapshots": "node --test --test-update-snapshots __test__/index.test.ts ",
+    "test": "vitest run",
+    "test:update-snapshots": "vitest run -u",
     "prepublish": "napi prepublish -t npm"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.2.0",
-    "@oxc-node/core": "^0.0.35",
-    "chalk": "^5.6.2",
-    "typescript": "^6.0.0"
+    "@napi-rs/cli": "catalog:",
+    "@tsconfig/strictest": "catalog:",
+    "chalk": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
   },
   "publishConfig": {
     "access": "public"

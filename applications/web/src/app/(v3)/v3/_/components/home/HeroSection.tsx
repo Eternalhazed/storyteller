@@ -4,12 +4,13 @@ import { Book3D } from "@v3/_/components/books/Book3D"
 import { useCoverScope } from "@v3/_/components/books/CoverScope"
 import { Button } from "@v3/_/components/ui/button"
 import { Skeleton } from "@v3/_/components/ui/skeleton"
+import { useUserPreferences } from "@v3/_/components/user-preferences-provider"
 import { V3Link } from "@v3/_/components/v3-link"
 import { useTranslation } from "@v3/_/hooks/use-translation"
 
-import { formatTimeHuman } from "@/components/reader/preferenceItems/formatTime"
 import { type BookWithRelations } from "@/database/books"
 import { STATUS_READING } from "@/database/statusKinds"
+import { formatTimeHuman } from "@/formatTime"
 import * as icon from "@/icons"
 import {
   useListInfiniteBooksInfiniteQuery,
@@ -73,7 +74,7 @@ export function HeroSection() {
 function HeroSkeleton() {
   return (
     <section className="to-cover-well relative -mx-4 flex min-h-96 flex-col gap-0 bg-linear-to-t from-transparent via-30% pb-8">
-      <Skeleton className="mx-6 mt-8 h-3 w-28 animate-none" />
+      <Skeleton className="mx-6 mt-14 h-3 w-28 animate-none md:mt-8" />
       <div className="flex flex-col-reverse gap-6 overflow-hidden px-6 py-8 @xl/main:flex-row @xl/main:gap-10">
         <div className="flex flex-1 flex-col justify-between gap-8 pb-4">
           <div className="flex flex-col gap-2">
@@ -104,6 +105,7 @@ function HeroSkeleton() {
 
 function Hero({ book }: { book: BookWithRelations }) {
   const t = useTranslation("HomePage")
+  const { bookDetail3dView, bookDetail3dViewAudio } = useUserPreferences()
   const scope = useCoverScope(book)
 
   const progress = book.position?.locator.locations?.totalProgression ?? 0
@@ -143,7 +145,9 @@ function Hero({ book }: { book: BookWithRelations }) {
       className="to-cover-well relative -mx-4 flex min-h-96 flex-col gap-0 bg-linear-to-t from-transparent via-30% pb-8"
       {...scope}
     >
-      <p className="text-tinted small-caps mx-6 mt-8">{t("hero.eyebrow")}</p>
+      <p className="text-tinted small-caps mx-6 mt-14 md:mt-8">
+        {t("hero.eyebrow")}
+      </p>
       <div className="flex grow flex-col-reverse gap-6 overflow-hidden px-6 py-8 @xl/main:flex-row @xl/main:gap-10">
         <div className="flex flex-1 flex-col justify-between pb-4">
           <div slot="main-info">
@@ -193,7 +197,14 @@ function Hero({ book }: { book: BookWithRelations }) {
           </div>
         </div>
         <div className="flex w-full justify-center @xl/main:w-auto">
-          <Book3D book={book} width={200} />
+          <Book3D
+            book={book}
+            width={200}
+            initialViews={{
+              audiobook: bookDetail3dViewAudio ?? undefined,
+              ebook: bookDetail3dView ?? undefined,
+            }}
+          />
         </div>
       </div>
     </section>

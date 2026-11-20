@@ -1,9 +1,10 @@
 import assert from "node:assert/strict"
-import test from "node:test"
+import { test } from "vitest"
 
 import {
   firstClipInResource,
   isStandaloneAudiobookLocator,
+  nearestClipToResource,
   normalizeResourceHref,
   positionForProgression,
 } from "./locatorFormat"
@@ -137,4 +138,28 @@ test("finds the first clip of a resource", () => {
   )
   assert.equal(firstClipInResource(clips, "OPS/c02.xhtml"), null)
   assert.equal(firstClipInResource(null, "OPS/c01.xhtml"), null)
+})
+
+test("starts narration near a resource that has none of its own", () => {
+  const clip = (resource: string, sentence: number) => ({
+    relativeUrl: "OPS/Audio/00001-00001.mp4",
+    fragmentId: `${resource}-sentence${sentence}`,
+    start: sentence,
+    end: sentence + 1,
+    duration: 1,
+    textResource: `OPS/${resource}.xhtml`,
+    locator: { href: `OPS/${resource}.xhtml`, type: "application/xhtml+xml" },
+  })
+  const clips = [clip("c01", 0), clip("c01", 1), clip("c03", 0)]
+  const positions = ["title", "c01", "map", "c03", "notes"].map(
+    (resource, index) => position(`OPS/${resource}.xhtml`, index / 5),
+  )
+  const nearest = (resource: string) =>
+    nearestClipToResource(clips, positions, `OPS/${resource}.xhtml`)?.fragmentId
+
+  assert.equal(nearest("title"), "c01-sentence0", "front matter: next chapter")
+  assert.equal(nearest("map"), "c03-sentence0", "interlude: next chapter")
+  assert.equal(nearest("notes"), "c03-sentence0", "end matter: last before")
+  assert.equal(nearest("unknown"), undefined)
+  assert.equal(nearestClipToResource(clips, null, "OPS/map.xhtml"), null)
 })

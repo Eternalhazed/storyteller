@@ -1,6 +1,8 @@
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const WHEEL_INPUT_IDLE_MS = 150
+const android = navigator.userAgent.includes("Android")
 
-class PageTurnSelectionGuard {
+class ViewportInput {
   static #attribute = "data-foliate-suppress-selection"
   static #styles = `
 :root[data-foliate-suppress-selection],
@@ -13,10 +15,13 @@ class PageTurnSelectionGuard {
   #document = null
   #pointerDocument = null
   #touchActive = false
+  #wheelTimer = null
   #isSettled
+  #onActivityChanged
 
-  constructor(isSettled) {
+  constructor(isSettled, onActivityChanged) {
     this.#isSettled = isSettled
+    this.#onActivityChanged = onActivityChanged
   }
   attach(document) {
     this.#document = document
@@ -25,7 +30,7 @@ class PageTurnSelectionGuard {
     this.#pointerDocument = null
 
     const style = document.createElement("style")
-    style.textContent = PageTurnSelectionGuard.#styles
+    style.textContent = ViewportInput.#styles
     document.head?.append(style)
     this.#syncDocument()
 
@@ -46,7 +51,10 @@ class PageTurnSelectionGuard {
     document.addEventListener(
       "pointerdown",
       () => {
-        if (document === this.#document) this.#pointerDocument = document
+        if (document === this.#document) {
+          this.#pointerDocument = document
+          this.#onActivityChanged()
+        }
       },
       true,
     )
@@ -64,8 +72,26 @@ class PageTurnSelectionGuard {
   get touchActive() {
     return this.#touchActive
   }
+  get inputActive() {
+    return Boolean(
+      this.#pointerDocument || this.#touchActive || this.#wheelTimer,
+    )
+  }
+  get settled() {
+    return !this.inputActive && this.#isSettled()
+  }
+  wheel() {
+    // Wheel events have no matching release event.
+    clearTimeout(this.#wheelTimer)
+    this.#wheelTimer = setTimeout(() => {
+      this.#wheelTimer = null
+      this.releaseIfSettled()
+    }, WHEEL_INPUT_IDLE_MS)
+    this.#onActivityChanged()
+  }
   startTouch() {
     this.#touchActive = true
+    this.#onActivityChanged()
   }
   endTouch(event) {
     this.#touchActive = Boolean(event.touches?.length)
@@ -77,19 +103,14 @@ class PageTurnSelectionGuard {
     this.#clearSelection()
   }
   releaseIfSettled() {
-    if (
-      !this.#active ||
-      !this.#isSettled() ||
-      this.#pointerDocument ||
-      this.#touchActive
-    )
-      return
+    this.#onActivityChanged()
+    if (!this.#active || !this.settled) return
     this.#active = false
     this.#syncDocument()
   }
   #syncDocument() {
     this.#document?.documentElement.toggleAttribute(
-      PageTurnSelectionGuard.#attribute,
+      ViewportInput.#attribute,
       this.#active,
     )
   }
@@ -117,7 +138,7 @@ class CommittedPageTurnInputGuard {
       this.#wheel = false
       this.#notifyBlockedInteraction()
       this.#sync()
-    }, 150)
+    }, WHEEL_INPUT_IDLE_MS)
 
     blocker.addEventListener("pointerdown", (event) => {
       this.#pointers.add(event.pointerId)
@@ -220,12 +241,20 @@ class CommittedPageTurnInputGuard {
 class CssSnapTrack {
   #element
   #signature = null
+  #selectionMarker = null
 
   constructor(element) {
     this.#element = element
   }
   invalidate() {
     this.#signature = null
+  }
+  setSelectionPage(page) {
+    const marker = page == null ? null : this.#element.children.item(page)
+    if (marker === this.#selectionMarker) return
+    this.#selectionMarker?.classList.remove("selection-page")
+    marker?.classList.add("selection-page")
+    this.#selectionMarker = marker
   }
   update({ vertical, pages, pageSize, canPrev, canNext }) {
     const signature = `${vertical}:${pages}:${pageSize}:${canPrev}:${canNext}`
@@ -244,6 +273,7 @@ class CssSnapTrack {
       return marker
     })
     this.#element.replaceChildren(...markers)
+    this.#selectionMarker = null
   }
 }
 
@@ -524,12 +554,11 @@ class View {
           this.render(layout)
           this.#observer.observe(doc.body)
 
-          // the resize observer above doesn't work in Firefox
-          // (see https://bugzilla.mozilla.org/show_bug.cgi?id=1832939)
-          // until the bug is fixed we can at least account for font load
-          doc.fonts.ready.then(() => this.expand())
-
-          resolve()
+          // Firefox can miss font-driven ResizeObserver notifications.
+          doc.fonts.ready.then(() => {
+            this.expand()
+            resolve()
+          })
         },
         { once: true },
       )
@@ -740,9 +769,13 @@ export class Paginator extends HTMLElement {
   #userChapterTransition = null
   #lastVisibleRange
   #scrolledFlowRestoreFrame = null
-  #pageTurnSelection = new PageTurnSelectionGuard(
+  #input = new ViewportInput(
     () =>
       !this.#locked && !this.#viewport.active && !this.#userChapterTransition,
+    () => {
+      this.#viewport.updateInteraction()
+      this.#syncSelectionPage()
+    },
   )
   constructor() {
     super()
@@ -858,6 +891,9 @@ export class Paginator extends HTMLElement {
         #snap-track > div.disabled {
             scroll-snap-align: none;
         }
+        #snap-track:has(> .selection-page) > :not(.selection-page) {
+            scroll-snap-align: none;
+        }
         #header {
             grid-column: 3 / 4;
             grid-row: 1;
@@ -925,14 +961,6 @@ export class Paginator extends HTMLElement {
     this.#container.addEventListener("scrollend", () =>
       this.#viewport.handleScrollEnd(),
     )
-    this.#container.addEventListener(
-      "scroll",
-      debounce(() => {
-        if (this.scrolled) {
-          this.#viewport.settleContinuousScroll()
-        }
-      }, 250),
-    )
 
     const opts = { passive: true }
     this.addEventListener("touchstart", this.#onTouchStart.bind(this), opts)
@@ -977,7 +1005,9 @@ export class Paginator extends HTMLElement {
         this.next(undefined, false)
     }, 700)
     this.addEventListener("load", ({ detail: { doc } }) => {
-      this.#pageTurnSelection.attach(doc)
+      this.#input.attach(doc)
+      if (android)
+        doc.addEventListener("selectionchange", () => this.#syncSelectionPage())
       doc.addEventListener(
         "pointerdown",
         (e) => {
@@ -998,10 +1028,7 @@ export class Paginator extends HTMLElement {
         if (!range) return
         const sel = doc.getSelection()
         if (!sel.rangeCount) return
-        if (
-          this.#pageTurnSelection.hasActivePointer(doc) &&
-          sel.type === "Range"
-        )
+        if (this.#input.hasActivePointer(doc) && sel.type === "Range")
           checkPointerSelection(range, sel)
         else if (isKeyboardSelecting) {
           const selRange = sel.getRangeAt(0).cloneRange()
@@ -1179,8 +1206,7 @@ export class Paginator extends HTMLElement {
   }
   render() {
     if (!this.#view) return
-    if (this.cssSnapEnabled) this.#viewport.beginReflow()
-    else this.#viewport.abortReflow()
+    this.#viewport.beginReflow()
     this.#view.render(
       this.#beforeRender({
         vertical: this.#vertical,
@@ -1192,7 +1218,7 @@ export class Paginator extends HTMLElement {
     // View.render() expands synchronously, but font loading and content changes
     // can also expand the view independently. Once a viewport has settled,
     // both paths must use the same resize owner and frozen logical location.
-    if (this.cssSnapEnabled) this.#viewport.beginReflow()
+    this.#viewport.beginReflow()
 
     this.#updateCssSnapLayout()
     if (this.scrolled) this.#resetCrossScrollOffset()
@@ -1249,6 +1275,8 @@ export class Paginator extends HTMLElement {
     this.#container.classList.toggle("vertical", enabled && this.#vertical)
   }
   #updateCssSnapLayout() {
+    const { width, height } = this.#container.getBoundingClientRect()
+    this.#viewport.recordLayoutViewport(width, height)
     const enabled = !this.scrolled && this.#view
     const snapActive = enabled && this.#viewport.snapRestored
     this.#setCssSnapClass(Boolean(snapActive))
@@ -1259,8 +1287,6 @@ export class Paginator extends HTMLElement {
       return
     }
 
-    const { width, height } = this.#container.getBoundingClientRect()
-    this.#viewport.recordLayoutViewport(width, height)
     const { pages, size } = this
     this.#cssSnapTrack.update({
       vertical: this.#vertical,
@@ -1277,7 +1303,7 @@ export class Paginator extends HTMLElement {
    * navigation, and reflow are mutually exclusive operation types; starting a
    * replacement explicitly resolves or preserves the operation it supersedes.
    *
-   * A reflow operation freezes the last committed visible range, disables snap,
+   * A reflow operation freezes the last committed logical anchor, disables snap,
    * and follows this state machine:
    *
    * Normal path:
@@ -1332,16 +1358,51 @@ export class Paginator extends HTMLElement {
     #cssSnap = null
     #continuous = null
     #resumeCommittedPageTurnFrame = null
-    #gestureInProgress = false
-    #lastPage = null
+    #interaction = null
+    #lastPosition = null
     #committedAnchor = null
     #layoutViewport = null
     #settleCssSnapAfterIdle = debounce((operation) => {
       if (this.#cssSnap === operation) this.#settleCssSnap(operation, true)
     }, 200)
+    #settleContinuousAfterIdle = debounce(
+      () => this.settleContinuousScroll(),
+      250,
+    )
 
     constructor(paginator) {
       this.#paginator = paginator
+    }
+    beginInteraction() {
+      if (this.#interaction) return
+      this.#interaction = {
+        from: this.#lastPosition,
+        to: null,
+      }
+      this.#reportInteraction(true)
+    }
+    updateInteraction() {
+      const paginator = this.#paginator
+      if (paginator.#input.inputActive) this.beginInteraction()
+      else if (this.#reflow) this.#handleReflowActivity()
+      else if (this.#interaction && paginator.#input.settled) {
+        const { from, to } = this.#interaction
+        this.#interaction = null
+        const moved = Boolean(
+          from && to && (from.index !== to.index || from.offset !== to.offset),
+        )
+        this.#reportInteraction(false, moved)
+      } else if (paginator.scrolled && this.#continuous)
+        this.#settleContinuousAfterIdle()
+    }
+    #reportInteraction(active, moved = false) {
+      this.#paginator.dispatchEvent(
+        new CustomEvent("interaction", {
+          detail: { active, moved },
+          bubbles: true,
+          composed: true,
+        }),
+      )
     }
     /** Whether an asynchronous viewport operation owns movement or settlement. */
     get active() {
@@ -1365,6 +1426,21 @@ export class Paginator extends HTMLElement {
     /** Records the settled logical viewport position to preserve on reflow. */
     commitViewport(anchor) {
       this.#committedAnchor = this.#cloneAnchor(anchor)
+    }
+    /** Updates same-page follow-along without emitting navigation or scrolling. */
+    preserveAnchor(anchor) {
+      if (
+        !this.#anchorBelongsToView(anchor) ||
+        this.#cssSnap ||
+        this.#continuous
+      )
+        return
+      this.#paginator.#anchor = anchor
+      this.commitViewport(anchor)
+      if (this.#reflow) {
+        this.#reflow.anchor = this.#cloneAnchor(anchor)
+        this.beginReflow()
+      }
     }
     /** Records the viewport dimensions used to detect scroll-before-resize. */
     recordLayoutViewport(width, height) {
@@ -1390,7 +1466,15 @@ export class Paginator extends HTMLElement {
         return true
       }
 
-      const anchor = this.#cloneAnchor(this.#committedAnchor)
+      const pending = this.#cssSnap
+      const pendingNavigation =
+        pending?.reason === "navigation" || pending?.reason === "selection"
+      // A new chapter has no committed viewport until navigation settles.
+      // Preserve its pending target so layout changes cannot cancel navigation.
+      const anchor = this.#cloneAnchor(
+        this.#committedAnchor ??
+          (pendingNavigation ? this.#paginator.#anchor : null),
+      )
       if (!this.#anchorBelongsToView(anchor)) return false
 
       const container = this.#paginator.#container
@@ -1412,11 +1496,12 @@ export class Paginator extends HTMLElement {
         resumeNavigation: null,
       }
       this.#reflow = transaction
+      if (this.#interaction && !this.#interaction.to)
+        this.#interaction.from = null
       this.#continuous = null
 
-      const pending = this.#cssSnap
       this.#cssSnap = null
-      if (pending?.reason === "navigation" || pending?.reason === "selection") {
+      if (pendingNavigation) {
         transaction.resumeNavigation = {
           anchor: this.#cloneAnchor(this.#paginator.#anchor),
           reason: pending.reason,
@@ -1424,7 +1509,6 @@ export class Paginator extends HTMLElement {
         }
       } else pending?.resolve?.(false)
 
-      this.#gestureInProgress = false
       if (this.#resumeCommittedPageTurnFrame !== null) {
         cancelAnimationFrame(this.#resumeCommittedPageTurnFrame)
         this.#resumeCommittedPageTurnFrame = null
@@ -1444,13 +1528,7 @@ export class Paginator extends HTMLElement {
       this.#scheduleReflowAdvance(transaction)
       return true
     }
-    /**
-     * Routes paginated scroll activity to reflow or the current CSS-snap owner.
-     * A viewport size mismatch starts reflow before ResizeObserver can report it.
-     * @returns {boolean} Whether the event belongs to paginated viewport motion.
-     */
     handleScroll() {
-      if (this.#paginator.scrolled) return false
       if (this.#handleReflowActivity()) return true
 
       const viewport = this.#paginator.#container.getBoundingClientRect()
@@ -1461,14 +1539,22 @@ export class Paginator extends HTMLElement {
         (Math.abs(viewport.width - layout.width) > 0.5 ||
           Math.abs(viewport.height - layout.height) > 0.5)
       ) {
-        // A native snap adjustment can dispatch scroll before ResizeObserver.
-        // Claim it immediately; the observer renders into this transaction.
+        // Native layout adjustment can dispatch scroll before ResizeObserver.
         this.beginReflow()
         return true
       }
+      if (this.#paginator.scrolled) {
+        this.#continuous ??= {
+          reason: this.#paginator.#justAnchored ? "anchor" : "scroll",
+        }
+        this.#settleContinuousAfterIdle()
+        return false
+      }
       if (!this.#cssSnap) {
+        // Replacing a chapter can clamp the previous scroll offset. Until the
+        // new chapter has a committed position, that scroll is part of layout.
+        if (this.#committedAnchor == null) return true
         this.#cssSnap = { reason: "snap" }
-        this.#gestureInProgress = true
       }
       const operation = this.#cssSnap
       operation.scrollStarted = true
@@ -1540,18 +1626,22 @@ export class Paginator extends HTMLElement {
         targetCorrectionAttempted: false,
       }
       this.#cssSnap = replacement
-      this.#gestureInProgress = true
       pending.resolve?.(false)
       this.armCssSnapIdleFallback(replacement)
     }
-    /** Records the beginning of touch input that may become a page gesture. */
-    beginGesture(page) {
-      this.#continuous = null
-      this.#gestureInProgress = true
-      this.#lastPage = page
-    }
-    /** Marks an adopted CSS-snap operation as confirmed user dragging. */
+    /** A page drag that starts after layout takes over from its saved anchor. */
     confirmGesture() {
+      if (
+        this.#reflow &&
+        this.#interaction?.from &&
+        !this.#paginator.scrolled
+      ) {
+        this.abortReflow()
+        this.#paginator.#updateCssSnapLayout()
+        this.#paginator.#afterScroll("anchor", false)
+      }
+      this.#paginator.#justAnchored = false
+      if (this.#continuous) this.#continuous.reason = "scroll"
       if (this.#cssSnap?.reason === "snap") this.#cssSnap.userInitiated = true
     }
     /** Rearms settlement after every touch has ended or been cancelled. */
@@ -1559,18 +1649,21 @@ export class Paginator extends HTMLElement {
       if (!this.#handleReflowActivity() && this.#cssSnap?.reason === "snap")
         this.armCssSnapIdleFallback(this.#cssSnap)
     }
-    /** Cancels gesture-owned operations in response to wheel or pointer input. */
     interruptFromInput(userInitiated) {
-      this.#continuous = null
+      if (userInitiated) {
+        this.#paginator.#justAnchored = false
+        if (this.#continuous) this.#continuous.reason = "scroll"
+      }
       this.interruptCssSnap(userInitiated)
     }
-    /** Records an animated navigation in continuous-scroll mode. */
     beginContinuousScroll(reason) {
       this.#cancelCssSnap()
       this.#continuous = { reason }
+      this.#settleContinuousAfterIdle()
     }
     /** Commits continuous-scroll movement after its debounce interval. */
     settleContinuousScroll() {
+      if (this.#paginator.#input.inputActive) return
       const operation = this.#continuous
       this.#continuous = null
       if (operation) {
@@ -1579,26 +1672,17 @@ export class Paginator extends HTMLElement {
       } else if (this.#paginator.#justAnchored)
         this.#paginator.#justAnchored = false
       else this.#paginator.#afterScroll("scroll")
-      this.#paginator.#pageTurnSelection.releaseIfSettled()
+      this.#paginator.#input.releaseIfSettled()
     }
-    /** Emits page-flip semantics only for movement owned by a user gesture. */
-    reportPageFlip(reason) {
-      const page = this.#paginator.page
-      if (
-        reason === "snap" &&
-        this.#gestureInProgress &&
-        page !== this.#lastPage
-      ) {
-        this.#paginator.dispatchEvent(
-          new CustomEvent("page-flip", {
-            detail: { fromPage: this.#lastPage, toPage: page },
-            bubbles: true,
-            composed: true,
-          }),
-        )
-        this.#gestureInProgress = false
+    recordPosition(reason) {
+      const paginator = this.#paginator
+      const position = {
+        index: paginator.#index,
+        offset: paginator.scrolled ? paginator.start : paginator.page,
       }
-      this.#lastPage = page
+      if (this.#interaction && (reason === "snap" || reason === "scroll"))
+        this.#interaction.to = position
+      this.#lastPosition = position
     }
     /** Finishes a Swift-committed page turn after consuming blocked input. */
     finishCommittedPageTurn() {
@@ -1638,19 +1722,18 @@ export class Paginator extends HTMLElement {
     /** Cancels paginated movement without disturbing continuous navigation. */
     disableCssSnap() {
       this.#cancelCssSnap()
-      this.#gestureInProgress = false
       if (this.#resumeCommittedPageTurnFrame !== null) {
         cancelAnimationFrame(this.#resumeCommittedPageTurnFrame)
         this.#resumeCommittedPageTurnFrame = null
       }
-      this.#paginator.#pageTurnSelection.releaseIfSettled()
+      this.#paginator.#input.releaseIfSettled()
     }
     /** Cancels all viewport ownership and resolves interrupted promises. */
     cancel() {
       this.abortReflow()
       this.disableCssSnap()
       this.#continuous = null
-      this.#paginator.#pageTurnSelection.releaseIfSettled()
+      this.#paginator.#input.releaseIfSettled()
     }
     /** Cancels the active transaction and resolves its pending work as aborted. */
     abortReflow() {
@@ -1662,7 +1745,7 @@ export class Paginator extends HTMLElement {
       this.#reflow = null
       transaction.resumeNavigation?.resolve?.(false)
       transaction.resolveDone()
-      this.#paginator.#pageTurnSelection.releaseIfSettled()
+      this.#paginator.#input.releaseIfSettled()
     }
     #cancelCssSnap() {
       const operation = this.#cssSnap
@@ -1676,7 +1759,7 @@ export class Paginator extends HTMLElement {
       if (
         !operation ||
         this.#cssSnap !== operation ||
-        paginator.#pageTurnSelection.touchActive
+        paginator.#input.touchActive
       )
         return
 
@@ -1728,11 +1811,10 @@ export class Paginator extends HTMLElement {
           this.armCssSnapIdleFallback(correction)
           return
         }
-        paginator.#finishCssSnap(reason)
+        paginator.#finishCssSnap(userInitiated === false ? "anchor" : reason)
       }
-      this.#gestureInProgress = false
       resolve?.(true)
-      paginator.#pageTurnSelection.releaseIfSettled()
+      paginator.#input.releaseIfSettled()
     }
     #handleReflowActivity() {
       const transaction = this.#reflow
@@ -1770,14 +1852,18 @@ export class Paginator extends HTMLElement {
         !this.#anchorBelongsToView(transaction.anchor)
       )
         return
-      this.#paginator
-        .#scrollToAnchor(transaction.anchor, "anchor", false, false)
-        .catch((error) =>
-          console.warn(
-            "Failed to preserve the viewport during repagination",
-            error,
-          ),
-        )
+      this.#paginator.#scrollToAnchor(
+        transaction.anchor,
+        "anchor",
+        false,
+        false,
+      ).catch((error) =>
+        console.warn(
+          "Failed to preserve the viewport during repagination",
+          error,
+        ),
+      )
+      this.recordPosition("anchor")
     }
     #scheduleReflowAdvance(transaction) {
       if (this.#reflow !== transaction) return
@@ -1806,7 +1892,7 @@ export class Paginator extends HTMLElement {
     #advanceReflow(transaction, revision) {
       if (
         !this.#isCurrentReflowRevision(transaction, revision) ||
-        this.#paginator.#pageTurnSelection.touchActive
+        this.#paginator.#input.inputActive
       )
         return
 
@@ -1860,15 +1946,14 @@ export class Paginator extends HTMLElement {
     #complete(transaction) {
       if (this.#reflow !== transaction) return
 
-      // Publish page metrics without committing resize motion as navigation.
-      this.#paginator.#afterScroll("anchor", false)
       this.#restoreScrollBehavior(transaction)
       this.#reflow = null
+      this.#paginator.#afterScroll("anchor", false)
 
       const resume = transaction.resumeNavigation
       const finish = () => {
         transaction.resolveDone()
-        this.#paginator.#pageTurnSelection.releaseIfSettled()
+        this.#paginator.#input.releaseIfSettled()
       }
       if (resume && this.#anchorBelongsToView(resume.anchor)) {
         this.#paginator.#scrollToAnchor(resume.anchor, resume.reason).then(
@@ -1892,6 +1977,9 @@ export class Paginator extends HTMLElement {
   }
   get cssSnapEnabled() {
     return !this.scrolled
+  }
+  get idle() {
+    return this.#input.settled
   }
   get pageTurnBlocksNavigation() {
     const committedPageTurn = this.#committedPageTurnInput.requested
@@ -1976,30 +2064,40 @@ export class Paginator extends HTMLElement {
   #finishUserChapterTransition(transition) {
     if (this.#userChapterTransition !== transition) return
     this.#userChapterTransition = null
-    this.#pageTurnSelection.releaseIfSettled()
+    this.#input.releaseIfSettled()
+  }
+  // A native handle can scroll a fragmented paragraph back a column. While
+  // text is selected at rest, only the visible page is a snap destination.
+  // A short swipe can settle on the same page with that selection still live.
+  #syncSelectionPage() {
+    if (!android) return
+    const hold =
+      this.#input.settled &&
+      !this.scrolled &&
+      this.#view?.document?.getSelection()?.type === "Range"
+    this.#cssSnapTrack.setSelectionPage(hold ? this.page : null)
   }
   #onWheel() {
     if (this.#committedPageTurnInput.active) return
+    this.#input.wheel()
     this.#viewport.interruptFromInput(true)
   }
   #onTouchStart() {
-    this.#pageTurnSelection.startTouch()
+    this.#input.startTouch()
     this.#viewport.interruptFromInput(false)
     this.#touchPinched = false
-    this.#viewport.beginGesture(this.page)
   }
   #onTouchMove(e) {
     if (this.#touchPinched) return
     this.#touchPinched = globalThis.visualViewport.scale > 1
-    if (this.scrolled || this.#touchPinched) return
+    if (this.#touchPinched) return
     if (e.touches.length > 1) return
-    this.#touchScrolled = true
     this.#viewport.confirmGesture()
+    if (!this.scrolled) this.#touchScrolled = true
   }
   #onTouchEnd(e) {
     this.#touchScrolled = false
-    this.#pageTurnSelection.endTouch(e)
-    if (this.scrolled) return
+    this.#input.endTouch(e)
     this.#viewport.endTouch()
   }
   // allows one to process rects as if they were LTR and horizontal
@@ -2038,11 +2136,9 @@ export class Paginator extends HTMLElement {
   async #scrollTo(offset, reason, smooth) {
     const element = this.#container
     const { scrollProp } = this
+    if (element[scrollProp] !== offset)
+      this.#cssSnapTrack.setSelectionPage(null)
     const shouldAnimate = smooth && this.#shouldAnimateScrolling()
-    if (this.#viewport.reflowActive) {
-      element[scrollProp] = offset
-      return
-    }
     // FIXME: vertical-rl only, not -lr
     if (this.scrolled && this.#vertical) offset = -offset
     if (this.scrolled) {
@@ -2059,13 +2155,17 @@ export class Paginator extends HTMLElement {
         ? Math.max(-maxOffset, Math.min(0, offset))
         : Math.max(0, Math.min(maxOffset, offset))
     }
+    if (this.#viewport.reflowActive) {
+      element[scrollProp] = offset
+      return
+    }
+    if (this.scrolled) this.#viewport.beginContinuousScroll(reason)
     if (element[scrollProp] === offset) {
       this.#afterScroll(reason)
       return
     }
     if (shouldAnimate && this.scrolled) {
       const axis = scrollProp === "scrollLeft" ? "left" : "top"
-      this.#viewport.beginContinuousScroll(reason)
       element.scrollTo({ [axis]: offset, behavior: "smooth" })
       return
     }
@@ -2109,6 +2209,11 @@ export class Paginator extends HTMLElement {
       select ? "selection" : "navigation",
       smooth,
     )
+  }
+  /** Preserve a followed sentence already on this page without navigating. */
+  setReflowAnchor(anchor) {
+    if (this.scrolled || this.pageTurnBlocksNavigation) return
+    this.#viewport.preserveAnchor(anchor)
   }
   async #scrollToAnchor(
     anchor,
@@ -2169,7 +2274,7 @@ export class Paginator extends HTMLElement {
   }
   /**
    * Records why the viewport moved. The reason identifies who owns the
-   * relocation and controls selection, history, and page-flip reporting.
+   * relocation and controls selection, history, and interaction reporting.
    *
    * @param {"snap"|"page"|"scroll"|"navigation"|"selection"|"anchor"|null} reason
    *   The source of the relocation:
@@ -2188,7 +2293,6 @@ export class Paginator extends HTMLElement {
   #afterScroll(reason, commitViewport = true) {
     const range = this.#getVisibleRange()
     this.#lastVisibleRange = range
-    if (commitViewport) this.#viewport.commitViewport(range)
     // don't set new anchor if relocation was to scroll to anchor
     if (
       reason !== "selection" &&
@@ -2198,7 +2302,12 @@ export class Paginator extends HTMLElement {
       this.#anchor = range
     else this.#justAnchored = true
 
-    this.#viewport.reportPageFlip(reason)
+    // Navigation retains the requested sentence/CFI, while user movement above
+    // replaces it with the visible range. Keeping only the page start here
+    // loses the restored target when late font metrics repaginate the section.
+    if (commitViewport) this.#viewport.commitViewport(this.#anchor ?? range)
+
+    this.#viewport.recordPosition(reason)
 
     const index = this.#index
     const detail = { reason, range, index }
@@ -2246,6 +2355,11 @@ export class Paginator extends HTMLElement {
       select,
       smooth,
     )
+    // Wait for load-triggered layout before completing navigation.
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)),
+    )
+    await this.#viewport.wait()
     if (hasFocus) this.focusView()
   }
   #canGoToIndex(index) {
@@ -2342,10 +2456,8 @@ export class Paginator extends HTMLElement {
     // for reflow and execute against the newly paginated layout. Rejecting it
     // also lets the native reader discard its pre-resize expected-page state.
     if (this.#locked || this.#viewport.reflowActive) return "rejected"
-    // An overlay cannot take ownership of a touch sequence that already
-    // started in the book document. Reject the Swift command and let that
-    // gesture's PageFlipped event be the sole source of navigation instead.
-    if (blockUserInput && this.#pageTurnSelection.touchActive) return "rejected"
+    // An overlay cannot intercept a touch that started in the book document.
+    if (blockUserInput && this.#input.touchActive) return "rejected"
     this.#locked = true
     if (blockUserInput) this.#committedPageTurnInput.setRequested(true)
     try {
@@ -2355,7 +2467,7 @@ export class Paginator extends HTMLElement {
         selection?.rangeCount && !selection.isCollapsed,
       )
       const turnAnimated = animated && !hasSelection
-      if (turnAnimated) this.#pageTurnSelection.suppress()
+      if (turnAnimated) this.#input.suppress()
 
       const prev = dir === -1
       const { status, shouldGo } = await (prev
@@ -2372,7 +2484,7 @@ export class Paginator extends HTMLElement {
     } finally {
       if (blockUserInput) this.#committedPageTurnInput.setRequested(false)
       this.#locked = false
-      this.#pageTurnSelection.releaseIfSettled()
+      this.#input.releaseIfSettled()
     }
   }
   prev(distance, animated = true, blockUserInput = false) {

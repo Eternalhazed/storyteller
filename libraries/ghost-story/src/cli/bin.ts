@@ -9,14 +9,23 @@ import {
 } from "@robingenz/zli"
 import { Presets, SingleBar } from "cli-progress"
 import { ensureDirSync } from "fs-extra"
+import PQueue from "p-queue"
 import { z } from "zod/v4"
 
+import packageJson from "../../package.json" with { type: "json" }
 import { type RecognitionOptions } from "../api/Recognition.ts"
 import {
   BUILD_VARIANTS,
+  CTC_MODEL_FAMILIES,
+  CTC_MODEL_PACKAGES,
   RECOGNITION_ENGINES,
+  CTC_DEVICES,
   WHISPER_CPP_VERSION,
   WHISPER_MODELS,
+  ctcModelLanguages,
+  isCtcModelFamily,
+  resolveCtcDevice,
+  resolveCtcModelVariant,
 } from "../constants.ts"
 
 import {
@@ -25,6 +34,7 @@ import {
   isValidModel,
   isValidVariant,
 } from "./config.ts"
+import { installModelPackage } from "./ctc-install.ts"
 import {
   PlatformMismatchError,
   installBinary,
@@ -33,37 +43,43 @@ import {
 } from "./install.ts"
 import {
   IncompatibleBinaryError,
+  defaultServerOptions,
   spawnWhisperServer,
 } from "./whisper-server.ts"
 
 const recognitionEngineSchema = z.enum(RECOGNITION_ENGINES)
 const whisperModelSchema = z.enum(WHISPER_MODELS)
 const buildVariantSchema = z.enum(BUILD_VARIANTS)
+const ctcDeviceSchema = z.enum(CTC_DEVICES)
 
-type InstallTarget = "binary" | "model" | "vad" | "all"
+const INSTALL_TARGETS = ["binary", "model", "vad", "ctc-model", "all"] as const
+const installTargetSchema = z.enum(INSTALL_TARGETS)
+
+type InstallTarget = (typeof INSTALL_TARGETS)[number]
 
 function isInstallTarget(value: string): value is InstallTarget {
-  return ["binary", "model", "vad", "all"].includes(value)
+  return INSTALL_TARGETS.includes(value as InstallTarget)
 }
 
 const installCommand = defineCommand({
   description: `Install whisper.cpp binary and models.
 
 Usage:
-  ghost-story install binary [variant]  - Install binary (auto-detects platform if variant not specified)
-  ghost-story install model <model>     - Install a whisper model
-  ghost-story install vad               - Install Silero VAD model
-  ghost-story install all               - Install binary, all models, and VAD`,
+  ghost-story install binary [variant]    - Install binary (auto-detects platform if variant not specified)
+  ghost-story install model <model>       - Install a whisper model
+  ghost-story install vad                 - Install Silero VAD model
+  ghost-story install ctc-model [variant] - Install model for CTC alignment (fp32, fp16, or mlx)
+  ghost-story install all                 - Install binary, all models, and VAD`,
   args: z.union([
     z.tuple([
-      z
-        .enum(["binary", "model", "vad", "all"])
-        .describe("What to install: binary, model, vad, or all"),
+      installTargetSchema.describe(
+        `What to install: ${INSTALL_TARGETS.join(", ")}`,
+      ),
     ]),
     z.tuple([
-      z
-        .enum(["binary", "model", "vad", "all"])
-        .describe("What to install: binary, model, vad, or all"),
+      installTargetSchema.describe(
+        `What to install: ${INSTALL_TARGETS.join(", ")}`,
+      ),
       z
         .string()
         .optional()
@@ -80,8 +96,15 @@ Usage:
         .boolean()
         .default(false)
         .describe("List available variants or models"),
+      device: ctcDeviceSchema
+        .default("auto")
+        .describe("Device the CTC model will run on"),
+      language: z
+        .string()
+        .optional()
+        .describe("Language of the CTC model, for example en or de"),
     }),
-    { f: "force", l: "list" },
+    { f: "force", l: "list", d: "device" },
   ),
   action: async (options, args) => {
     const [target, argument] = args
@@ -110,13 +133,24 @@ Usage:
         }
         return
       }
-      console.error("Use --list with 'binary' or 'model'")
+      if (target === "ctc-model") {
+        console.log("Available CTC models:")
+        for (const family of CTC_MODEL_FAMILIES) {
+          const languages =
+            family === "mms"
+              ? "any language"
+              : ctcModelLanguages(family).join(", ")
+          console.log(`  ${family} (${languages})`)
+        }
+        return
+      }
+      console.error("Use --list with 'binary', 'model', or 'ctc-model'")
       process.exit(1)
     }
 
     if (!isInstallTarget(target)) {
       console.error(`Unknown install target: ${target as string}`)
-      console.error("Valid targets: binary, model, vad, all")
+      console.error(`Valid targets: ${INSTALL_TARGETS.join(", ")}`)
       process.exit(1)
     }
 
@@ -147,6 +181,24 @@ Usage:
           process.exit(1)
         }
         await installModel({ model: argument, force, printOutput: true })
+      }
+
+      if (target === "ctc-model") {
+        const family = argument ?? "mms"
+        if (!isCtcModelFamily(family)) {
+          console.error(`Unknown CTC model: ${family}`)
+          console.error("\nAvailable models:")
+          for (const f of CTC_MODEL_FAMILIES) {
+            console.log(`  ${f}`)
+          }
+          process.exit(1)
+        }
+        const device = resolveCtcDevice(options.device, null)
+        const variant = resolveCtcModelVariant(family, options.language, device)
+        await installModelPackage(CTC_MODEL_PACKAGES[variant], {
+          force,
+          printOutput: true,
+        })
       }
 
       if (target === "all") {
@@ -369,6 +421,195 @@ const serverCommand = defineCommand({
   },
 })
 
+const serveCommand = defineCommand({
+  description:
+    "Start a server that computes CTC emissions, and optionally transcribes, for other machines",
+  options: defineOptions(
+    z.object({
+      host: z.string().default("0.0.0.0").describe("Host to bind to"),
+      port: z.coerce.number().default(8765).describe("Port to listen on"),
+      apiKey: z
+        .string()
+        .optional()
+        .describe(
+          "The key clients must send, defaults to GHOST_STORY_API_KEY. Required.",
+        ),
+      device: ctcDeviceSchema
+        .default("auto")
+        .describe("Device to run inference on"),
+      modelDir: z
+        .string()
+        .optional()
+        .describe("Directory CTC models are installed to"),
+      batchSize: z.coerce
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "How many chunks go through the model at once. Defaults to 2 on a GPU and 1 on a CPU. Only really important if time per chunk is already very short, <1s.",
+        ),
+      concurrency: z.coerce
+        .number()
+        .optional()
+        .describe("How many blocks of audio ffmpeg decodes at once"),
+      ffmpeg: z.string().default("ffmpeg").describe("Path to ffmpeg"),
+      ffprobe: z.string().default("ffprobe").describe("Path to ffprobe"),
+      cacheSize: z.coerce
+        .number()
+        .positive()
+        .default(10)
+        .describe("Gigabytes of uploaded audio to keep for later jobs"),
+      whisperModel: whisperModelSchema
+        .optional()
+        .describe(
+          "Transcribe with this whisper model at /v1/audio/transcriptions. Omit to serve emissions only.",
+        ),
+      threads: z.coerce
+        .number()
+        .default(defaultServerOptions.threads)
+        .describe("Threads per whisper processor"),
+      processors: z.coerce
+        .number()
+        .default(defaultServerOptions.processors)
+        .describe("Parts whisper splits long audio into"),
+    }),
+    { p: "port", d: "device", m: "whisper-model" },
+  ),
+  action: async (options) => {
+    const apiKey = options.apiKey ?? process.env["GHOST_STORY_API_KEY"]
+    if (!apiKey) {
+      const { randomBytes } = await import("node:crypto")
+      console.error(
+        `The server needs an API key. Pass --api-key or set GHOST_STORY_API_KEY, for example:\n\n  ghost-story serve --api-key ${randomBytes(24).toString("base64url")}\n\nThen enter the same key in Storyteller.`,
+      )
+      process.exit(1)
+    }
+
+    const { execFile } = await import("node:child_process")
+    const { promisify } = await import("node:util")
+    for (const tool of [options.ffmpeg, options.ffprobe]) {
+      try {
+        await promisify(execFile)(tool, ["-version"])
+      } catch {
+        console.error(
+          `Could not run ${tool}. Install ffmpeg and put it on your PATH, or pass --ffmpeg and --ffprobe.`,
+        )
+        process.exit(1)
+      }
+    }
+
+    let server: typeof import("../server/index.ts")
+    try {
+      server = await import("../server/index.ts")
+    } catch (error) {
+      console.error("Failed to load the inference runtime:", error)
+      if (process.platform === "win32") {
+        console.error(
+          "\nOn Windows this usually means the Microsoft Visual C++ Redistributable is missing. Install the x64 or arm64 build from https://aka.ms/vs/17/release/vc_redist.x64.exe (or vc_redist.arm64.exe) and try again.",
+        )
+      }
+      process.exit(1)
+    }
+
+    if (options.whisperModel) {
+      console.log(`Installing whisper.cpp and ${options.whisperModel}...`)
+      await installBinary({ printOutput: true })
+      await installModel({ model: options.whisperModel, printOutput: true })
+    }
+
+    const jobs = server.memoryJobs()
+    const files = await server.diskFileStore({
+      maxBytes: options.cacheSize * 1024 ** 3,
+    })
+    const inference = new PQueue({ concurrency: 1 })
+    const log = (message: string) => {
+      console.log(`[${new Date().toISOString()}] ${message}`)
+    }
+    const emissions = server.emissionService({
+      jobs,
+      files,
+      inference,
+      device: options.device,
+      batchSize: options.batchSize,
+      buildVariant: getInstalledVariant(),
+      modelDir: options.modelDir,
+      concurrency: options.concurrency,
+      ffmpegPath: options.ffmpeg,
+      ffprobePath: options.ffprobe,
+      log,
+    })
+    const services = [
+      emissions,
+      ...(options.whisperModel
+        ? [
+            server.transcriptionService({
+              model: options.whisperModel,
+              threads: options.threads,
+              processors: options.processors,
+              inference,
+              log,
+            }),
+          ]
+        : []),
+    ]
+    const listening = await server.listen(
+      server.createServer({ services, files, apiKey }),
+      { host: options.host, port: options.port },
+    )
+    console.log("ghost-story server")
+    console.log(
+      `  Services: ${services.map((service) => service.name).join(", ")}`,
+    )
+    console.log(`  Device: ${emissions.capabilities().device}`)
+    if (options.whisperModel) {
+      console.log(`  Whisper model: ${options.whisperModel}`)
+    }
+    const { networkInterfaces } = await import("node:os")
+    const addresses =
+      options.host === "0.0.0.0" || options.host === "::"
+        ? [
+            "localhost",
+            ...Object.values(networkInterfaces())
+              .flat()
+              .filter(
+                (address) => address?.family === "IPv4" && !address.internal,
+              )
+              .map((address) => address?.address),
+          ]
+        : [options.host]
+    console.log(`  Listening on port ${options.port}. Reach it at:`)
+    for (const address of addresses) {
+      console.log(`    http://${address}:${options.port}`)
+    }
+    console.log(
+      `  From a Docker container on this machine, use http://host.docker.internal:${options.port}. Outside Docker Desktop that name needs extra_hosts: ["host.docker.internal:host-gateway"] in the container's compose file.`,
+    )
+    console.log(
+      "  Enter the same API key this server was started with in Storyteller.",
+    )
+
+    let closing = false
+    const shutdown = () => {
+      if (closing) return
+      closing = true
+      console.log("\nShutting down...")
+      listening.close()
+      void jobs[Symbol.asyncDispose]()
+        .then(() =>
+          Promise.all(
+            services.map((service) => service[Symbol.asyncDispose]()),
+          ),
+        )
+        .then(() => files[Symbol.asyncDispose]())
+        .finally(() => process.exit(0))
+    }
+    process.on("SIGINT", shutdown)
+    process.on("SIGTERM", shutdown)
+    process.on("SIGBREAK", shutdown)
+  },
+})
+
 const vadCommand = defineCommand({
   description: "Run voice activity detection on an audio file",
   args: z.tuple([z.string().describe("Input audio file path")], {
@@ -441,14 +682,15 @@ const vadCommand = defineCommand({
 const config = defineConfig({
   meta: {
     name: "ghost-story",
-    version: WHISPER_CPP_VERSION,
-    description: `Whisper.cpp management CLI (v${WHISPER_CPP_VERSION})`,
+    version: packageJson.version,
+    description: `Speech toolkit for Storyteller (whisper.cpp v${WHISPER_CPP_VERSION})`,
   },
   commands: {
     install: installCommand,
     status: statusCommand,
     transcribe: transcribeCommand,
     server: serverCommand,
+    serve: serveCommand,
     vad: vadCommand,
   },
   defaultCommand: statusCommand,

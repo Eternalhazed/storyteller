@@ -11,7 +11,6 @@ import { Button } from "@v3/_/components/ui/button"
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@v3/_/components/ui/card"
@@ -37,9 +36,9 @@ import { useTranslation } from "@v3/_/hooks/use-translation"
 
 import { Providers } from "@/auth/providers"
 import { cn } from "@/cn"
-import { FallbackIcon, ProviderIcons } from "@/components/icons/ProviderIcons"
 import type { UserPermissionSet } from "@/database/users"
 import * as icon from "@/icons"
+import { FallbackIcon, ProviderIcons } from "@/icons/ProviderIcons"
 
 import { LockTooltip, useSettingsForm } from "./SettingsFormProvider"
 import { type SettingsFormForm, SettingsSection, safeUrl } from "./shared"
@@ -86,7 +85,7 @@ const PERMISSION_OPTIONS: Array<{ value: Permission; label: string }> = [
   { value: "settingsUpdate", label: "Change server settings" },
 ]
 
-export function AuthTab() {
+export function AuthenticationSection() {
   const { form, lockedSettings } = useSettingsForm()
 
   const webUrl = useWatch({ control: form.control, name: "webUrl" })
@@ -94,7 +93,7 @@ export function AuthTab() {
     control: form.control,
     name: "authProviders",
   })
-  const t = useTranslation("SettingsPage.tabs.auth.sections.sso")
+  const t = useTranslation("SettingsPage.tabs.server.sections.auth")
 
   const {
     fields: authProviders,
@@ -127,7 +126,7 @@ export function AuthTab() {
 
   return (
     <div className="space-y-6">
-      <SettingsSection tab="auth" section="sso">
+      <SettingsSection id="authentication">
         <Card>
           <CardHeader>
             <CardTitle
@@ -138,11 +137,10 @@ export function AuthTab() {
             >
               {t("title")} {isAuthProvidersLocked && <LockTooltip />}
             </CardTitle>
-            <CardDescription>{t("description")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {authProviders.map((provider, index) => (
-              <Card key={provider.id} className="relative">
+              <Card key={provider.key} className="relative">
                 <Button
                   type="button"
                   variant="ghost"
@@ -377,7 +375,7 @@ export function AuthTab() {
 }
 
 type TranslationFn = ReturnType<
-  typeof useTranslation<"SettingsPage.tabs.auth.sections.sso">
+  typeof useTranslation<"SettingsPage.tabs.server.sections.auth">
 >
 
 type GroupPermissionsValue = Record<string, Permission[]>
@@ -473,6 +471,7 @@ function BuiltInProviderFields({
                   label: string
                 }[]
               }
+              // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
               value={field.value as string}
               onValueChange={field.onChange}
               disabled={isAuthProvidersLocked}
@@ -553,6 +552,7 @@ function CustomProviderFields({
             <FieldLabel>{t("type")}</FieldLabel>
             <Select
               items={providerTypeOptions}
+              // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
               value={field.value as string}
               onValueChange={field.onChange}
               disabled={isAuthProvidersLocked}

@@ -5,11 +5,11 @@ import { Controller, useWatch } from "react-hook-form"
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@v3/_/components/ui/card"
 import { Field, FieldDescription } from "@v3/_/components/ui/field"
+import { InfoTip } from "@v3/_/components/ui/info-tip"
 import { Switch } from "@v3/_/components/ui/switch"
 import { useTranslation } from "@v3/_/hooks/use-translation"
 
@@ -40,6 +40,7 @@ export function AppearanceTab({ form }: { form: PreferencesFormType }) {
   const colorModeDefault = useResolvedDefault("colorMode")
   const layoutAnimationsDefault = useResolvedDefault("layoutAnimations")
   const animatePanelOpenDefault = useResolvedDefault("animatePanelOpen")
+  const shellThemeDefault = useResolvedDefault("shellTheme")
 
   const colorMode =
     useWatch({ control: form.control, name: "colorMode" }) ?? colorModeDefault
@@ -51,11 +52,10 @@ export function AppearanceTab({ form }: { form: PreferencesFormType }) {
 
   return (
     <div className="space-y-6">
-      <PreferencesSection tab="appearance" section="accent">
+      <PreferencesSection id="accent">
         <Card>
           <CardHeader>
             <CardTitle>{t("accent.title")}</CardTitle>
-            <CardDescription>{t("accent.description")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <Controller
@@ -69,9 +69,7 @@ export function AppearanceTab({ form }: { form: PreferencesFormType }) {
                   <FieldDescription>{t("accent.hint")}</FieldDescription>
                   <AccentColorPicker
                     value={field.value ?? null}
-                    onChange={(value) => {
-                      field.onChange(value)
-                    }}
+                    onChange={field.onChange}
                     defaultLabel={t("accent.useDefault")}
                     customLabel={t("accent.custom")}
                     defaultColor={accentDefault ?? null}
@@ -90,10 +88,8 @@ export function AppearanceTab({ form }: { form: PreferencesFormType }) {
                   </SettingLabel>
                   <FieldDescription>{t("accent.shell.hint")}</FieldDescription>
                   <SegmentedControl
-                    value={field.value}
-                    onChange={(value) => {
-                      field.onChange(value)
-                    }}
+                    value={field.value ?? shellThemeDefault}
+                    onChange={field.onChange}
                     options={shellThemeOptions}
                   />
                   <FieldDescription>
@@ -106,11 +102,10 @@ export function AppearanceTab({ form }: { form: PreferencesFormType }) {
         </Card>
       </PreferencesSection>
 
-      <PreferencesSection tab="appearance" section="colorfulness">
+      <PreferencesSection id="colorfulness">
         <Card>
           <CardHeader>
             <CardTitle>{t("colorfulness.title")}</CardTitle>
-            <CardDescription>{t("colorfulness.description")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <Controller
@@ -121,12 +116,9 @@ export function AppearanceTab({ form }: { form: PreferencesFormType }) {
                   <SettingLabel field="colorMode">
                     {t("colorfulness.label")}
                   </SettingLabel>
-                  <FieldDescription>{t("colorfulness.hint")}</FieldDescription>
                   <SegmentedControl
                     value={field.value ?? colorModeDefault}
-                    onChange={(value) => {
-                      field.onChange(value)
-                    }}
+                    onChange={field.onChange}
                     options={colorModeOptions}
                   />
                 </Field>
@@ -138,11 +130,10 @@ export function AppearanceTab({ form }: { form: PreferencesFormType }) {
         </Card>
       </PreferencesSection>
 
-      <PreferencesSection tab="appearance" section="motion">
+      <PreferencesSection id="motion">
         <Card>
           <CardHeader>
             <CardTitle>{t("motion.title")}</CardTitle>
-            <CardDescription>{t("motion.description")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <Controller
@@ -171,6 +162,7 @@ export function AppearanceTab({ form }: { form: PreferencesFormType }) {
                   <div className="flex flex-col gap-1">
                     <SettingLabel field="animatePanelOpen">
                       {t("motion.panelLabel")}
+                      <InfoTip>{t("motion.panelTip")}</InfoTip>
                     </SettingLabel>
                     <FieldDescription>{t("motion.panelHint")}</FieldDescription>
                   </div>

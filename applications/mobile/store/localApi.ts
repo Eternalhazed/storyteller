@@ -3,7 +3,7 @@ import deepmerge from "deepmerge"
 import * as SecureStore from "expo-secure-store"
 import { current } from "immer"
 
-import { type Xray } from "@storyteller-platform/xray/view"
+import { type Xray } from "@storyteller/xray/view"
 
 import { type HighlightTint } from "@/colors"
 import {

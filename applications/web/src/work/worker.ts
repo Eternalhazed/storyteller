@@ -1,32 +1,46 @@
 import { randomUUID } from "node:crypto"
-import { mkdir, readFile, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { mkdir, readFile, readdir, rm } from "node:fs/promises"
+import { dirname } from "node:path"
 import type { MessagePort } from "node:worker_threads"
 
 import {
   align,
+  ctcAlign,
+  emit,
   markup,
   processAudiobook,
   transcribe,
-} from "@storyteller-platform/align"
-import { Epub } from "@storyteller-platform/epub"
+} from "@storyteller/align"
+import { Epub, MemoryAdapter } from "@storyteller/epub"
+import { scratchPath } from "@storyteller/fs"
 import {
   createTiming,
   formatSingleReport,
-} from "@storyteller-platform/ghost-story"
-import { readBookSource } from "@storyteller-platform/xray/epub"
+  resolveCtcDevice,
+} from "@storyteller/ghost-story"
+import { isCtcModelVariant } from "@storyteller/ghost-story/constants"
+import { readBookSource } from "@storyteller/xray/epub"
 
 import { getExtractedCover } from "@/assets/covers"
-import { deleteProcessed, deleteTranscriptions } from "@/assets/fs"
+import {
+  deleteProcessed,
+  deleteProcessedAudio,
+  deleteTranscriptions,
+  getProcessedAudioFiles,
+} from "@/assets/fs"
 import { writeMetadataToEpub } from "@/assets/metadata"
 import {
   getAlignmentReportFilepath,
+  getEmissionsFilepath,
   getProcessedAudioFilepath,
   getReadaloudFilepath,
   getTranscriptionsFilepath,
 } from "@/assets/paths"
-import { type Report, createAlignmentReport } from "@/database/alignmentReports"
+import { getAlignmentDecisions } from "@/database/alignmentDecisions"
+import {
+  type AnyReport,
+  createAlignmentReport,
+} from "@/database/alignmentReports"
 import {
   type BookRelationsUpdate,
   type BookUpdate,
@@ -42,9 +56,14 @@ import { env } from "@/env"
 import { logger } from "@/logging"
 import type { UUID } from "@/uuid"
 import { getCurrentVersion } from "@/versions"
+import { rangeBehaviourSettings } from "@/work/rangeBehaviour"
 
-import type { RestartMode } from "./distributor"
-import { type JobStats, buildJobStats } from "./jobStats"
+import type { ControlMessage, RestartMode } from "./distributor"
+import {
+  type AlignmentJobSummary,
+  type JobStats,
+  buildJobStats,
+} from "./jobStats"
 import type { RunConfig } from "./runConfig"
 
 const STAGES = ["SPLIT_TRACKS", "TRANSCRIBE_CHAPTERS", "SYNC_CHAPTERS"] as const
@@ -72,6 +91,14 @@ export default async function processBook({
   config: RunConfig | null
   port: MessagePort
 }): Promise<JobStats | undefined> {
+  const abort = new AbortController()
+  const { signal } = abort
+  port.on("message", (message: Partial<ControlMessage> | null) => {
+    if (message?.type === "abort") {
+      abort.abort(new DOMException("Processing stopped by user", "AbortError"))
+    }
+  })
+
   const processTiming = createTiming()
   processTiming.setMetadata("bookUuid", bookUuid)
   processTiming.setMetadata("restartMode", restart || "continue")
@@ -102,10 +129,22 @@ export default async function processBook({
   }
 
   let book = await getBookOrThrow(bookUuid)
+  let alignmentSummary: AlignmentJobSummary | null = null
 
   if (restart === "full") {
     await processTiming.timeAsync("delete_all_cache", () =>
       deleteProcessed(book),
+    )
+    book = await updateBook(null, {
+      readaloud: {
+        status: "PROCESSING",
+        currentStage: "SPLIT_TRACKS",
+        stageProgress: 0,
+      },
+    })
+  } else if (restart === "transcode") {
+    await processTiming.timeAsync("delete_transcoded_audio", () =>
+      deleteProcessedAudio(book),
     )
     book = await updateBook(null, {
       readaloud: {
@@ -145,12 +184,83 @@ export default async function processBook({
 
   const bookRefForLog = `"${book.title}" (uuid: ${bookUuid})`
 
+  const runLanguage = config?.language ?? book.language
+  let locale: Intl.Locale
+  if (runLanguage) {
+    locale = new Intl.Locale(runLanguage)
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    using epub = await Epub.from(book.ebook!.filepath)
+    locale = (await epub.getLanguage()) ?? new Intl.Locale("en-US")
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const stageIndex = STAGES.indexOf(book.readaloud!.currentStage)
-  const remainingStages = STAGES.slice(stageIndex)
+
+  const alignerSettings = await getEffectiveSettings()
+  const alignerInputDir =
+    alignerSettings.aligner === "ctc"
+      ? getEmissionsFilepath(book)
+      : getTranscriptionsFilepath(book)
+  const alignerInputCount = await readdir(alignerInputDir).then(
+    (filenames) =>
+      filenames.filter((f) => f.endsWith(".json") || f.endsWith(".emissions"))
+        .length,
+    () => 0,
+  )
+
+  const processedAudioCount = await getProcessedAudioFiles(book).then(
+    (filenames) => filenames.length,
+    () => 0,
+  )
+
+  const transcribeIndex = STAGES.indexOf("TRANSCRIBE_CHAPTERS")
+  const startIndex =
+    stageIndex > 0 && processedAudioCount === 0
+      ? 0
+      : stageIndex > transcribeIndex && alignerInputCount === 0
+        ? transcribeIndex
+        : stageIndex
+
+  if (startIndex === 0 && stageIndex > 0) {
+    logger.info(
+      `No transcoded audio on disk for ${bookRefForLog}, restarting from the split step`,
+    )
+    book = await updateBook(null, {
+      readaloud: {
+        status: "PROCESSING",
+        currentStage: "SPLIT_TRACKS",
+        stageProgress: 0,
+      },
+    })
+  } else if (startIndex < stageIndex) {
+    logger.info(
+      `No ${alignerSettings.aligner === "ctc" ? "emissions" : "transcriptions"} on disk for ${bookRefForLog}, restarting from the transcription step`,
+    )
+    book = await updateBook(null, {
+      readaloud: {
+        status: "PROCESSING",
+        currentStage: "TRANSCRIBE_CHAPTERS",
+        stageProgress: 0,
+      },
+    })
+  }
+
+  const remainingStages = STAGES.slice(startIndex)
 
   for (const stage of remainingStages) {
+    const PROGRESS_WRITE_STEPS = 100
+    let lastWrittenProgress = 0
+
     const onProgress = (progress: number) => {
+      const reachedNewStep =
+        Math.floor(progress * PROGRESS_WRITE_STEPS) >
+        Math.floor(lastWrittenProgress * PROGRESS_WRITE_STEPS)
+
+      if (!reachedNewStep) return
+
+      lastWrittenProgress = progress
+
       void updateBook(null, {
         readaloud: {
           status: "PROCESSING",
@@ -161,10 +271,10 @@ export default async function processBook({
     }
 
     try {
+      signal.throwIfAborted()
+
       if (stage === "SPLIT_TRACKS") {
-        // clean stale files from previous runs to prevent mismatches
-        // shame not to reuse stuff, but too easy to produce bugs if we do
-        await deleteProcessed(book)
+        await deleteProcessedAudio(book)
 
         const settings = await getEffectiveSettings()
         logger.info("Pre-processing...")
@@ -182,70 +292,114 @@ export default async function processBook({
               },
               logger,
               onProgress,
+              signal,
             },
           ),
         )
       }
 
       if (stage === "TRANSCRIBE_CHAPTERS") {
-        logger.info("Transcribing...")
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        using epub = await Epub.from(book.ebook!.filepath)
         book = await getBookOrThrow(bookUuid)
 
-        const runLanguage = config?.language ?? book.language
-        const locale = runLanguage
-          ? new Intl.Locale(runLanguage)
-          : (await epub.getLanguage()) ?? new Intl.Locale("en-US")
-
         const settings = await getEffectiveSettings()
-        await processTiming.timeAsync("transcribe_chapters", () =>
-          transcribe(
-            getProcessedAudioFilepath(book),
-            getTranscriptionsFilepath(book),
-            locale,
-            {
+
+        if (settings.aligner === "ctc") {
+          logger.info("Generating emissions...")
+          const engine = settings.ctcEngine ?? "ctc-local"
+          const device =
+            engine === "ctc-local"
+              ? resolveCtcDevice(
+                  settings.ctcDevice,
+                  env.STORYTELLER_WHISPER_VARIANT,
+                )
+              : null
+          const family = settings.ctcModel ?? "quartznet15x5"
+          const model =
+            family === "mms" ||
+            isCtcModelVariant(`${family}_${locale.language}`)
+              ? family
+              : "mms"
+          if (model !== family) {
+            logger.warn(
+              `${family} has no ${locale.language} model, using mms for ${bookRefForLog}`,
+            )
+          }
+          await processTiming.timeAsync("transcribe_chapters", () =>
+            emit(getProcessedAudioFilepath(book), getEmissionsFilepath(book), {
+              engine,
+              device,
+              model,
+              dtype: settings.ctcDtype,
+              batchSize: settings.ctcBatchSize,
+              language: locale,
+              serverUrl: settings.ctcServerUrl,
+              serverApiKey: settings.ctcServerApiKey,
               onProgress,
-              engine: settings.transcriptionEngine,
-              parallelism: settings.parallelTranscribes,
-              model: settings.whisperModel,
-              processors: settings.whisperThreads,
-              threads: settings.whisperThreads * 4,
-              whisperCpuOverride: settings.whisperCpuFallback,
               logger,
-              googleCloudApiKey: settings.googleCloudApiKey,
-              azureServiceRegion: settings.azureServiceRegion,
-              azureSubscriptionKey: settings.azureSubscriptionKey,
-              amazonTranscribeRegion: settings.amazonTranscribeRegion,
-              amazonTranscribeAccessKeyId: settings.amazonTranscribeAccessKeyId,
-              amazonTranscribeSecretAccessKey:
-                settings.amazonTranscribeSecretAccessKey,
-              amazonTranscribeBucketName: settings.amazonTranscribeBucketName,
-              openAiApiKey: settings.openAiApiKey,
-              openAiOrganization: settings.openAiOrganization,
-              openAiBaseUrl: settings.openAiBaseUrl,
-              openAiModelName: settings.openAiModelName,
-              whisperServerUrl: settings.whisperServerUrl,
-              whisperServerApiKey: settings.whisperServerApiKey,
-              deepgramApiKey: settings.deepgramApiKey,
-              deepgramModel: settings.deepgramModel,
-            },
-          ),
-        )
+              signal,
+            }),
+          )
+        } else {
+          logger.info("Transcribing...")
+          await processTiming.timeAsync("transcribe_chapters", () =>
+            transcribe(
+              getProcessedAudioFilepath(book),
+              getTranscriptionsFilepath(book),
+              locale,
+              {
+                onProgress,
+                engine: settings.transcriptionEngine,
+                parallelism: settings.parallelTranscribes,
+                model: settings.whisperModel,
+                processors: settings.whisperThreads,
+                threads: settings.whisperThreads * 4,
+                whisperCpuOverride: settings.whisperCpuFallback,
+                logger,
+                googleCloudApiKey: settings.googleCloudApiKey,
+                azureServiceRegion: settings.azureServiceRegion,
+                azureSubscriptionKey: settings.azureSubscriptionKey,
+                amazonTranscribeRegion: settings.amazonTranscribeRegion,
+                amazonTranscribeAccessKeyId:
+                  settings.amazonTranscribeAccessKeyId,
+                amazonTranscribeSecretAccessKey:
+                  settings.amazonTranscribeSecretAccessKey,
+                amazonTranscribeBucketName: settings.amazonTranscribeBucketName,
+                openAiApiKey: settings.openAiApiKey,
+                openAiOrganization: settings.openAiOrganization,
+                openAiBaseUrl: settings.openAiBaseUrl,
+                openAiModelName: settings.openAiModelName,
+                whisperServerUrl: settings.whisperServerUrl,
+                whisperServerApiKey: settings.whisperServerApiKey,
+                deepgramApiKey: settings.deepgramApiKey,
+                deepgramModel: settings.deepgramModel,
+                signal,
+              },
+            ),
+          )
+        }
       }
 
       if (stage === "SYNC_CHAPTERS") {
         await processTiming.timeAsync("sync", async () => {
-          const markupFilepath = join(
-            tmpdir(),
+          const markupFilepath = scratchPath(
             `storyteller-${randomUUID()}`,
             `${book.uuid}.epub`,
           )
 
           const settings = await getEffectiveSettings()
+          const decisions = await getAlignmentDecisions(bookUuid)
           const readaloudFilepath = getReadaloudFilepath(book, settings)
           const readaloudDirectory = dirname(readaloudFilepath)
           await mkdir(readaloudDirectory, { recursive: true })
+
+          using epub = await Epub.using(MemoryAdapter).from(
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            book.ebook!.filepath,
+          )
+          const runLanguage = config?.language ?? book.language
+          const locale = runLanguage
+            ? new Intl.Locale(runLanguage)
+            : ((await epub.getLanguage()) ?? new Intl.Locale("en-US"))
 
           const reportFilepath = getAlignmentReportFilepath(book)
           try {
@@ -255,22 +409,51 @@ export default async function processBook({
                 onProgress(p * 0.15)
               },
               logger,
+              granularity: settings.alignmentGranularity ?? "sentence",
+              primaryLocale: locale,
             })
 
-            await align(
-              markupFilepath,
-              readaloudFilepath,
-              getTranscriptionsFilepath(book),
-              getProcessedAudioFilepath(book),
-              {
-                granularity: "sentence",
-                reportsPath: reportFilepath,
-                logger,
-                onProgress: (p) => {
-                  onProgress(0.15 + p * 0.85)
+            signal.throwIfAborted()
+
+            if (settings.aligner === "ctc") {
+              await ctcAlign(
+                markupFilepath,
+                readaloudFilepath,
+                getEmissionsFilepath(book),
+                getProcessedAudioFilepath(book),
+                {
+                  granularity: settings.alignmentGranularity ?? "sentence",
+                  reportsPath: reportFilepath,
+                  logger,
+                  onProgress: (p) => {
+                    onProgress(0.15 + p * 0.85)
+                  },
+                  primaryLocale: locale,
+                  signal,
+                  ...rangeBehaviourSettings(settings),
+                  decisions,
                 },
-              },
-            )
+              )
+            } else {
+              await align(
+                markupFilepath,
+                readaloudFilepath,
+                getTranscriptionsFilepath(book),
+                getProcessedAudioFilepath(book),
+                {
+                  granularity: "sentence",
+                  reportsPath: reportFilepath,
+                  logger,
+                  onProgress: (p) => {
+                    onProgress(0.15 + p * 0.85)
+                  },
+                  primaryLocale: locale,
+                  signal,
+                  ...rangeBehaviourSettings(settings),
+                  decisions,
+                },
+              )
+            }
           } finally {
             await rm(dirname(markupFilepath), { recursive: true, force: true })
           }
@@ -279,11 +462,13 @@ export default async function processBook({
             const reportJson = await readFile(reportFilepath, {
               encoding: "utf-8",
             })
-            await createAlignmentReport({
+
+            const { summary } = await createAlignmentReport({
               jobUuid,
               bookUuid,
-              report: JSON.parse(reportJson) as Report,
+              report: JSON.parse(reportJson) as AnyReport,
             })
+            alignmentSummary = summary
           } catch (err) {
             logger.warn({
               msg: "Failed to persist alignment report",
@@ -321,17 +506,17 @@ export default async function processBook({
             `Writing metadata to aligned readaloud file (title: ${book.title})`,
           )
 
-          using epub = await Epub.from(readaloudFilepath)
-          await writeMetadataToEpub(book, epub, {
+          using readaloudEpub = await Epub.from(readaloudFilepath)
+          await writeMetadataToEpub(book, readaloudEpub, {
             includeAlignmentMetadata: true,
             ...(audioCover && { audioCover }),
             format: "readaloud",
           })
           logger.info(
-            `Successfully wrote metadata to file (title: ${await epub.getTitle(true)})`,
+            `Successfully wrote metadata to file (title: ${await readaloudEpub.getTitle(true)})`,
           )
 
-          await epub.saveAndClose()
+          await readaloudEpub.saveAndClose()
 
           const shouldCleanCache = await getSetting("cleanCacheAfterReadaloud")
 
@@ -342,6 +527,8 @@ export default async function processBook({
         })
       }
     } catch (e) {
+      if (signal.aborted) throw signal.reason
+
       logger.error({
         msg: `Encountered error while running task "${stage}" for book ${bookUuid}`,
         err: e,
@@ -362,15 +549,13 @@ export default async function processBook({
 
   const summary = processTiming.summary()
 
-  const enableTiming = env.STORYTELLER_LOG_LEVEL === "debug"
-  if (enableTiming) {
-    logger.info(formatSingleReport(summary, `Process Book: ${book.title}`))
-  }
+  logger.info(formatSingleReport(summary, `Process Book: ${book.title}`))
 
   logger.info(`Completed synchronizing book ${bookRefForLog}`)
 
   return buildJobStats(summary, {
     audioDurationSeconds: book.audiobook?.duration ?? null,
     pageCount: book.ebook?.pageCount ?? null,
+    alignment: alignmentSummary,
   })
 }

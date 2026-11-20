@@ -1,14 +1,15 @@
 import { type Metadata } from "next"
+import { getMessages } from "next-intl/server"
 import { forbidden } from "next/navigation"
-import { getMessages, getTranslations } from "next-intl/server"
 
 import { PreferencesForm } from "@v3/_/components/preferences-form/preferences-form"
 import {
+  PREFERENCE_SECTIONS,
   type SectionKeywords,
-  preferenceTabs,
 } from "@v3/_/components/preferences-form/tabs"
 import { withPageAuth } from "@v3/_/server/page-auth-wrapper"
 
+import { getApiTokens } from "@/database/apiTokens"
 import {
   getConfigLockedKeys,
   getPreferenceDefaults,
@@ -19,12 +20,7 @@ import { getUserSettings } from "@/database/userSettings"
 import { getAccounts } from "@/database/users"
 import { env } from "@/env"
 
-export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslations("PreferencesPage")
-  return {
-    title: t("title"),
-  }
-}
+export const metadata: Metadata = { title: null }
 
 function extractKeywords(obj: Record<string, unknown>): string[] {
   const keywords: string[] = []
@@ -39,21 +35,28 @@ function extractKeywords(obj: Record<string, unknown>): string[] {
 }
 
 function generateSectionKeywords(
-  tabsMessages: Record<string, { sections?: Record<string, unknown> }>,
+  tabsMessages: Record<
+    string,
+    { title?: string; sections?: Record<string, unknown> }
+  >,
 ): SectionKeywords {
-  const result = {} as SectionKeywords
+  const result: SectionKeywords = {}
 
-  for (const tab of preferenceTabs) {
-    result[tab] = {}
+  for (const section of PREFERENCE_SECTIONS) {
+    const tab = tabsMessages[section.tab]
+    const keys = [
+      section.id,
+      ...("alsoMatches" in section ? section.alsoMatches : []),
+    ]
 
-    const sections = tabsMessages[tab]?.sections
-    if (!sections) continue
-
-    for (const [sectionKey, sectionData] of Object.entries(sections)) {
-      result[tab][sectionKey] = extractKeywords(
-        sectionData as Record<string, unknown>,
-      )
-    }
+    result[section.id] = [
+      ...(tab?.title ? [tab.title] : []),
+      ...keys.flatMap((key) =>
+        extractKeywords(
+          (tab?.sections?.[key] ?? {}) as Record<string, unknown>,
+        ),
+      ),
+    ]
   }
 
   return result
@@ -65,14 +68,21 @@ export default withPageAuth<{ params: Promise<Record<string, unknown>> }>([])(
       forbidden()
     }
 
-    const [settings, rawPreferences, linkedAccounts, messages, prefDefaults] =
-      await Promise.all([
-        getSettings(),
-        getUserSettings(user.id),
-        getAccounts(user.id),
-        getMessages(),
-        getPreferenceDefaults(),
-      ])
+    const [
+      settings,
+      rawPreferences,
+      linkedAccounts,
+      apiTokens,
+      messages,
+      prefDefaults,
+    ] = await Promise.all([
+      getSettings(),
+      getUserSettings(user.id),
+      getAccounts(user.id),
+      getApiTokens(user.id),
+      getMessages(),
+      getPreferenceDefaults(),
+    ])
 
     const preferences = formUserPreferences(rawPreferences)
 
@@ -93,6 +103,7 @@ export default withPageAuth<{ params: Promise<Record<string, unknown>> }>([])(
         preferences={preferences}
         sectionKeywords={sectionKeywords}
         linkedAccounts={linkedAccounts}
+        apiTokens={apiTokens}
         providers={oauthProviders.map((provider) =>
           provider.kind === "built-in"
             ? { id: provider.id, name: provider.id }
@@ -101,6 +112,7 @@ export default withPageAuth<{ params: Promise<Record<string, unknown>> }>([])(
         disablePasswordLogin={settings.disablePasswordLogin}
         preferenceDefaults={prefDefaults}
         preferenceDefaultsLocked={preferenceDefaultsLocked}
+        kindleSender={settings.smtpHost ? settings.smtpFrom : null}
       />
     )
   },

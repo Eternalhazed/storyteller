@@ -1,12 +1,13 @@
 import { type Dirent } from "node:fs"
 import { readdir, realpath } from "node:fs/promises"
-import { extname, join, resolve, sep } from "node:path"
+import { extname, join, resolve } from "node:path"
 
-import { Epub, MemoryAdapter } from "@storyteller-platform/epub"
+import { Epub, MemoryAdapter } from "@storyteller/epub"
+import { isHiddenFile } from "@storyteller/fs"
 
 import { isInsideInternalDirectory } from "@/assets/library/internalDirs"
-import { isReadaloudEpub } from "@/assets/library/scanner/create-book"
-import { isAudioFile, isHiddenFile } from "@/audio"
+import { pathBelongsTo } from "@/assets/library/paths"
+import { isAudioFile } from "@/audio"
 import { type BookWithRelations } from "@/database/books"
 import { getIgnorePaths } from "@/database/importRules"
 import { getSetting } from "@/database/settings"
@@ -15,7 +16,7 @@ import {
   type ImportMode,
   renderEpubSuffix,
 } from "@/database/settingsTypes"
-import { isEpubVersionError } from "@/epub"
+import { isEpubFile, isEpubVersionError, isReadaloudEpub } from "@/epub"
 import { logger } from "@/logging"
 
 import { type ScanCtx } from "./ctx"
@@ -69,23 +70,22 @@ async function classifyFolder(
     )
     if (isInIgnorePath) continue
 
-    const ext = extname(name)
-
-    if (ext === ".epub") {
+    if (isEpubFile(name)) {
       if (name.endsWith(`${epub2BackupSuffix}.epub`)) continue
 
       // if there is a file in this folder with the same name but with the epub3 backup suffix, add it to the epubPaths
       // ignore this one
       const backedUp = entries.find(
         (entry) =>
-          entry.name === `${name.replace(ext, "")}${epub3BackupSuffix}.epub`,
+          entry.name ===
+          `${name.replace(extname(name), "")}${epub3BackupSuffix}.epub`,
       )
       if (backedUp) {
         continue
       }
 
       epubPaths.push(fullPath)
-    } else if (isAudioFile(ext)) {
+    } else if (isAudioFile(name)) {
       hasAudio = true
     }
   }
@@ -120,12 +120,6 @@ async function classifyFolder(
     readaloudEpubs,
     audiobookDir: hasAudio ? folder : null,
   }
-}
-
-export function pathBelongsTo(folder: string, candidatePath: string): boolean {
-  const f = resolve(folder)
-  const p = resolve(candidatePath)
-  return p === f || p.startsWith(f + sep)
 }
 
 function booksReferencingFolder(
@@ -366,8 +360,7 @@ export async function walkFolders(
     if (isInsideInternalDirectory(entry.parentPath)) continue
     if (isHiddenFile(entry.name)) continue
 
-    const ext = extname(entry.name)
-    if (ext !== ".epub" && !isAudioFile(ext)) continue
+    if (!isEpubFile(entry.name) && !isAudioFile(entry.name)) continue
 
     const parent = await canonicalizePath(entry.parentPath)
     folders.add(parent)

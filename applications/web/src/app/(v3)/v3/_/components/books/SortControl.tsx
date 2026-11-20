@@ -18,12 +18,7 @@ import {
   useCommon,
   useTranslation,
 } from "@/app/(v3)/v3/_/hooks/use-translation"
-import {
-  FIELD_REGISTRY,
-  type Field,
-  type FieldGroupKey,
-  getFieldDef,
-} from "@/fields"
+import { FIELD_REGISTRY, type FieldGroupKey, getFieldDef } from "@/fields"
 import * as icon from "@/icons"
 import { FieldIcon } from "@/icons"
 
@@ -82,9 +77,7 @@ export function SortControl({
     > = {}
     for (const option of options) {
       const fieldDef =
-        option.value in FIELD_REGISTRY
-          ? getFieldDef(option.value as Field)
-          : undefined
+        option.value in FIELD_REGISTRY ? getFieldDef(option.value) : undefined
       const group = fieldDef?.group ?? "context"
       ;(acc[group] ??= []).push({
         ...option,
@@ -100,13 +93,14 @@ export function SortControl({
         <FilterableMenuTrigger
           render={
             <TooltipButton
-              className="items-center rounded-l-lg rounded-r-none border-r-0 pr-1 pl-2 text-xs font-normal"
-              variant="ghost"
+              className="text-muted-foreground hover:text-foreground items-center rounded-l-lg rounded-r-none border-r-0 pr-1 pl-2 text-xs font-normal"
+              variant="outline"
+              size="icon"
               tooltip={label}
               aria-label={label}
               shortcut={[sortHotKey]}
             >
-              <FieldIcon field={field} className="h-3.5 w-3.5 stroke-[1.5]" />
+              <FieldIcon field={field} size="default" />
             </TooltipButton>
           }
         />
@@ -192,17 +186,18 @@ export function SortControl({
         </FilterableMenuContent>
       </FilterableMenu>
       <TooltipButton
-        variant="ghost"
-        className="items-center rounded-l-none rounded-r-lg pr-2 pl-1 text-xs font-normal"
+        variant="outline"
+        size="icon"
+        className="text-muted-foreground hover:text-foreground items-center rounded-l-none rounded-r-lg pr-2 pl-1 text-xs font-normal"
         tooltip={t("toggleSort.tooltip")}
         aria-label={t.plain("toggleSort.tooltip")}
         shortcut={[toggleSortHotKey]}
         onClick={flip}
       >
         {direction === "asc" ? (
-          <icon.ArrowUp size="sm" strokeWidth={1.5} />
+          <icon.ArrowUp size="default" strokeWidth={1.5} />
         ) : (
-          <icon.ArrowDown size="sm" strokeWidth={1.5} />
+          <icon.ArrowDown size="default" strokeWidth={1.5} />
         )}
       </TooltipButton>
     </div>

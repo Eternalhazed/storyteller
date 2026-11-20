@@ -1,13 +1,13 @@
 import assert from "node:assert"
-import { describe, it } from "node:test"
 
-import { Epub, type ParsedXml } from "@storyteller-platform/epub"
+import { describe, it } from "vitest"
+
+import { parse, serialize } from "@storyteller/epub"
 
 import { markupChapter } from "../markup.ts"
 import { getChapterSentences } from "../sentences.ts"
 
-const chapter = /* xml */ `
-<?xml version="1.0" encoding="UTF-8"?>
+const chapter = /* xml */ `<?xml version="1.0" encoding="UTF-8"?>
 
 <html>
   <head>
@@ -26,24 +26,23 @@ const chapter = /* xml */ `
 </html>
 `
 
-void describe("getChapterSentences", () => {
-  void it("numbers sentences the way markupChapter ids them", async () => {
+const parseChapter = () => parse(chapter, "application/xhtml+xml")
+
+describe("getChapterSentences", () => {
+  it("numbers sentences the way markupChapter ids them", async () => {
     const locale = new Intl.Locale("en-US")
 
-    const sentences = await getChapterSentences(
-      Epub.xhtmlParser.parse(chapter) as ParsedXml,
-      locale,
-    )
+    const sentences = await getChapterSentences(parseChapter(), locale)
     const { markedUp } = await markupChapter(
       "ch1",
-      Epub.xhtmlParser.parse(chapter) as ParsedXml,
+      parseChapter(),
       "sentence",
       locale,
     )
 
     const spans = [
-      ...(Epub.xhtmlBuilder.build(markedUp) as string).matchAll(
-        /<span id="ch1-s(\d+)">([^<]*)<\/span>/g,
+      ...serialize(markedUp).matchAll(
+        /<span id="ch1-s(\d+)"[^>]*>([^<]*)<\/span>/g,
       ),
     ]
 
@@ -58,9 +57,9 @@ void describe("getChapterSentences", () => {
     )
   })
 
-  void it("marks the sentence that closes each text block", async () => {
+  it("marks the sentence that closes each text block", async () => {
     const sentences = await getChapterSentences(
-      Epub.xhtmlParser.parse(chapter) as ParsedXml,
+      parseChapter(),
       new Intl.Locale("en-US"),
     )
 

@@ -169,11 +169,6 @@ struct StorytellerReaderApp: App {
 
         startupTask = Task {
             guard await prerequisites.value else { return false }
-            let started = CFAbsoluteTimeGetCurrent()
-            await BookServiceActor.shared.refreshLibraryFromSources()
-            debugLog(
-                "[RestoreTrace][Startup] refreshLibraryFromSources deltaMs=\(String(format: "%.1f", (CFAbsoluteTimeGetCurrent() - started) * 1000))"
-            )
 
             if LastOpenBookStore.hasSavedRoute {
                 debugLog(
@@ -229,6 +224,7 @@ struct StorytellerReaderApp: App {
         debugLog(
             "[StorytellerReaderApp] App entering background - posting resign notification"
         )
+        DebugLogFile.shared.flush()
         NotificationCenter.default.post(name: .appWillResignActive, object: nil)
         Task {
             guard await StorytellerRuntime.start() else { return }
@@ -250,9 +246,8 @@ struct StorytellerReaderApp: App {
                 }
                 return
             }
-            // Give players reacting to appWillResignActive a moment to queue their
-            // final positions before spooling them into background upload tasks
-            try? await Task.sleep(for: .seconds(2))
+            await ActiveReadingSession.shared.current?.handleSceneEnteredBackground()
+            await mediaViewModel.publishWidgetSnapshot()
             await ProgressUploadManager.shared.enqueuePendingUploads()
             await StorytellerAppDelegate.scheduleProgressSyncRefreshIfNeeded()
 
@@ -268,6 +263,7 @@ struct StorytellerReaderApp: App {
         Task {
             guard await StorytellerRuntime.start() else { return }
             await BookServiceActor.shared.setActive(true, source: .app)
+            await ActiveReadingSession.shared.current?.handleSceneBecameActive()
         }
     }
 }
@@ -287,6 +283,10 @@ private struct iOSRootView: View {
                 iOSLibraryView()
             }
         }
+        .libraryRefreshDemand(
+            restoreStartupFinished && PlayerPresenter.shared.card == nil,
+            model: mediaViewModel,
+        )
         .onReceive(NotificationCenter.default.publisher(for: .storytellerCreateReadaloud)) {
             notification in
             guard AppLaunchContext.environment.readaloudAligner != nil else { return }

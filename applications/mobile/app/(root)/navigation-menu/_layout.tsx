@@ -58,6 +58,13 @@ export default function NavigationMenuLayout() {
     }
   }, [pathname])
 
+  const navigateToTab =
+    (name: "toc" | "bookmarks" | "highlights" | "xray") =>
+    (event: { preventDefault: () => void }) => {
+      event.preventDefault()
+      router.navigate({ pathname: `/navigation-menu/${name}`, params })
+    }
+
   return (
     <View
       className="bg-background overflow-hidden"
@@ -111,7 +118,7 @@ export default function NavigationMenuLayout() {
         >
           <Tabs.Screen
             name="toc"
-            initialParams={params}
+            listeners={{ tabPress: navigateToTab("toc") }}
             options={{
               title: "Contents",
               tabBarIcon: ({ color, focused }) => (
@@ -126,7 +133,7 @@ export default function NavigationMenuLayout() {
           />
           <Tabs.Screen
             name="bookmarks"
-            initialParams={params}
+            listeners={{ tabPress: navigateToTab("bookmarks") }}
             options={{
               title: "Bookmarks",
               tabBarIcon: ({ color, focused }) => (
@@ -141,7 +148,7 @@ export default function NavigationMenuLayout() {
           />
           <Tabs.Screen
             name="highlights"
-            initialParams={params}
+            listeners={{ tabPress: navigateToTab("highlights") }}
             options={{
               title: "Highlights",
               tabBarIcon: ({ color, focused }) => (
@@ -156,7 +163,7 @@ export default function NavigationMenuLayout() {
           />
           <Tabs.Screen
             name="xray"
-            initialParams={params}
+            listeners={{ tabPress: navigateToTab("xray") }}
             options={{
               title: "X-Ray",
               ...(hasXray ? {} : { href: null }),

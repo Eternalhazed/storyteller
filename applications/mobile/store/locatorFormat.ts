@@ -90,3 +90,42 @@ export function firstClipInResource(
     ) ?? null
   )
 }
+
+/**
+ * Where narration should start for a resource that has none of its own, such
+ * as a title page, a map or an afterword: the first narrated sentence after
+ * it in reading order, or failing that the last one before it. Without this,
+ * pressing play there would start the book over and overwrite the reader's
+ * place.
+ */
+export function nearestClipToResource(
+  clips: ReadiumClip[] | null | undefined,
+  positions: ReadiumLocator[] | null | undefined,
+  href: string,
+): ReadiumClip | null {
+  const resource = normalizeResourceHref(href)
+  if (!resource || !clips?.length || !positions?.length) return null
+
+  const order = new Map<string, number>()
+  for (const position of positions) {
+    const positionResource = normalizeResourceHref(position.href)
+    if (!order.has(positionResource)) order.set(positionResource, order.size)
+  }
+  const target = order.get(resource)
+  if (target === undefined) return null
+
+  // Clips run in reading order within a resource; across resources, rank
+  // them by the resource's place in the book.
+  let after: { clip: ReadiumClip; index: number } | null = null
+  let before: { clip: ReadiumClip; index: number } | null = null
+  for (const clip of clips) {
+    const index = order.get(normalizeResourceHref(clip.textResource))
+    if (index === undefined) continue
+    if (index > target && (!after || index < after.index)) {
+      after = { clip, index }
+    } else if (index < target && (!before || index >= before.index)) {
+      before = { clip, index }
+    }
+  }
+  return after?.clip ?? before?.clip ?? null
+}

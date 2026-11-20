@@ -5,7 +5,7 @@ import {
   Price,
   type Subject,
 } from "@readium/shared"
-import { XMLBuilder } from "fast-xml-parser"
+import XMLBuilder from "fast-xml-builder"
 
 import { type Facet } from "../model/Facet.ts"
 import { type Feed } from "../model/Feed.ts"
@@ -32,8 +32,10 @@ type XmlNode = Record<string, unknown>
 const plainText = (value: unknown): string | undefined =>
   typeof value === "string" ? value : undefined
 
+/* oxlint-disable typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type */
 const otherProps = (link: Link): Record<string, unknown> =>
   (link.properties?.otherProperties ?? {}) as Record<string, unknown>
+/* oxlint-enable typescript/no-unnecessary-type-assertion */
 
 const acquisitionXml = (acquisition: Acquisition): XmlNode => {
   const node: XmlNode = { "@_type": acquisition.type }
@@ -119,20 +121,35 @@ const publicationEntryXml = (publication: OPDSPublication): XmlNode => {
   if (links.length > 0) entry["link"] = links
   return entry
 }
+
+const withCount = (node: XmlNode, link: Link): XmlNode => {
+  const count = otherProps(link)["numberOfItems"]
+  if (typeof count === "number") {
+    node["@_thr:count"] = count
+  }
+
+  return node
+}
+
 const navigationEntryXml = (link: Link): XmlNode => ({
   id: link.href,
   title: link.title ?? "",
-  link: linkXml(link),
+  link: withCount(linkXml(link), link),
 })
 
 const facetLinksXml = (facet: Facet): XmlNode[] => {
   const group = plainText(facet.metadata?.title)
   return facet.links.items.map((link) => {
-    const node = linkXml(link)
+    const node = withCount(linkXml(link), link)
     node["@_rel"] = REL.facet
-    if (group) node["@_opds:facetGroup"] = group
-    const count = otherProps(link)["numberOfItems"]
-    if (typeof count === "number") node["@_thr:count"] = count
+    if (group) {
+      node["@_opds:facetGroup"] = group
+    }
+
+    if (link.rels?.has("self")) {
+      node["@_opds:activeFacet"] = "true"
+    }
+
     return node
   })
 }
@@ -205,7 +222,8 @@ export const toAtomXml = (
     attributeNamePrefix: "@_",
     format: options.pretty ?? true,
     suppressEmptyNode: true,
+    suppressBooleanAttributes: false,
   })
-  const body = builder.build({ feed: root }) as string
+  const body = builder.build({ feed: root })
   return `<?xml version="1.0" encoding="UTF-8"?>\n${body}`
 }

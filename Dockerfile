@@ -3,12 +3,13 @@ ARG BASE_TAG=main
 # WHISPER_VARIANT is the whisper.cpp build to pre-install (e.g., linux-x64-cuda-12.9.0)
 # declared at top level so it's available in all stages
 ARG WHISPER_VARIANT=""
+# TARGETARCH is declared globally so it can be used in a FROM line
+ARG TARGETARCH
 FROM registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:${BASE_TAG} AS builder
 
 WORKDIR /app
 
 COPY package.json yarn.lock .yarnrc.yml ./
-COPY .yarn/cache ./.yarn/cache
 COPY .yarn/patches ./.yarn/patches
 
 COPY applications/web/package.json ./applications/web/package.json
@@ -16,21 +17,51 @@ COPY libraries/align/package.json ./libraries/align/package.json
 COPY libraries/align/binding.gyp ./libraries/align/binding.gyp
 COPY libraries/align/prebuilds/linux-x64 ./libraries/align/prebuilds/linux-x64
 COPY libraries/align/prebuilds/linux-arm64 ./libraries/align/prebuilds/linux-arm64
+COPY libraries/crengine-xpointer/package.json ./libraries/crengine-xpointer/package.json
+COPY libraries/epubcfi/package.json ./libraries/epubcfi/package.json
 COPY libraries/fs/package.json ./libraries/fs/package.json
 COPY libraries/mapping/package.json ./libraries/mapping/package.json
 COPY libraries/epub/package.json ./libraries/epub/package.json
 COPY libraries/path/package.json ./libraries/path/package.json
-COPY libraries/audiobook/package.json ./libraries/audiobook/package.json
+COPY libraries/audiobooks/package.json ./libraries/audiobooks/package.json
 COPY libraries/ghost-story/package.json ./libraries/ghost-story/package.json
 COPY libraries/opds/package.json ./libraries/opds/package.json
 COPY libraries/nodekit/package.json ./libraries/nodekit/package.json
+COPY libraries/media-types/package.json ./libraries/media-types/package.json
+COPY libraries/mlx-audio/package.json ./libraries/mlx-audio/package.json
+COPY libraries/uri-fragment/package.json ./libraries/uri-fragment/package.json
 COPY libraries/xray/package.json ./libraries/xray/package.json
-COPY config/tsup/package.json ./config/tsup/package.json
-COPY config/eslint/package.json ./config/eslint/package.json
 
+# prevent onnxruntime from installing shit, almost always hangs
+ENV ONNXRUNTIME_NODE_INSTALL=skip
 # --inline-builds streams native build-script output so a hang during the
 # link step names the offending package instead of freezing silently
 RUN yarn install --inline-builds
+
+# manualy reproducing that stupid onnxruntime install step
+# CUDA 12 comes from NuGet, where onnxruntime-node's own installer gets it;
+# the GitHub release assets are no longer served.
+ARG BASE_TAG
+RUN case "$BASE_TAG" in \
+      cuda-12*) ORT_CUDA=cuda12 ;; \
+      cuda-13*) ORT_CUDA=cuda13 ;; \
+      *) ORT_CUDA= ;; \
+    esac && \
+    ORT_VERSION=$(node -p "require('./node_modules/onnxruntime-node/package.json').version") && \
+    ORT_TARGET=node_modules/onnxruntime-node/bin/napi-v6/linux/x64 && \
+    if [ "$ORT_CUDA" = cuda12 ]; then \
+      curl -fL --retry 5 --retry-all-errors --retry-delay 15 --connect-timeout 30 --speed-limit 10000 --speed-time 60 \
+        -o /tmp/ort.nupkg "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.gpu.linux/$ORT_VERSION/microsoft.ml.onnxruntime.gpu.linux.$ORT_VERSION.nupkg" && \
+      python3 -c "import sys, zipfile; z = zipfile.ZipFile('/tmp/ort.nupkg'); [open(sys.argv[1] + '/' + name, 'wb').write(z.read('runtimes/linux-x64/native/' + name)) for name in ('libonnxruntime_providers_cuda.so', 'libonnxruntime_providers_shared.so')]" "$ORT_TARGET" && \
+      rm /tmp/ort.nupkg; \
+    elif [ -n "$ORT_CUDA" ]; then \
+      ORT_DIST="onnxruntime-linux-x64-gpu_$ORT_CUDA-$ORT_VERSION" && \
+      curl -fL --retry 5 --retry-all-errors --retry-delay 15 --connect-timeout 30 --speed-limit 10000 --speed-time 60 \
+        -o /tmp/ort.tgz "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/$ORT_DIST.tgz" && \
+      tar -xzf /tmp/ort.tgz --strip-components=2 -C "$ORT_TARGET" \
+        "$ORT_DIST/lib/libonnxruntime_providers_cuda.so" "$ORT_DIST/lib/libonnxruntime_providers_shared.so" && \
+      rm /tmp/ort.tgz; \
+    fi
 
 COPY docker-scripts/ ./scripts/
 
@@ -38,16 +69,12 @@ COPY . .
 
 RUN cp docker-scripts/* ./scripts/
 
-RUN gcc -g -fPIC -rdynamic -shared applications/web/sqlite/uuid.c -o applications/web/sqlite/uuid.c.so
-
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ARG CI_COMMIT_TAG
 ENV CI_COMMIT_TAG=${CI_COMMIT_TAG}
 
-ENV SQLITE_NATIVE_BINDING=/app/node_modules/better-sqlite3/build/Release/better_sqlite3.node
-
-RUN yarn workspaces foreach -Rpt --from @storyteller-platform/web --exclude @storyteller-platform/eslint run build
+RUN yarn workspaces foreach -Rpt --from @storyteller/web run build
 
 # Pre-install whisper.cpp binary and default model in builder stage
 ARG TARGETARCH
@@ -69,28 +96,47 @@ RUN if [ -z "$WHISPER_VARIANT" ]; then \
         install binary linux-x64-cpu-legacy; \
     fi
 
+# The whisper variant defaults per architecture, and ENV cannot branch, so the
+# runner picks an arch-specific base that carries the right default.
 ARG BASE_TAG=main
-FROM registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:${BASE_TAG} AS runner
+FROM registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:${BASE_TAG} AS runner-base-amd64
+ARG WHISPER_VARIANT
+ENV STORYTELLER_WHISPER_VARIANT=${WHISPER_VARIANT:-linux-x64-cpu}
+
+ARG BASE_TAG=main
+FROM registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:${BASE_TAG} AS runner-base-arm64
+ARG WHISPER_VARIANT
+ENV STORYTELLER_WHISPER_VARIANT=${WHISPER_VARIANT:-linux-arm64-cpu}
+
+FROM runner-base-${TARGETARCH} AS runner
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg gosu libcurl4 libxml2 \
-    && rm -rf /var/lib/apt/lists/*
+# libvulkan1 and the mesa ICDs back onnxruntime's WebGPU provider on AMD and
+# Intel GPUs, NVIDIA mounts its own ICD through the container toolkit
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg gosu libcurl4 libxml2 libvulkan1 mesa-vulkan-drivers apache2-utils libjemalloc2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s "/usr/lib/$(uname -m)-linux-gnu/libjemalloc.so.2" /usr/local/lib/libjemalloc.so.2
+
+# i believe in jemalloc supremacy
+ENV LD_PRELOAD=/usr/local/lib/libjemalloc.so.2
+ENV MALLOC_CONF=background_thread:true
 
 RUN  (userdel -r ubuntu || true) \
     && groupadd -g 1000 storyteller \
     && useradd -u 1000 -g storyteller -m storyteller \
     && (usermod -aG render,video storyteller 2>/dev/null || true)
 
-COPY --from=ghcr.io/readium/readium:0.6.5 /opt/readium /opt/readium
+# note: versions lower than 26.12.1 are UNSAFE
+COPY --from=platformatic/node-caged:26.12.1-slim /usr/local/bin/node /usr/bin/node
+
+COPY --from=ghcr.io/readium/readium:0.9.1 /opt/readium /opt/readium
 RUN ln -sf /opt/readium /usr/local/bin/readium
 
 
 COPY --from=builder /app/applications/web/.next/standalone ./.next/standalone
 COPY --from=builder /app/applications/web/public ./.next/standalone/applications/web/public
 COPY --from=builder /app/applications/web/.next/static ./.next/standalone/applications/web/.next/static
-COPY --from=builder /app/applications/web/sqlite/uuid.c.so ./.next/standalone/applications/web/sqlite/uuid.c.so
-
 RUN mkdir -p ./.next/standalone/applications/web/.next/cache \
     && chown storyteller:storyteller ./.next/standalone/applications/web/.next/cache
 
@@ -105,21 +151,11 @@ COPY --from=builder /app/scripts/ ./.next/standalone/applications/web/scripts/
 COPY --from=builder /app/applications/web/work-dist ./.next/standalone/applications/web/work-dist
 COPY --from=builder /app/applications/web/file-write-dist ./.next/standalone/applications/web/file-write-dist
 
-COPY --from=builder /app/libraries/align/prebuilds/linux-x64 ./.next/standalone/applications/web/work-dist/@storyteller-platform/align/prebuilds/linux-x64
-COPY --from=builder /app/libraries/align/prebuilds/linux-arm64 ./.next/standalone/applications/web/work-dist/@storyteller-platform/align/prebuilds/linux-arm64
+COPY --from=builder /app/libraries/align/prebuilds/linux-x64 ./.next/standalone/applications/web/work-dist/@storyteller/align/prebuilds/linux-x64
+COPY --from=builder /app/libraries/align/prebuilds/linux-arm64 ./.next/standalone/applications/web/work-dist/@storyteller/align/prebuilds/linux-arm64
 
 # Echogarden tries to naively resolve its own wasm builds
 COPY --from=builder /app/node_modules/@echogarden/icu-segmentation-wasm/wasm/*.wasm ./.next/standalone/applications/web/work-dist/
-
-# @parcel/watcher native binaries are loaded dynamically at runtime and
-# not traced by next.js into the standalone output
-COPY --from=builder /app/node_modules/@parcel ./.next/standalone/node_modules/@parcel
-
-# kuromoji package: the bundled kuroshiro-analyzer-kuromoji still calls
-# require.resolve("kuromoji") at runtime to locate its dict/ directory, so the
-# package must exist on disk in a location reachable from web/work-dist/.
-COPY --from=builder /app/node_modules/kuromoji ./.next/standalone/node_modules/kuromoji
-
 
 # Copy pre-installed whisper binaries and models from builder
 COPY --from=builder --chown=storyteller:storyteller /root/.local/share/ghost-story /home/storyteller/.local/share/ghost-story
@@ -135,23 +171,18 @@ ENV HOSTNAME=0.0.0.0
 ENV STORYTELLER_DATA_DIR=/data
 ENV READIUM_PORT=9000
 ENV NVIDIA_VISIBLE_DEVICES=all
-ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
 
-ENV ERROR_ALIGN_NATIVE_BINDING=/app/.next/standalone/applications/web/work-dist/@storyteller-platform/align/
-ENV SQLITE_NATIVE_BINDING=/app/.next/standalone/node_modules/better-sqlite3/build/Release/better_sqlite3.node
+ENV ERROR_ALIGN_NATIVE_BINDING=/app/.next/standalone/applications/web/work-dist/@storyteller/align/
 ENV STORYTELLER_WORKER=worker.mjs
 ENV STORYTELLER_FILE_WRITE_WORKER=fileWriteWorker.mjs
-
-# set the whisper variant that was pre-installed in this image
-# this tells the runtime which binary to use without needing detection
-ARG WHISPER_VARIANT
-ENV STORYTELLER_WHISPER_VARIANT=${WHISPER_VARIANT}
 
 WORKDIR /app/.next/standalone/applications/web
 
 COPY --from=builder /app/scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY --from=builder /app/scripts/run-server.sh /usr/local/bin/run-server.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/run-server.sh
 
 ENTRYPOINT ["entrypoint.sh"]
 
-CMD ["node", "--enable-source-maps", "server.js"]
+CMD ["run-server.sh"]

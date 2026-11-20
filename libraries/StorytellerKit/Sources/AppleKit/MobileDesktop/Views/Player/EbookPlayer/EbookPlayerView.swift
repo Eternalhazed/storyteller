@@ -97,9 +97,9 @@ public struct EbookPlayerView: View {
         #if os(iOS)
         .fullScreenCover(isPresented: $viewModel.showCustomizePopover) {
             EbookPlayerSettings(settingsVM: viewModel.settingsVM)
-                .readerPaletteSurface(coverPalette)
+            .readerPaletteSurface(coverPalette)
         }
-        .statusBarHidden(!viewModel.isMenuBarVisible)
+        .statusBarHidden(!isPad && !viewModel.isMenuBarVisible)
         .persistentSystemOverlays(viewModel.isMenuBarVisible ? .automatic : .hidden)
         .navigationBarHidden(true)
         .toolbar(.hidden, for: .tabBar)
@@ -126,11 +126,11 @@ public struct EbookPlayerView: View {
         #else
         .ignoresSafeArea(.container, edges: .top)
         .onKeyPress(.leftArrow) {
-            viewModel.progressManager?.handleUserNavLeft()
+            viewModel.session?.turnPageLeft()
             return .handled
         }
         .onKeyPress(.rightArrow) {
-            viewModel.progressManager?.handleUserNavRight()
+            viewModel.session?.turnPageRight()
             return .handled
         }
         .onKeyPress(.upArrow) {
@@ -142,13 +142,13 @@ public struct EbookPlayerView: View {
             return .handled
         }
         .onKeyPress(.space) {
-            Task { await viewModel.progressManager?.togglePlaying() }
+            Task { try? await viewModel.session?.togglePlayback() }
             return .handled
         }
         .toolbar {
             EbookPlayerToolbar(
                 viewModel: viewModel,
-                display: playerDisplayModel,
+                display: { playerDisplayModel },
                 actions: macToolbarActions,
                 customizeCard: $customizeCard,
             )
@@ -163,12 +163,12 @@ public struct EbookPlayerView: View {
         }
         .sheet(isPresented: $viewModel.showCustomizePopover) {
             EbookPlayerSettings(settingsVM: viewModel.settingsVM)
-                .readerPaletteModalSurface(coverPalette)
+            .readerPaletteModalSurface(coverPalette)
         }
         .sheet(isPresented: $viewModel.showSleepTimerSheet) {
             SleepTimerSheet(
-                sleepTimerActive: viewModel.mediaOverlayManager?.sleepTimerActive ?? false,
-                sleepTimerType: viewModel.mediaOverlayManager?.sleepTimerType,
+                sleepTimerActive: viewModel.session?.sleepTimerActive ?? false,
+                sleepTimerType: viewModel.session?.sleepTimerType,
                 onStart: viewModel.handleSleepTimerStart,
                 onDone: { viewModel.showSleepTimerSheet = false },
             )
@@ -185,9 +185,9 @@ public struct EbookPlayerView: View {
                         },
                     )
                     .readerPaletteModalSurface(coverPalette)
-                    #if os(iOS)
+                        #if os(iOS)
                     .readerPaletteNavigationBar(coverPalette, colorScheme: colorScheme)
-                    #endif
+                        #endif
                     .navigationTitle("Search")
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
@@ -204,7 +204,7 @@ public struct EbookPlayerView: View {
             VStack(spacing: 16) {
                 EbookKeybindingsHelp()
                 Button("Done") { viewModel.showKeybindingsPopover = false }
-                    .keyboardShortcut(.defaultAction)
+                .keyboardShortcut(.defaultAction)
             }
             .padding()
             .frame(width: 300)
@@ -319,7 +319,7 @@ public struct EbookPlayerView: View {
         #else
         .sheet(isPresented: $viewModel.showReadingTimeline) {
             readingTimelineSheet
-                .frame(minWidth: 520, minHeight: 680)
+            .frame(minWidth: 520, minHeight: 680)
         }
         #endif
         #if os(iOS)
@@ -530,7 +530,9 @@ public struct EbookPlayerView: View {
 
     private var audioSidebarCard: some View {
         let cardWidth = audioSidebarTotalWidth - audioSidebarGutter * 2
-        return audiobookSidebar(palette: coverPalette, containerWidth: cardWidth)
+        return ReaderPlaybackContent {
+            audiobookSidebar(palette: coverPalette, containerWidth: cardWidth)
+        }
             .frame(width: cardWidth)
             .playerCardChrome(coverPalette)
             .overlay(alignment: .leading) {
@@ -642,7 +644,9 @@ public struct EbookPlayerView: View {
                 Rectangle()
                     .fill(separatorColor)
                     .frame(width: 1)
-                audiobookSidebar(foregroundColor: readerForegroundColor, containerWidth: 360)
+                ReaderPlaybackContent {
+                    audiobookSidebar(foregroundColor: readerForegroundColor, containerWidth: 360)
+                }
                     .frame(width: 360)
                     .padding(.horizontal, 14)
                     .transition(.move(edge: .trailing))
@@ -659,7 +663,9 @@ public struct EbookPlayerView: View {
 
     private var readerBackgroundColor: Color {
         if let bgColor = resolvedThemeHex(
-            viewModel.settingsVM.backgroundColor, role: .background),
+            viewModel.settingsVM.backgroundColor,
+            role: .background,
+        ),
             let color = Color(hex: bgColor)
         {
             return color
@@ -681,7 +687,9 @@ public struct EbookPlayerView: View {
     // follow the system appearance, and the two can disagree.
     private var readerForegroundColor: Color {
         if let fgColor = resolvedThemeHex(
-            viewModel.settingsVM.foregroundColor, role: .foreground), !fgColor.isEmpty,
+            viewModel.settingsVM.foregroundColor,
+            role: .foreground,
+        ), !fgColor.isEmpty,
             let color = Color(hex: fgColor)
         {
             return color
@@ -728,16 +736,17 @@ public struct EbookPlayerView: View {
                 if viewModel.isComicBook {
                     ComicPlayerView(
                         pageURLs: viewModel.comicPageURLs,
-                        selectedPageIndex: viewModel.progressManager?.selectedChapterId ?? 0,
+                        selectedPageIndex: viewModel.session?.readerLocation?.sectionIndex ?? 0,
+                        isScrollingMode: viewModel.settingsVM.scrollingMode,
                         backgroundColor: readerBackgroundColor,
                         isBottomScrubberVisible: isComicScrubberVisible,
                         isTopChromeVisible: isReaderTopChromeVisible,
                         onPageSelected: viewModel.handleComicPageSelected,
                         onNavigateLeft: {
-                            viewModel.progressManager?.handleNativeNavLeft()
+                            viewModel.session?.turnPageLeft()
                         },
                         onNavigateRight: {
-                            viewModel.progressManager?.handleNativeNavRight()
+                            viewModel.session?.turnPageRight()
                         },
                         onToggleOverlay: {
                             viewModel.handleToggleOverlay()
@@ -794,59 +803,63 @@ public struct EbookPlayerView: View {
                 && hasEnabledDockItems
 
             if shouldShowDock {
-                EbookDockIos(
-                    leadingSlots: viewModel.settingsVM.dockLeadingSlots,
-                    trailingSlots: viewModel.settingsVM.dockTrailingSlots,
-                    centerSlots: viewModel.settingsVM.dockCenterSlots,
-                    dockTransparency: viewModel.settingsVM.dockTransparency,
-                    display: playerDisplayModel,
-                    backgroundColor: readerBackgroundColor,
-                    positionAtTop: alwaysShowMini,
-                    actions: dockActions,
-                    mirrored: viewModel.settingsVM.miniPlayerMirrored,
-                )
+                ReaderPlaybackContent {
+                    EbookDockIos(
+                        leadingSlots: viewModel.settingsVM.dockLeadingSlots,
+                        trailingSlots: viewModel.settingsVM.dockTrailingSlots,
+                        centerSlots: viewModel.settingsVM.dockCenterSlots,
+                        dockTransparency: viewModel.settingsVM.dockTransparency,
+                        display: playerDisplayModel,
+                        backgroundColor: readerBackgroundColor,
+                        positionAtTop: alwaysShowMini,
+                        actions: dockActions,
+                        mirrored: viewModel.settingsVM.miniPlayerMirrored,
+                    )
+                }
                 .transition(.opacity)
             }
 
             if viewModel.isMenuBarVisible {
-                EbookPlayerMenuBar(
-                    display: playerDisplayModel,
-                    actions: dockActions,
-                    sleepTimerActive: viewModel.mediaOverlayManager?.sleepTimerActive ?? false,
-                    sleepTimerType: viewModel.mediaOverlayManager?.sleepTimerType,
-                    showCustomizePopover: $viewModel.showCustomizePopover,
-                    showSearchSheet: $viewModel.showSearchPanel,
-                    showBookmarksPanel: $viewModel.showBookmarksPanel,
-                    showAudioSidebar: $viewModel.showAudioSidebar,
-                    showSleepTimerSheet: $viewModel.showSleepTimerSheet,
-                    searchManager: viewModel.searchManager,
-                    onDismiss: {
-                        if let onClose {
-                            onClose()
-                        } else {
-                            dismiss()
-                        }
-                    },
-                    onSearchResultSelected: viewModel.handleSearchResultNavigation,
-                    onSleepTimerStart: viewModel.handleSleepTimerStart,
-                    onSleepTimerCancel: viewModel.handleSleepTimerCancel,
-                    settingsVM: viewModel.settingsVM,
-                    customizeCard: $customizeCard,
-                    coverPalette: coverPalette,
-                )
+                ReaderPlaybackContent {
+                    EbookPlayerMenuBar(
+                        display: playerDisplayModel,
+                        actions: dockActions,
+                        sleepTimerActive: viewModel.session?.sleepTimerActive ?? false,
+                        sleepTimerType: viewModel.session?.sleepTimerType,
+                        showCustomizePopover: $viewModel.showCustomizePopover,
+                        showSearchSheet: $viewModel.showSearchPanel,
+                        showBookmarksPanel: $viewModel.showBookmarksPanel,
+                        showAudioSidebar: $viewModel.showAudioSidebar,
+                        showSleepTimerSheet: $viewModel.showSleepTimerSheet,
+                        searchManager: viewModel.searchManager,
+                        onDismiss: {
+                            if let onClose {
+                                onClose()
+                            } else {
+                                dismiss()
+                            }
+                        },
+                        onSearchResultSelected: viewModel.handleSearchResultNavigation,
+                        onSleepTimerStart: viewModel.handleSleepTimerStart,
+                        onSleepTimerCancel: viewModel.handleSleepTimerCancel,
+                        settingsVM: viewModel.settingsVM,
+                        customizeCard: $customizeCard,
+                        coverPalette: coverPalette,
+                    )
+                }
                 .transition(.opacity)
             }
 
             if !(isPad && viewModel.showAudioSidebar) {
-                draggableAudioCard
+                ReaderPlaybackContent { draggableAudioCard }
             }
 
             if progressIndicatorEnabled {
-                playbackProgressBar
+                ReaderPlaybackContent { playbackProgressBar }
             }
 
             if viewModel.hasAudioNarration,
-                viewModel.mediaOverlayManager?.playheadDiverged == true
+                viewModel.session?.isBrowsing == true
             {
                 returnToPlayheadButton
                     .transition(.opacity)
@@ -858,21 +871,23 @@ public struct EbookPlayerView: View {
             }
             #else
             if !viewModel.showAudioSidebar && hasEnabledDockItems {
-                EbookDockIos(
-                    leadingSlots: viewModel.settingsVM.dockLeadingSlots,
-                    trailingSlots: viewModel.settingsVM.dockTrailingSlots,
-                    centerSlots: viewModel.settingsVM.dockCenterSlots,
-                    dockTransparency: viewModel.settingsVM.dockTransparency,
-                    display: playerDisplayModel,
-                    backgroundColor: readerBackgroundColor,
-                    positionAtTop: false,
-                    actions: dockActions,
-                )
+                ReaderPlaybackContent {
+                    EbookDockIos(
+                        leadingSlots: viewModel.settingsVM.dockLeadingSlots,
+                        trailingSlots: viewModel.settingsVM.dockTrailingSlots,
+                        centerSlots: viewModel.settingsVM.dockCenterSlots,
+                        dockTransparency: viewModel.settingsVM.dockTransparency,
+                        display: playerDisplayModel,
+                        backgroundColor: readerBackgroundColor,
+                        positionAtTop: false,
+                        actions: dockActions,
+                    )
+                }
                 .transition(.opacity)
             }
 
             if progressIndicatorEnabled {
-                playbackProgressBar
+                ReaderPlaybackContent { playbackProgressBar }
             }
 
             if viewModel.timelineBackLocator != nil || viewModel.timelineForwardLocator != nil {
@@ -952,7 +967,7 @@ public struct EbookPlayerView: View {
         HStack {
             Spacer()
             Button {
-                Task { await viewModel.mediaOverlayManager?.returnToPlayhead() }
+                Task { await viewModel.session?.returnToPlayhead() }
             } label: {
                 Label("Playhead", systemImage: "arrow.uturn.backward")
                     .font(.footnote.weight(.medium))
@@ -966,7 +981,6 @@ public struct EbookPlayerView: View {
         .padding(.bottom, webViewBottomInset + 70)
     }
 
-
     #endif
 
     @ViewBuilder
@@ -975,7 +989,7 @@ public struct EbookPlayerView: View {
             ReadingTimelineSheet(
                 bookId: bookID,
                 bookTitle: viewModel.bookData?.metadata.title ?? "",
-                currentFraction: viewModel.progressManager?.bookFraction,
+                currentFraction: viewModel.session?.readerLocation?.fraction,
                 currentDescription: viewModel.currentPositionDescription(),
                 onJump: { locator, description in
                     Task {
@@ -1026,7 +1040,7 @@ public struct EbookPlayerView: View {
     #endif
 
     private var isAudioPlaying: Bool {
-        viewModel.mediaOverlayManager?.isPlaying ?? false
+        viewModel.session?.isAudioPlaying ?? false
     }
 
     private var hasEnabledDockItems: Bool {
@@ -1044,9 +1058,8 @@ public struct EbookPlayerView: View {
     }
 
     private var playerDisplayModel: MiniPlayerDisplayModel {
-        let pm = viewModel.progressManager
-        let mom = viewModel.mediaOverlayManager
-        let currentChapterTitle = pm?.selectedChapterId.flatMap { index in
+        let reading = viewModel.session
+        let currentChapterTitle = reading?.readerLocation?.sectionIndex.flatMap { index in
             viewModel.bookStructure[safe: index]?.label
         }
         return MiniPlayerDisplayModel(
@@ -1054,24 +1067,27 @@ public struct EbookPlayerView: View {
             chapterTitle: currentChapterTitle,
             authorName: viewModel.bookData?.metadata.authors?.first?.name,
             cover: viewModel.bookData?.coverArt,
-            isPlaying: mom?.isPlaying ?? false,
-            playbackRate: mom?.playbackRate ?? viewModel.settingsVM.defaultPlaybackSpeed,
+            isPlaying: reading?.audioState?.isPlaying ?? false,
+            playbackRate: reading?.audioState?.playbackRate
+                ?? viewModel.settingsVM.defaultPlaybackSpeed,
             chapterProgress: viewModel.chapterProgressBinding.wrappedValue,
-            chapterElapsedSeconds: mom?.chapterElapsedSeconds,
-            chapterTotalSeconds: mom?.chapterTotalSeconds,
-            bookTimeRemaining: mom?.bookTimeRemaining,
-            bookFraction: pm?.bookFraction,
-            currentPage: pm?.chapterCurrentPage,
-            totalPages: pm?.chapterTotalPages,
-            chapterIndex: pm?.selectedChapterId,
+            chapterElapsedSeconds: reading?.audioState?.chapterElapsed,
+            chapterTotalSeconds: reading?.audioState?.chapterTotal,
+            bookTimeRemaining: reading?.bookTimeRemaining,
+            bookFraction: reading?.readerLocation?.fraction,
+            currentPage: reading?.readerLocation?.pageIndex,
+            totalPages: reading?.readerLocation?.totalPages,
+            chapterIndex: reading?.readerLocation?.sectionIndex,
             chapterCount: viewModel.bookStructure.count,
-            sleepTimerRemaining: (mom?.sleepTimerActive ?? false) ? mom?.sleepTimerRemaining : nil,
-            sleepTimerEndOfChapter: (mom?.sleepTimerActive ?? false)
-                && mom?.sleepTimerType == .endOfChapter,
+            sleepTimerRemaining: (reading?.sleepTimerActive ?? false)
+                ? reading?.sleepTimerRemaining : nil,
+            sleepTimerEndOfChapter: (reading?.sleepTimerActive ?? false)
+                && reading?.sleepTimerType == .endOfChapter,
             sessionStart: sessionStart,
             chapters: viewModel.chapterList,
             selectedChapterHref: viewModel.selectedChapterHref,
             hasAudioNarration: viewModel.hasAudioNarration,
+            isComicBook: viewModel.isComicBook,
             isScrollingMode: viewModel.settingsVM.scrollingMode,
             freeBrowseMode: viewModel.settingsVM.freeBrowseMode,
         )
@@ -1080,7 +1096,7 @@ public struct EbookPlayerView: View {
     private var dockActions: MiniPlayerActions {
         MiniPlayerActions(
             onPlayPause: {
-                Task { await viewModel.progressManager?.togglePlaying() }
+                Task { try? await viewModel.session?.togglePlayback() }
             },
             onSkipBackward: {
                 viewModel.handlePrevSentence()
@@ -1147,21 +1163,22 @@ public struct EbookPlayerView: View {
     // webview bottoms out at the safe area, so deduct the safe-area inset.
     private var webViewBottomInset: CGFloat {
         if viewModel.settingsVM.alwaysShowMiniPlayer {
-            let audio = viewModel.hasAudioNarration
+            let supportsLayout = viewModel.hasAudioNarration || viewModel.isComicBook
             let showStats =
-                audio && viewModel.settingsVM.miniPlayerStatSlots.hasActiveComplication
+                supportsLayout && viewModel.settingsVM.miniPlayerStatSlots.hasActiveComplication
             let band = MiniPlayerMetrics.bottomBandHeight(
                 showStats: showStats,
                 safeAreaBottom: safeAreaInsets.bottom,
             )
             return MiniPlayerMetrics.compactHeight(
-                size: audio ? viewModel.settingsVM.miniPlayerSize : .compact,
+                size: supportsLayout ? viewModel.settingsVM.miniPlayerSize : .compact,
                 showStats: showStats,
             ) + max(0, band - safeAreaInsets.bottom)
         }
         guard dockBandReserved else { return 0 }
         let band = EbookDockIos.reservedBottomInset(
-            withPlaybackControls: hasEnabledDockControls)
+            withPlaybackControls: hasEnabledDockControls
+        )
         return max(0, band - safeAreaInsets.bottom)
     }
 
@@ -1245,7 +1262,7 @@ public struct EbookPlayerView: View {
             : viewModel.settingsVM.progressIndicatorScopeDock
         let progress =
             scope == .book
-            ? (viewModel.progressManager?.bookFraction ?? 0)
+            ? (viewModel.session?.readerLocation?.fraction ?? 0)
             : viewModel.chapterProgressBinding.wrappedValue
         let thickness =
             onMiniPlayer
@@ -1278,7 +1295,7 @@ public struct EbookPlayerView: View {
     private var macToolbarActions: MiniPlayerActions {
         var overridden = dockActions
         overridden.onOpenSleepTimer = {
-            if viewModel.mediaOverlayManager?.sleepTimerActive == true {
+            if viewModel.session?.sleepTimerActive == true {
                 viewModel.handleSleepTimerCancel()
             } else {
                 viewModel.showSleepTimerSheet = true
@@ -1295,7 +1312,7 @@ public struct EbookPlayerView: View {
         let scope = viewModel.settingsVM.progressIndicatorScopeDock
         let progress =
             scope == .book
-            ? (viewModel.progressManager?.bookFraction ?? 0)
+            ? (viewModel.session?.readerLocation?.fraction ?? 0)
             : viewModel.chapterProgressBinding.wrappedValue
         return ProgressIndicatorLine(
             progress: progress,
@@ -1330,9 +1347,8 @@ public struct EbookPlayerView: View {
         palette: CoverDerivedPalette? = nil,
         containerWidth: CGFloat? = nil,
     ) -> some View {
-        let pm = viewModel.progressManager
-        let mom = viewModel.mediaOverlayManager
-        let currentChapterTitle = pm?.selectedChapterId.flatMap { index in
+        let reading = viewModel.session
+        let currentChapterTitle = reading?.readerLocation?.sectionIndex.flatMap { index in
             viewModel.bookStructure[safe: index]?.label
         }
 
@@ -1340,20 +1356,20 @@ public struct EbookPlayerView: View {
         let bookAuthor = viewModel.bookData?.metadata.authors?.first?.name ?? "Unknown Author"
         let defaultChapterDuration: TimeInterval = TimeInterval((12 * 60) + 27)
         let defaultBookDuration: TimeInterval = TimeInterval((8 * 60 * 60) + (9 * 60))
-        let chapterDuration = mom?.chapterTimeRemaining ?? defaultChapterDuration
-        let totalRemaining = mom?.bookTimeRemaining ?? defaultBookDuration
+        let chapterDuration = reading?.chapterTimeRemaining ?? defaultChapterDuration
+        let totalRemaining = reading?.bookTimeRemaining ?? defaultBookDuration
 
         let readingMode: ReadingMode = viewModel.bookData?.category == .ebook ? .ebook : .readaloud
 
         let progressData = ProgressData(
             chapterLabel: currentChapterTitle,
-            chapterCurrentPage: pm?.chapterCurrentPage,
-            chapterTotalPages: pm?.chapterTotalPages,
-            chapterCurrentSecondsAudio: mom?.chapterElapsedSeconds,
-            chapterTotalSecondsAudio: mom?.chapterTotalSeconds,
-            bookCurrentSecondsAudio: mom?.bookElapsedSeconds,
-            bookTotalSecondsAudio: mom?.bookTotalSeconds,
-            bookCurrentFraction: pm?.bookFraction,
+            chapterCurrentPage: reading?.readerLocation?.pageIndex,
+            chapterTotalPages: reading?.readerLocation?.totalPages,
+            chapterCurrentSecondsAudio: reading?.audioState?.chapterElapsed,
+            chapterTotalSecondsAudio: reading?.audioState?.chapterTotal,
+            bookCurrentSecondsAudio: reading?.audioState?.bookElapsed,
+            bookTotalSecondsAudio: reading?.audioState?.bookTotal,
+            bookCurrentFraction: reading?.readerLocation?.fraction,
         )
 
         return ReadingSidebarView(
@@ -1366,12 +1382,13 @@ public struct EbookPlayerView: View {
                 ebookCoverArt: viewModel.bookData?.ebookCoverArt,
                 chapterDuration: chapterDuration,
                 totalRemaining: totalRemaining,
-                playbackRate: mom?.playbackRate ?? viewModel.settingsVM.defaultPlaybackSpeed,
-                volume: mom?.volume ?? viewModel.settingsVM.defaultVolume,
-                isPlaying: mom?.isPlaying ?? false,
-                sleepTimerActive: mom?.sleepTimerActive ?? false,
-                sleepTimerRemaining: mom?.sleepTimerRemaining,
-                sleepTimerType: mom?.sleepTimerType,
+                playbackRate: reading?.audioState?.playbackRate
+                    ?? viewModel.settingsVM.defaultPlaybackSpeed,
+                volume: reading?.audioState?.volume ?? viewModel.settingsVM.defaultVolume,
+                isPlaying: reading?.audioState?.isPlaying ?? false,
+                sleepTimerActive: reading?.sleepTimerActive ?? false,
+                sleepTimerRemaining: reading?.sleepTimerRemaining,
+                sleepTimerType: reading?.sleepTimerType,
             ),
             mode: readingMode,
             foregroundColor: foregroundColor,
@@ -1391,7 +1408,7 @@ public struct EbookPlayerView: View {
                 viewModel.handlePrevSentence()
             },
             onPlayPause: {
-                Task { await viewModel.progressManager?.togglePlaying() }
+                Task { try? await viewModel.session?.togglePlayback() }
             },
             onSkipForward: {
                 viewModel.handleNextSentence()

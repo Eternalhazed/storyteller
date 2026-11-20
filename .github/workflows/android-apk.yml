@@ -5,6 +5,8 @@ name: Android APK
 #
 # To release: push a tag such as v2.0.1, or use "Run workflow" and enter the
 # version. Every release must use a higher version than the one before.
+# To test a build without releasing it, run the workflow with "publish" off:
+# the signed APK is attached to the run as an artifact instead.
 #
 # Repository secrets, copied from Doppler (agent-tools/local):
 #   ANDROID_KEYSTORE_BASE64    the release keystore (PKCS12), base64 encoded
@@ -21,6 +23,10 @@ on:
       version:
         description: Version to release, for example 2.0.1
         required: true
+      publish:
+        description: Publish a release (off attaches the APK to the run only)
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -67,7 +73,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
           package-manager-cache: false
 
       - uses: actions/setup-java@v6
@@ -112,8 +118,8 @@ jobs:
 
       - name: Generate the Android project
         run:
-          yarn workspace @storyteller-platform/mobile expo prebuild --platform
-          android --clean --no-install
+          yarn workspace @storyteller/mobile expo prebuild --platform android
+          --clean --no-install
 
       - name: Build the APK
         working-directory: applications/mobile/android
@@ -140,7 +146,16 @@ jobs:
           fi
           echo "APK_PATH=$apk" >> "$GITHUB_ENV"
 
+      - name: Attach the APK to the run
+        if: github.ref_type != 'tag' && !inputs.publish
+        uses: actions/upload-artifact@v7
+        with:
+          name: Storyteller-${{ env.APP_VERSION }}
+          path: ${{ env.APK_PATH }}
+          retention-days: 7
+
       - name: Publish the release
+        if: github.ref_type == 'tag' || inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

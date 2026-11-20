@@ -1,15 +1,9 @@
-import { readdir } from "node:fs/promises"
-import { join } from "node:path"
+import { Audiobook } from "@storyteller/audiobooks"
+import { type InMemoryEpubReader } from "@storyteller/epub"
 
-import {
-  Audiobook,
-  type AudiobookInputs,
-} from "@storyteller-platform/audiobook"
-import { type InMemoryEpubReader } from "@storyteller-platform/epub"
-
+import { getAudiobookTracks } from "@/assets/audiobooks.ts"
 import { openOrUpgradeEpub } from "@/assets/library/scanner/create-book"
 import { defineStep } from "@/assets/library/scanner/step"
-import { isAudioFile, isHiddenFile } from "@/audio"
 import { updateBook } from "@/database/books"
 
 import { type FingerPrinted } from "./check-fingerprint"
@@ -62,15 +56,6 @@ export type OpenedEpub = FingerPrinted & {
 }
 
 const AUDIOBOOK_STEP = "open-audiobook" as const
-
-async function getAudiobookTracks(directory: string): Promise<AudiobookInputs> {
-  const entries = await readdir(directory, { recursive: true })
-  const tracks = entries
-    .filter((entry) => isAudioFile(entry) && !isHiddenFile(entry))
-    .map((entry) => join(directory, entry))
-
-  return tracks as AudiobookInputs
-}
 
 export const openAudiobookStep = defineStep(
   AUDIOBOOK_STEP,

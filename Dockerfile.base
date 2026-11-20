@@ -119,7 +119,7 @@ fi
 # set up library paths for GPU variants
 # cuda paths (harmless if /usr/local/cuda doesn't exist)
 ENV PATH="/usr/local/cuda/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64"
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda-12.9/lib64"
 
 # oneapi/sycl paths (harmless if /opt/intel/oneapi doesn't exist)
 ENV ONEAPI_ROOT=/opt/intel/oneapi
@@ -131,14 +131,7 @@ COPY scripts/install-node.sh .
 ARG TARGETARCH
 
 # install node
-RUN NODE_ARCH=$(if [ "${TARGETARCH}" = "amd64" ]; then echo "x64"; else echo "arm64"; fi) && \
-  wget https://nodejs.org/dist/v24.8.0/node-v24.8.0-linux-$NODE_ARCH.tar.xz && \
-  tar -xf node-v24.8.0-linux-$NODE_ARCH.tar.xz && \
-  rm node-v24.8.0-linux-$NODE_ARCH.tar.xz && \
-  cp -r node-v24.8.0-linux-$NODE_ARCH/* /usr/ && \
-  rm -r node-v24.8.0-linux-$NODE_ARCH && \
-  corepack enable && \
-  yes | yarn --version
+RUN ./install-node.sh && rm install-node.sh
 
 COPY --link --from=mwader/static-ffmpeg:8.0 /ffmpeg /usr/local/bin/
 COPY --link --from=mwader/static-ffmpeg:8.0 /ffprobe /usr/local/bin/

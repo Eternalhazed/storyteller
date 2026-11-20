@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { resolve } from "node:path"
 
 import createNextIntlPlugin from "next-intl/plugin"
@@ -9,6 +9,55 @@ import { V3_ROOTS } from "./src/v3Routes"
 const pkg = JSON.parse(
   readFileSync(new URL("./package.json", import.meta.url), "utf-8"),
 ) as Record<string, unknown>
+
+const repoRoot = resolve(new URL(import.meta.url).pathname, "../../..")
+
+const notNeededAtRuntime = new Set(["onnxruntime-web", "@types/node"])
+
+function packageClosure(roots: string[]) {
+  const seen = new Set<string>()
+  const walk = (name: string) => {
+    const dir = resolve(repoRoot, "node_modules", name)
+    if (seen.has(name) || notNeededAtRuntime.has(name) || !existsSync(dir))
+      return
+    seen.add(name)
+    const pkg = JSON.parse(
+      readFileSync(resolve(dir, "package.json"), "utf-8"),
+    ) as {
+      dependencies?: Record<string, string>
+      optionalDependencies?: Record<string, string>
+    }
+    for (const dep of [
+      ...Object.keys(pkg.dependencies ?? {}),
+      ...Object.keys(pkg.optionalDependencies ?? {}),
+    ]) {
+      walk(dep)
+    }
+  }
+  roots.forEach(walk)
+  return [...seen]
+}
+
+const untracedRuntimePackages = packageClosure([
+  "onnxruntime-node",
+  "@huggingface/transformers",
+  "@parcel/watcher",
+  "kuromoji",
+  "@storyteller-platform/nodekit",
+])
+
+function packageGlobs(name: string) {
+  const dir = resolve(repoRoot, "node_modules", name)
+  const prefix = `../../node_modules/${name}`
+  if (name !== "onnxruntime-node") return [`${prefix}/**`]
+  return readdirSync(dir).map((entry) => {
+    if (entry === "bin")
+      return `${prefix}/bin/napi-v6/${process.platform}/${process.arch}/**`
+    return statSync(resolve(dir, entry)).isDirectory()
+      ? `${prefix}/${entry}/**`
+      : `${prefix}/${entry}`
+  })
+}
 
 const withNextIntl = createNextIntlPlugin({
   experimental: {
@@ -23,10 +72,6 @@ const withNextIntl = createNextIntlPlugin({
   },
 })
 
-const unlessV2Cookie = [
-  { type: "cookie" as const, key: "frontend-version", value: "v2" },
-]
-
 const nextConfig: import("next").NextConfig = {
   redirects: () => [
     {
@@ -34,21 +79,16 @@ const nextConfig: import("next").NextConfig = {
       destination: "/opds/v1",
       permanent: true,
     },
+    { source: "/account", destination: "/preferences", permanent: false },
+    { source: "/users", destination: "/settings?tab=users", permanent: false },
   ],
   rewrites: () => ({
     beforeFiles: [
-      { source: "/", missing: unlessV2Cookie, destination: "/v3" },
-      ...V3_ROOTS.filter((root) => root !== "books").map((root) => ({
+      { source: "/", destination: "/v3" },
+      ...V3_ROOTS.map((root) => ({
         source: `/${root}/:path*`,
-        missing: unlessV2Cookie,
         destination: `/v3/${root}/:path*`,
       })),
-      { source: "/books", missing: unlessV2Cookie, destination: "/v3/books" },
-      {
-        source: "/books/:path((?![^/]+/read$).+)",
-        missing: unlessV2Cookie,
-        destination: "/v3/books/:path",
-      },
     ],
   }),
   env: {
@@ -58,11 +98,14 @@ const nextConfig: import("next").NextConfig = {
     ignoreBuildErrors: true,
   },
   transpilePackages: [
-    "@storyteller-platform/epub",
-    "@storyteller-platform/fs",
-    "@storyteller-platform/path",
-    "@storyteller-platform/audiobook",
-    "@storyteller-platform/xray",
+    "@storyteller/epub",
+    "@storyteller/epubcfi",
+    "@storyteller/fs",
+    "@storyteller/path",
+    "@storyteller/audiobooks",
+    "@storyteller/media-types",
+    "@storyteller/uri-fragment",
+    "@storyteller/xray",
     "@t3-oss/env-nextjs",
     "@t3-oss/env-core",
   ],
@@ -72,27 +115,40 @@ const nextConfig: import("next").NextConfig = {
     "pino",
     "pino-pretty",
     "onnxruntime-node",
+    "@huggingface/transformers",
     "@node-rs/crc32",
     "@node-rs/xxhash",
     "@parcel/watcher",
     "@reflink/reflink",
     "@storyteller-platform/okmain",
+    "@storyteller-platform/nodekit",
   ],
   output: "standalone",
-  outputFileTracingRoot: resolve(new URL(import.meta.url).pathname, "../../.."),
+  outputFileTracingRoot: repoRoot,
+  outputFileTracingIncludes: {
+    "*": [
+      ...untracedRuntimePackages.flatMap(packageGlobs),
+      "../../node_modules/better-sqlite3/prebuilds/**",
+    ],
+  },
   outputFileTracingExcludes: {
-    "*": ["./applications/web/src/__fixtures__/**"],
+    "*": ["./src/__fixtures__/**"],
   },
   reactCompiler: true,
   productionBrowserSourceMaps: true,
   experimental: {
-    optimizePackageImports: ["@mantine/core", "@mantine/hooks"],
     authInterrupts: true,
     turbopackSourceMaps: true,
+    preloadEntriesOnStart: false,
   },
-  ...(process.env.NODE_ENV === "development" && process.env["EXTRA_DEV_ORIGINS"]
+  ...(process.env.NODE_ENV === "development"
     ? {
-        allowedDevOrigins: [process.env["EXTRA_DEV_ORIGINS"]],
+        allowedDevOrigins: [
+          ...(process.env["EXTRA_DEV_ORIGINS"]
+            ? [process.env["EXTRA_DEV_ORIGINS"]]
+            : []),
+          "127.0.0.1",
+        ],
       }
     : {}),
 }

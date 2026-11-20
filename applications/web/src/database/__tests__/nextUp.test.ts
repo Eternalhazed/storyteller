@@ -1,46 +1,18 @@
 import assert from "node:assert"
-import { describe, it } from "node:test"
 
-import { type Database } from "better-sqlite3"
+import { describe, it } from "vitest"
 
 import {
   type TestDbContext,
   seedBooks,
+  seedUser,
+  seedSeries,
   setupTestDb,
 } from "@/__tests__/harness/testDb"
 import { getNextUpInSeries } from "@/database/nextUp"
 import { type UUID } from "@/uuid"
 
 const userId = "11111111-1111-1111-1111-111111111111" as UUID
-
-function seedUser(sqlite: Database) {
-  sqlite
-    .prepare(`INSERT INTO user_permission (uuid, book_list) VALUES (?, 1)`)
-    .run("22222222-2222-2222-2222-222222222222")
-  sqlite
-    .prepare(
-      `INSERT INTO "user" (id, user_permission_uuid, email) VALUES (?, ?, ?)`,
-    )
-    .run(userId, "22222222-2222-2222-2222-222222222222", "t@example.com")
-}
-
-function seedSeries(
-  ctx: TestDbContext,
-  name: string,
-  members: [bookUuid: string, position: number][],
-): string {
-  const seriesUuid = crypto.randomUUID()
-  ctx.sqlite
-    .prepare(`INSERT INTO series (uuid, name) VALUES (?, ?)`)
-    .run(seriesUuid, name)
-  const insert = ctx.sqlite.prepare(
-    `INSERT INTO book_to_series (series_uuid, book_uuid, position) VALUES (?, ?, ?)`,
-  )
-  for (const [bookUuid, position] of members) {
-    insert.run(seriesUuid, bookUuid, position)
-  }
-  return seriesUuid
-}
 
 function setStatus(ctx: TestDbContext, bookUuid: string, statusName: string) {
   ctx.sqlite
@@ -59,10 +31,10 @@ function setPosition(ctx: TestDbContext, bookUuid: string, timestamp: number) {
     .run(bookUuid, userId, timestamp)
 }
 
-void describe("getNextUpInSeries", () => {
-  void it("returns the lowest unread position above the highest read one", async () => {
+describe("getNextUpInSeries", () => {
+  it("returns the lowest unread position above the highest read one", async () => {
     using ctx = setupTestDb()
-    seedUser(ctx.sqlite)
+    seedUser(ctx, userId)
 
     const [b1, b2, b3, b4] = seedBooks(ctx, [
       { title: "one" },
@@ -88,9 +60,9 @@ void describe("getNextUpInSeries", () => {
     )
   })
 
-  void it("skips a book being read and shows the next to-be-read one", async () => {
+  it("skips a book being read and shows the next to-be-read one", async () => {
     using ctx = setupTestDb()
-    seedUser(ctx.sqlite)
+    seedUser(ctx, userId)
 
     const [b1, b2, b3] = seedBooks(ctx, [
       { title: "one" },
@@ -113,9 +85,9 @@ void describe("getNextUpInSeries", () => {
     )
   })
 
-  void it("does not surface series without any read book, or fully read ones", async () => {
+  it("does not surface series without any read book, or fully read ones", async () => {
     using ctx = setupTestDb()
-    seedUser(ctx.sqlite)
+    seedUser(ctx, userId)
 
     const [b1, b2, b3, b4] = seedBooks(ctx, [
       { title: "fresh 1" },
@@ -140,9 +112,9 @@ void describe("getNextUpInSeries", () => {
     assert.deepStrictEqual(books, [])
   })
 
-  void it("accepts explicit To read status but not custom statuses", async () => {
+  it("accepts explicit To read status but not custom statuses", async () => {
     using ctx = setupTestDb()
-    seedUser(ctx.sqlite)
+    seedUser(ctx, userId)
     ctx.sqlite
       .prepare(`INSERT INTO status (name, is_default) VALUES ('Abandoned', 0)`)
       .run()
@@ -168,9 +140,9 @@ void describe("getNextUpInSeries", () => {
     )
   })
 
-  void it("ignores a book with no status of its own", async () => {
+  it("ignores a book with no status of its own", async () => {
     using ctx = setupTestDb()
-    seedUser(ctx.sqlite)
+    seedUser(ctx, userId)
 
     const [b1, b2, b3] = seedBooks(ctx, [
       { title: "one" },
@@ -192,9 +164,9 @@ void describe("getNextUpInSeries", () => {
     )
   })
 
-  void it("orders series by most recent reading activity", async () => {
+  it("orders series by most recent reading activity", async () => {
     using ctx = setupTestDb()
-    seedUser(ctx.sqlite)
+    seedUser(ctx, userId)
 
     const [a1, a2, c1, c2] = seedBooks(ctx, [
       { title: "old series read" },
@@ -224,9 +196,41 @@ void describe("getNextUpInSeries", () => {
     )
   })
 
-  void it("returns a shared book once even when it is next in two series", async () => {
+  it("breaks ties between books sharing a number by oldest added", async () => {
     using ctx = setupTestDb()
-    seedUser(ctx.sqlite)
+    seedUser(ctx, userId)
+
+    // Seeded so both insertion order and title order disagree with
+    // created_at order
+    const [b1, newer, older] = seedBooks(ctx, [
+      { title: "one" },
+      { title: "Two (hardcover)" },
+      { title: "two (paperback)" },
+    ]) as [string, string, string]
+    const setCreatedAt = ctx.sqlite.prepare(
+      `UPDATE book SET created_at = ? WHERE uuid = ?`,
+    )
+    setCreatedAt.run("2021-01-01 00:00:00", newer)
+    setCreatedAt.run("2020-01-01 00:00:00", older)
+    seedSeries(ctx, "saga", [
+      [b1, 1],
+      [newer, 2],
+      [older, 2],
+    ])
+    setStatus(ctx, b1, "Read")
+    setStatus(ctx, newer, "To read")
+    setStatus(ctx, older, "To read")
+
+    const books = await getNextUpInSeries(userId)
+    assert.deepStrictEqual(
+      books.map((b) => b.title),
+      ["two (paperback)"],
+    )
+  })
+
+  it("returns a shared book once even when it is next in two series", async () => {
+    using ctx = setupTestDb()
+    seedUser(ctx, userId)
 
     const [b1, b2, shared] = seedBooks(ctx, [
       { title: "read one" },

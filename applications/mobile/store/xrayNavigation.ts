@@ -4,7 +4,7 @@ import {
   chapterIndexForHref,
   chapterIndexOf,
   locateSentence,
-} from "@storyteller-platform/xray/view"
+} from "@storyteller/xray/view"
 
 import {
   type ReadiumLink,

@@ -1,21 +1,42 @@
+import { type GuidedNavigationDocument } from "@readium/shared"
 /* eslint-disable @typescript-eslint/no-invalid-void-type */
-import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react"
+import {
+  type BaseQueryFn,
+  type MutationDefinition,
+  createApi,
+  fetchBaseQuery,
+} from "@reduxjs/toolkit/query/react"
+import {
+  type BookMetadataCandidate,
+  type BookMetadataProvider,
+  type BookMetadataSearchResult,
+  type CoverCandidate,
+  type CoverSearchQuery,
+  type MetadataSearchQuery,
+} from "@storyteller-platform/nodekit/types"
+import { type JsColor } from "@storyteller-platform/okmain"
 import { v4 as uuidv4 } from "uuid"
 
-import { type JsColor } from "@storyteller-platform/okmain"
+import { type EmissionCapabilities } from "@storyteller/ghost-story/emission-client"
 
-import { type BookAlignmentReportView } from "@/alignmentReportView"
+import {
+  type AlignmentDecisions,
+  type AlignmentOverrides,
+  type BookAlignmentReportView,
+} from "@/alignmentReportView"
 import { dismissalKey } from "@/announcement-builtins"
 import {
   type Invite,
   type InviteRequest,
+  type ServerCapabilities,
   type Settings,
   type User,
 } from "@/apiModels"
 import { type UpgradeResult } from "@/app/api/v2/books/[bookId]/upgrade-epub/route"
 import { type BackupInfo } from "@/backups"
-import { type Role } from "@/components/books/edit/marcRelators"
-import { type AlignmentOverrides } from "@/database/alignmentReports"
+import { type ChapterAudio } from "@/chapterAudio"
+import { type ApiTokenCreate } from "@/database/apiTokenTypes"
+import { type ApiTokenSummary } from "@/database/apiTokens"
 import {
   type BookRelationsUpdate,
   type BookUpdate,
@@ -37,7 +58,7 @@ import {
 } from "@/database/identifiers"
 import { type Image } from "@/database/images"
 import { type ImportRuleWithCollections } from "@/database/importRules"
-import { type JobType, type PublicJob } from "@/database/jobs"
+import { type DisplayJob } from "@/database/jobs"
 import {
   type FacetSection,
   type FacetValue,
@@ -45,6 +66,7 @@ import {
 } from "@/database/libraryCounts"
 import { type RewritePreview, type RewriteResult } from "@/database/pathRewrite"
 import { type Position } from "@/database/positions"
+import { type MetadataProvidersResponse } from "@/database/providerTokens"
 import {
   type RatingDimensionScores,
   computeRatingAverage,
@@ -78,11 +100,27 @@ import {
   type UserPreferencesForm,
 } from "@/database/userPreferencesTypes"
 import { type UserBookRating } from "@/database/userRatings"
-import { type UserPermissionSet } from "@/database/users"
+import { type ProfileUpdate, type UserPermissionSet } from "@/database/users"
 import { type SeriesWithBooks } from "@/hooks/useFilterSortedSeries"
+import {
+  type JobListFilter,
+  type JobListPatch,
+  applyJobEvent,
+  applyJobPatch,
+  compareJobs,
+  queueJobNext,
+} from "@/jobList"
+import { type OrphanFolder, type StorageUsage } from "@/maintenance"
+import { type Role } from "@/metadata/marcRelators"
+import { type AutoImportResult } from "@/metadataAutoImport"
+import { type CoverImportRequest } from "@/metadataImport"
+import { type MetadataImportBody } from "@/metadataImportTypes"
+import { type JobsQueryV2 } from "@/schemas/v2/job"
+import { type TranscodedAudioFile } from "@/schemas/v2/transcodedAudio"
 import { type ShelfFilter } from "@/shelves"
 import { type SortField } from "@/sort"
 import { type UUID } from "@/uuid"
+import { type StageName } from "@/work/jobStats"
 import { type RunConfig } from "@/work/runConfig"
 
 import { subscribeToEventStream } from "./eventStream"
@@ -120,10 +158,51 @@ function startBookMembershipBridge(dispatch: (action: unknown) => unknown) {
   })
 }
 
+type JobListsLifecycle = Pick<
+  Parameters<
+    NonNullable<
+      MutationDefinition<
+        unknown,
+        BaseQueryFn,
+        string,
+        unknown,
+        "api"
+      >["onQueryStarted"]
+    >
+  >[1],
+  "dispatch" | "getState"
+>
+
+function patchJobLists(
+  { dispatch, getState }: JobListsLifecycle,
+  recipe: (draft: DisplayJob[], filter: JobListFilter | undefined) => void,
+) {
+  const args = api.util.selectCachedArgsForQuery(getState(), "getJobs")
+  return args.map((arg) =>
+    dispatch(
+      api.util.updateQueryData("getJobs", arg, (draft) => {
+        recipe(draft, arg as JobListFilter | undefined)
+      }),
+    ),
+  )
+}
+
+async function undoOnFailure(
+  patches: { undo: () => void }[],
+  queryFulfilled: Promise<unknown>,
+) {
+  try {
+    await queryFulfilled
+  } catch {
+    for (const patch of patches) patch.undo()
+  }
+}
+
 export const api = createApi({
   reducerPath: "api",
   baseQuery: fetchBaseQuery({ baseUrl: "/api/v2" }),
   tagTypes: [
+    "ApiTokens",
     "Invites",
     "Users",
     "Statuses",
@@ -150,11 +229,17 @@ export const api = createApi({
     "Jobs",
     "BookAlignmentReport",
     "BookXray",
+    "TranscodedAudio",
     "Settings",
     "Identifiers",
     "BookIdentifiers",
     "Backups",
     "PathsStatus",
+    "ServerCapabilities",
+    "CacheUsage",
+    "MaintenanceStorage",
+    "Orphans",
+    "MetadataProviders",
   ],
   endpoints: (build) => ({
     createInvite: build.mutation<Invite, InviteRequest>({
@@ -225,6 +310,53 @@ export const api = createApi({
       query: () => "/user",
       providesTags: () => ["CurrentUser"],
     }),
+    updateProfile: build.mutation<User, ProfileUpdate>({
+      query: (body) => ({
+        url: "/user",
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: () => ["CurrentUser"],
+    }),
+    unlinkAccount: build.mutation<void, { provider: string }>({
+      query: ({ provider }) => ({
+        url: `/user/accounts/${encodeURIComponent(provider)}`,
+        method: "DELETE",
+      }),
+    }),
+    listApiTokens: build.query<ApiTokenSummary[], void>({
+      query: () => "/user/tokens",
+      providesTags: () => ["ApiTokens"],
+    }),
+    createApiToken: build.mutation<{ token: string }, ApiTokenCreate>({
+      query: (body) => ({
+        url: "/user/tokens",
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: () => ["ApiTokens"],
+    }),
+    deleteApiToken: build.mutation<void, { uuid: UUID }>({
+      query: ({ uuid }) => ({
+        url: `/user/tokens/${uuid}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: () => ["ApiTokens"],
+    }),
+    getServerCapabilities: build.query<ServerCapabilities, void>({
+      query: () => "/server/capabilities",
+      providesTags: () => ["ServerCapabilities"],
+    }),
+    testCtcServer: build.mutation<
+      EmissionCapabilities,
+      { url: string; apiKey: string | null }
+    >({
+      query: (body) => ({
+        url: "/server/ctc-server",
+        method: "POST",
+        body,
+      }),
+    }),
     getMaxUploadChunkSize: build.query<
       { maxUploadChunkSize: number | null; overriden: boolean },
       void
@@ -252,7 +384,12 @@ export const api = createApi({
         method: "PUT",
         body: settings,
       }),
-      invalidatesTags: ["MaxUploadChunkSize", "Settings", "ImportRules"],
+      invalidatesTags: [
+        "MaxUploadChunkSize",
+        "Settings",
+        "ImportRules",
+        "MetadataProviders",
+      ],
     }),
     updatePreferenceDefaults: build.mutation<
       PreferenceDefaults,
@@ -368,12 +505,51 @@ export const api = createApi({
         }),
       },
     ),
+    getBooksCacheUsage: build.query<
+      {
+        bytes: number
+        bookCount: number
+        parts: {
+          transcodedAudio: number
+          transcriptions: number
+          emissions: number
+        }
+      },
+      { bookUuids?: UUID[] }
+    >({
+      query: ({ bookUuids }) => ({
+        url: `/books/cache/usage`,
+        method: "POST",
+        body: { bookUuids },
+      }),
+      providesTags: ["CacheUsage"],
+    }),
     clearBooksCache: build.mutation<void, { bookUuids?: UUID[] }>({
       query: ({ bookUuids }) => ({
         url: `/books/cache`,
         method: "DELETE",
         body: { bookUuids },
       }),
+      invalidatesTags: ["CacheUsage"],
+    }),
+    recomputeAlignmentReports: build.mutation<
+      { count: number },
+      { bookUuids?: UUID[] }
+    >({
+      query: ({ bookUuids }) => ({
+        url: `/books/alignment-reports/recompute`,
+        method: "POST",
+        body: { bookUuids },
+      }),
+      invalidatesTags: (_result, _error, { bookUuids }) => [
+        "Books",
+        ...(bookUuids
+          ? bookUuids.map((uuid) => ({
+              type: "BookAlignmentReport" as const,
+              id: uuid,
+            }))
+          : ["BookAlignmentReport" as const]),
+      ],
     }),
     deleteBooks: build.mutation<
       void,
@@ -656,7 +832,7 @@ export const api = createApi({
       void,
       {
         uuid: UUID
-        restart?: "full" | "transcription" | "sync" | false
+        restart?: "full" | "transcode" | "transcription" | "sync" | false
         dismissGpuWarning?: boolean
         config?: Partial<RunConfig>
       }
@@ -790,6 +966,7 @@ export const api = createApi({
           language?: BookUpdate["language"]
           status?: UUID | undefined
           publicationDate?: BookUpdate["publicationDate"]
+          releaseDate?: BookUpdate["releaseDate"]
           authors?: string[]
           creators?: CreatorRelation[]
           pageCount?: number | null
@@ -835,6 +1012,9 @@ export const api = createApi({
         }
         if (updatedFields.includes("publicationDate")) {
           body.append("publicationDate", JSON.stringify(update.publicationDate))
+        }
+        if (updatedFields.includes("releaseDate")) {
+          body.append("releaseDate", JSON.stringify(update.releaseDate))
         }
         if (updatedFields.includes("status")) {
           body.append("status", JSON.stringify(update.status))
@@ -973,6 +1153,8 @@ export const api = createApi({
                 draft.description = update.description
               if (update.publicationDate !== undefined)
                 draft.publicationDate = update.publicationDate
+              if (update.releaseDate !== undefined)
+                draft.releaseDate = update.releaseDate
 
               if (update.status !== undefined) {
                 const statuses = api.endpoints.listStatuses.select()(getState())
@@ -1230,6 +1412,7 @@ export const api = createApi({
       invalidatesTags: (_result, _error, { uuid }) => [
         "Series",
         { type: "Series", id: uuid },
+        "Books",
       ],
     }),
     deleteSeries: build.mutation<void, { uuid: UUID }>({
@@ -1684,7 +1867,7 @@ export const api = createApi({
           api.util.updateQueryData("getBook", { uuid: bookUuid }, (draft) => {
             const existing = draft.userBookRating
             const nextReview =
-              review !== undefined ? review : existing?.review ?? null
+              review !== undefined ? review : (existing?.review ?? null)
 
             let nextRating: number | null
             let nextDimensions: RatingDimensionScores | null
@@ -1705,7 +1888,7 @@ export const api = createApi({
               }
             } else {
               nextRating =
-                rating !== undefined ? rating : existing?.rating ?? null
+                rating !== undefined ? rating : (existing?.rating ?? null)
               nextDimensions = existing?.dimensions ?? null
             }
 
@@ -1777,6 +1960,16 @@ export const api = createApi({
         body,
       }),
       invalidatesTags: ["UserSettings"],
+    }),
+    sendToKindle: build.mutation<
+      { sent: number; skipped: number },
+      { books: UUID[]; to?: string[] }
+    >({
+      query: (body) => ({
+        url: "/books/kindle",
+        method: "POST",
+        body,
+      }),
     }),
     setUserSetting: build.mutation<
       Record<string, unknown>,
@@ -1882,6 +2075,22 @@ export const api = createApi({
       ],
     }),
 
+    getBookOpf: build.query<
+      string,
+      { bookUuid: UUID; format: "ebook" | "readaloud" }
+    >({
+      query: ({ bookUuid, format }) => ({
+        url: `/books/${bookUuid}/debug/opf?format=${format}`,
+        responseHandler: "text",
+      }),
+    }),
+    getBookMediaOverlay: build.query<string, { bookUuid: UUID; href: string }>({
+      query: ({ bookUuid, href }) => ({
+        url: `/books/${bookUuid}/debug/media-overlay?href=${encodeURIComponent(href)}`,
+        responseHandler: "text",
+      }),
+    }),
+
     getInfiniteChangelog: build.infiniteQuery<
       ChangelogEntry[],
       string,
@@ -1934,10 +2143,10 @@ export const api = createApi({
         description: string | null
         releasedAt: string
       } | null,
-      { component?: string; beta?: boolean }
+      { component?: string }
     >({
-      query: ({ component = "web", beta = false }) =>
-        `/changelog/latest?component=${component}&beta=${beta}`,
+      query: ({ component = "web" }) =>
+        `/changelog/latest?component=${component}`,
     }),
 
     // shelves
@@ -2142,7 +2351,13 @@ export const api = createApi({
 
     // logs
     getLogs: build.query<
-      { lines: unknown[]; availableDates: string[] },
+      {
+        lines: unknown[]
+        date: string
+        today: string
+        availableDates: string[]
+        totalBytes: number
+      },
       { lines?: number; search?: string; level?: string; date?: string }
     >({
       query: ({ lines, search, level, date }) => {
@@ -2172,6 +2387,48 @@ export const api = createApi({
         url: "/logs/clear",
         method: "POST",
       }),
+    }),
+
+    getMaintenanceStorage: build.query<
+      Record<"imageCache" | "uploads" | "logs", StorageUsage>,
+      void
+    >({
+      query: () => "/maintenance/storage",
+      providesTags: ["MaintenanceStorage"],
+    }),
+    clearImageCache: build.mutation<void, void>({
+      query: () => ({ url: "/maintenance/image-cache", method: "DELETE" }),
+      invalidatesTags: ["MaintenanceStorage"],
+    }),
+    clearStaleUploads: build.mutation<void, void>({
+      query: () => ({ url: "/maintenance/uploads", method: "DELETE" }),
+      invalidatesTags: ["MaintenanceStorage"],
+    }),
+    deleteAllLogs: build.mutation<void, void>({
+      query: () => ({ url: "/maintenance/logs", method: "DELETE" }),
+      invalidatesTags: ["MaintenanceStorage"],
+    }),
+    getOrphans: build.query<
+      { folders: OrphanFolder[]; images: StorageUsage },
+      void
+    >({
+      query: () => "/maintenance/orphans",
+      providesTags: ["Orphans"],
+    }),
+    deleteOrphanFolders: build.mutation<
+      { deleted: number },
+      { names: string[] }
+    >({
+      query: ({ names }) => ({
+        url: "/maintenance/orphans/folders",
+        method: "DELETE",
+        body: { names },
+      }),
+      invalidatesTags: ["Orphans"],
+    }),
+    deleteUnusedImages: build.mutation<{ deleted: number }, void>({
+      query: () => ({ url: "/maintenance/orphans/images", method: "DELETE" }),
+      invalidatesTags: ["Orphans"],
     }),
 
     // database backups
@@ -2237,36 +2494,37 @@ export const api = createApi({
     }),
 
     // processing jobs queue
-    getJobs: build.query<
-      PublicJob[],
-      {
-        type?: "active" | "finished" | "all"
-        bookUuid?: UUID
-        jobType?: JobType
-        search?: string
-        sort?: "finishedAt" | "title" | "status"
-        order?: "asc" | "desc"
-        limit?: number
-        offset?: number
-      } | void
-    >({
+    getJobs: build.query<DisplayJob[], JobsQueryV2 | void>({
       query: (arg) => {
+        const filter: JobsQueryV2 = (arg as JobsQueryV2 | undefined) ?? {}
         const params = new URLSearchParams()
-        if (arg?.type) params.set("type", arg.type)
-        if (arg?.bookUuid) params.set("bookUuid", arg.bookUuid)
-        if (arg?.jobType) params.set("jobType", arg.jobType)
-        if (arg?.search) params.set("search", arg.search)
-        if (arg?.sort) params.set("sort", arg.sort)
-        if (arg?.order) params.set("order", arg.order)
-        if (arg?.limit) params.set("limit", String(arg.limit))
-        if (arg?.offset) params.set("offset", String(arg.offset))
+        for (const [key, value] of Object.entries(filter) as [
+          string,
+          string | number | string[] | undefined,
+        ][]) {
+          if (value === undefined) {
+            continue
+          }
+          params.set(
+            key,
+            Array.isArray(value) ? value.join(",") : String(value),
+          )
+        }
         return `/jobs?${params.toString()}`
       },
       providesTags: ["Jobs"],
       onCacheEntryAdded: async (
-        _arg,
-        /* eslint-disable-next-line @typescript-eslint/unbound-method */
-        { dispatch, cacheDataLoaded, cacheEntryRemoved, getCacheEntry },
+        arg,
+        // RTK Query's lifecycle helpers are safe to use unbound.
+        /* eslint-disable @typescript-eslint/unbound-method */
+        {
+          cacheDataLoaded,
+          cacheEntryRemoved,
+          updateCachedData,
+          dispatch,
+          getCacheEntry,
+        },
+        /* eslint-enable @typescript-eslint/unbound-method */
       ) => {
         try {
           await cacheDataLoaded
@@ -2274,15 +2532,28 @@ export const api = createApi({
           /* empty */
         }
 
+        const filter = arg as JobListFilter | undefined
+
         const unsubscribe = subscribeToEventStream("job", (event) => {
-          // Events contain only ids; resolve the book from this query's cache.
-          const job = getCacheEntry().data?.find(
-            ({ uuid }) => uuid === event.jobUuid,
-          )
-          dispatch(api.util.invalidateTags(["Jobs"]))
+          const job =
+            event.type === "jobDeleted"
+              ? getCacheEntry().data?.find(({ uuid }) => uuid === event.jobUuid)
+              : event.payload
           if (job?.type === "book_xray" && job.bookUuid) {
             dispatch(
               api.util.invalidateTags([{ type: "BookXray", id: job.bookUuid }]),
+            )
+          }
+          const outcome: { value: JobListPatch } = { value: "patched" }
+          updateCachedData((draft) => {
+            outcome.value = applyJobEvent(draft, filter, event)
+          })
+          if (outcome.value === "refetch") {
+            void dispatch(
+              api.endpoints.getJobs.initiate(arg, {
+                subscribe: false,
+                forceRefetch: true,
+              }),
             )
           }
         })
@@ -2292,7 +2563,11 @@ export const api = createApi({
       },
     }),
     getAlignmentEstimate: build.query<
-      { estimateSeconds: number | null; sampleSize: number },
+      {
+        estimateSeconds: number | null
+        stageSeconds: Partial<Record<StageName, number>>
+        sampleSize: number
+      },
       {
         bookUuid: UUID
         engine: string
@@ -2313,7 +2588,15 @@ export const api = createApi({
 
     cancelJob: build.mutation<void, { uuid: UUID }>({
       query: ({ uuid }) => ({ url: `/jobs/${uuid}`, method: "DELETE" }),
-      invalidatesTags: ["Jobs"],
+      onQueryStarted: async ({ uuid }, lifecycle) => {
+        const patches = patchJobLists(lifecycle, (draft, filter) => {
+          applyJobPatch(draft, filter, uuid, {
+            status: "CANCELED",
+            finishedAt: new Date().toISOString(),
+          })
+        })
+        await undoOnFailure(patches, lifecycle.queryFulfilled)
+      },
     }),
     reorderJobs: build.mutation<void, { order: UUID[] }>({
       query: ({ order }) => ({
@@ -2321,7 +2604,16 @@ export const api = createApi({
         method: "PATCH",
         body: { order },
       }),
-      invalidatesTags: ["Jobs"],
+      onQueryStarted: async ({ order }, lifecycle) => {
+        const patches = patchJobLists(lifecycle, (draft, filter) => {
+          for (const [index, uuid] of order.entries()) {
+            const job = draft.find((candidate) => candidate.uuid === uuid)
+            if (job) job.position = index
+          }
+          draft.sort(compareJobs(filter))
+        })
+        await undoOnFailure(patches, lifecycle.queryFulfilled)
+      },
     }),
     pauseJob: build.mutation<void, { uuid: UUID }>({
       query: ({ uuid }) => ({
@@ -2329,7 +2621,12 @@ export const api = createApi({
         method: "PATCH",
         body: { action: "pause" },
       }),
-      invalidatesTags: ["Jobs"],
+      onQueryStarted: async ({ uuid }, lifecycle) => {
+        const patches = patchJobLists(lifecycle, (draft, filter) => {
+          applyJobPatch(draft, filter, uuid, { status: "PAUSED" })
+        })
+        await undoOnFailure(patches, lifecycle.queryFulfilled)
+      },
     }),
     resumeJob: build.mutation<void, { uuid: UUID }>({
       query: ({ uuid }) => ({
@@ -2337,7 +2634,22 @@ export const api = createApi({
         method: "PATCH",
         body: { action: "resume" },
       }),
-      invalidatesTags: ["Jobs"],
+      onQueryStarted: async ({ uuid }, lifecycle) => {
+        const patches = patchJobLists(lifecycle, (draft, filter) => {
+          const target = draft.find((job) => job.uuid === uuid)
+          if (target) {
+            queueJobNext(
+              draft.filter((job) => job.type === target.type),
+              uuid,
+            )
+          }
+          applyJobPatch(draft, filter, uuid, {
+            status: "QUEUED",
+            finishedAt: null,
+          })
+        })
+        await undoOnFailure(patches, lifecycle.queryFulfilled)
+      },
     }),
     getXrayEnabled: build.query<{ configured: boolean }, void>({
       query: () => "/settings/xray",
@@ -2378,11 +2690,68 @@ export const api = createApi({
     }),
     getBookAlignmentReport: build.query<
       BookAlignmentReportView,
-      { uuid: UUID }
+      { uuid: UUID; reportUuid?: UUID }
     >({
-      query: ({ uuid }) => `/books/${uuid}/alignment-report`,
+      query: ({ uuid, reportUuid }) =>
+        `/books/${uuid}/alignment-report${reportUuid ? `?reportUuid=${reportUuid}` : ""}`,
       providesTags: (_result, _error, { uuid }) => [
         { type: "BookAlignmentReport", id: uuid },
+      ],
+    }),
+    getBookChapterText: build.query<
+      string,
+      { uuid: UUID; updatedAt: string; href: string }
+    >({
+      query: ({ uuid, updatedAt, href }) => ({
+        url: `/books/${uuid}/read/${href
+          .split("/")
+          .map(encodeURIComponent)
+          .join("/")}?v=${new Date(updatedAt).getTime()}`,
+        responseHandler: "text",
+      }),
+    }),
+    getBookChapterGuidedNavigation: build.query<
+      GuidedNavigationDocument,
+      { uuid: UUID; updatedAt: string; href: string }
+    >({
+      query: ({ uuid, updatedAt, href }) => ({
+        url: `/books/${uuid}/read/~readium/guided-navigation.json?ref=${href
+          .split("/")
+          .map(encodeURIComponent)
+          .join("/")}&v=${new Date(updatedAt).getTime()}`,
+      }),
+    }),
+    getBookChapterAudio: build.query<
+      ChapterAudio,
+      { bookUuid: UUID; version: string; href: string }
+    >({
+      query: ({ bookUuid, version, href }) =>
+        `/books/${bookUuid}/debug/chapter-audio?href=${encodeURIComponent(href)}&v=${encodeURIComponent(version)}`,
+    }),
+    getTranscodedAudio: build.query<TranscodedAudioFile[], { uuid: UUID }>({
+      query: ({ uuid }) => `/books/${uuid}/transcoded-audio`,
+      providesTags: (_result, _error, { uuid }) => [
+        { type: "TranscodedAudio", id: uuid },
+      ],
+    }),
+    getBookAlignmentDecisions: build.query<AlignmentDecisions, { uuid: UUID }>({
+      query: ({ uuid }) => `/books/${uuid}/alignment-decisions`,
+      providesTags: (_result, _error, { uuid }) => [
+        { type: "BookAlignmentReport", id: uuid },
+      ],
+    }),
+    updateBookAlignmentDecisions: build.mutation<
+      AlignmentDecisions,
+      { uuid: UUID; decisions: AlignmentDecisions }
+    >({
+      query: ({ uuid, decisions }) => ({
+        url: `/books/${uuid}/alignment-decisions`,
+        method: "PUT",
+        body: decisions,
+      }),
+      invalidatesTags: (_result, _error, { uuid }) => [
+        { type: "BookAlignmentReport", id: uuid },
+        "Books",
       ],
     }),
     updateBookAlignmentOverrides: build.mutation<
@@ -2399,6 +2768,116 @@ export const api = createApi({
         "Books",
       ],
     }),
+    metadataSearch: build.query<
+      BookMetadataSearchResult[],
+      Omit<MetadataSearchQuery, "providers">
+    >({
+      query: (params) => ({ url: "/metadata", params }),
+    }),
+    metadataBook: build.query<
+      BookMetadataCandidate,
+      { provider: BookMetadataProvider; id: string; region?: string }
+    >({
+      query: (params) => ({ url: "/metadata/book", params }),
+    }),
+    metadataCoverSearch: build.query<
+      CoverCandidate[],
+      Omit<CoverSearchQuery, "providers">
+    >({
+      query: (params) => ({ url: "/metadata/covers", params }),
+    }),
+    getMetadataProviders: build.query<MetadataProvidersResponse, void>({
+      query: () => "/metadata/providers",
+      providesTags: ["MetadataProviders"],
+    }),
+    setHardcoverToken: build.mutation<MetadataProvidersResponse, string>({
+      query: (token) => ({
+        url: "/metadata/providers",
+        method: "PUT",
+        body: { token },
+      }),
+      invalidatesTags: ["MetadataProviders"],
+    }),
+    clearHardcoverToken: build.mutation<MetadataProvidersResponse, void>({
+      query: () => ({ url: "/metadata/providers", method: "DELETE" }),
+      invalidatesTags: ["MetadataProviders"],
+    }),
+    importBookMetadata: build.mutation<
+      BookWithRelations,
+      { bookUuid: UUID } & MetadataImportBody
+    >({
+      query: ({ bookUuid, ...body }) => ({
+        url: `/books/${bookUuid}/metadata-import`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (_result, _error, { bookUuid }) => [
+        "Creators",
+        "Authors",
+        "Narrators",
+        "Series",
+        "Tags",
+        "Books",
+        "Identifiers",
+        { type: "Books", id: bookUuid },
+        { type: "BookIdentifiers", id: bookUuid },
+      ],
+    }),
+    autoImportBookMetadata: build.mutation<
+      AutoImportResult,
+      { bookUuid: UUID }
+    >({
+      query: ({ bookUuid }) => ({
+        url: `/books/${bookUuid}/metadata-auto-import`,
+        method: "POST",
+      }),
+      invalidatesTags: (_result, _error, { bookUuid }) => [
+        { type: "Books", id: bookUuid },
+        { type: "BookIdentifiers", id: bookUuid },
+      ],
+    }),
+    refreshBookRatings: build.mutation<BookWithRelations, { bookUuid: UUID }>({
+      query: ({ bookUuid }) => ({
+        url: `/books/${bookUuid}/ratings-refresh`,
+        method: "POST",
+      }),
+      invalidatesTags: (_result, _error, { bookUuid }) => [
+        { type: "Books", id: bookUuid },
+      ],
+    }),
+    deleteExternalRating: build.mutation<
+      BookWithRelations,
+      { bookUuid: UUID; ratingUuid: UUID }
+    >({
+      query: ({ bookUuid, ratingUuid }) => ({
+        url: `/books/${bookUuid}/external-ratings/${ratingUuid}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: (_result, _error, { bookUuid }) => [
+        { type: "Books", id: bookUuid },
+      ],
+    }),
+    importBookCover: build.mutation<
+      BookWithRelations,
+      { bookUuid: UUID } & CoverImportRequest
+    >({
+      query: ({ bookUuid, ...body }) => ({
+        url: `/books/${bookUuid}/cover-import`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (_result, _error, { bookUuid }) => [
+        "Books",
+        { type: "Books", id: bookUuid },
+      ],
+    }),
+    logout: build.mutation<void, void>({
+      query: () => ({
+        url: "/logout",
+        method: "POST",
+      }),
+      invalidatesTags: ["CurrentUser"],
+    }),
   }),
 })
 
@@ -2414,6 +2893,15 @@ export const {
   useCreateCollectionMutation,
   useCreateInviteMutation,
   useClearBooksCacheMutation,
+  useGetBooksCacheUsageQuery,
+  useGetMaintenanceStorageQuery,
+  useClearImageCacheMutation,
+  useClearStaleUploadsMutation,
+  useDeleteAllLogsMutation,
+  useGetOrphansQuery,
+  useDeleteOrphanFoldersMutation,
+  useDeleteUnusedImagesMutation,
+  useRecomputeAlignmentReportsMutation,
   useDeleteBookAssetsMutation,
   useDeleteBookMutation,
   useDeleteBooksMutation,
@@ -2430,8 +2918,15 @@ export const {
   useDeleteSeriesMutation,
   useDeleteUserMutation,
   useGetCurrentUserQuery,
+  useUpdateProfileMutation,
+  useUnlinkAccountMutation,
+  useListApiTokensQuery,
+  useCreateApiTokenMutation,
+  useDeleteApiTokenMutation,
   useGetGpuBuildWarningQuery,
   useGetMaxUploadChunkSizeQuery,
+  useGetServerCapabilitiesQuery,
+  useTestCtcServerMutation,
   useLazyListCollectionsQuery,
   useLazyListCreatorsQuery,
   useLazyListSeriesQuery,
@@ -2464,6 +2959,12 @@ export const {
   useGenerateXrayMutation,
   useGetAlignmentEstimateQuery,
   useGetBookAlignmentReportQuery,
+  useGetBookChapterTextQuery,
+  useGetBookChapterGuidedNavigationQuery,
+  useGetBookChapterAudioQuery,
+  useGetTranscodedAudioQuery,
+  useGetBookAlignmentDecisionsQuery,
+  useUpdateBookAlignmentDecisionsMutation,
   useUpdateBookAlignmentOverridesMutation,
   useCancelJobMutation,
   useReorderJobsMutation,
@@ -2550,49 +3051,22 @@ export const {
   useMergeIdentifierTypesMutation,
   useListBookIdentifiersQuery,
   useUpdateBookIdentifiersMutation,
+  useLazyMetadataSearchQuery,
+  useLazyMetadataBookQuery,
+  useMetadataCoverSearchQuery,
+  useGetMetadataProvidersQuery,
+  useSetHardcoverTokenMutation,
+  useClearHardcoverTokenMutation,
+  useImportBookMetadataMutation,
+  useAutoImportBookMetadataMutation,
+  useRefreshBookRatingsMutation,
+  useDeleteExternalRatingMutation,
+  useImportBookCoverMutation,
+  useGetBookOpfQuery,
+  useGetBookMediaOverlayQuery,
+  useSendToKindleMutation,
+  useLogoutMutation,
 } = api
-
-export function getDownloadUrl(
-  bookUuid: string,
-  format: "readaloud" | "audiobook" | "ebook",
-) {
-  const searchParams = new URLSearchParams({ format })
-  return `/api/v2/books/${bookUuid}/files?${searchParams.toString()}`
-}
-
-export function getImageUrl(sha256: string, size?: number | null) {
-  if (!size || !Number.isFinite(size) || size <= 0) {
-    return `/api/v2/images/${sha256}`
-  }
-  return `/api/v2/images/${sha256}?s=${Math.round(size)}`
-}
-
-export function getCoverUrl(
-  bookUuid: string,
-  {
-    height,
-    width,
-    updatedAt,
-    audio = false,
-  }: {
-    height?: number
-    width?: number
-    audio?: boolean
-    updatedAt: string | Date
-  },
-) {
-  const searchParams = new URLSearchParams()
-  if (audio) {
-    searchParams.append("audio", "true")
-  }
-  if (height) {
-    searchParams.append("h", height.toString())
-  }
-  if (width) {
-    searchParams.append("w", width.toString())
-  }
-  return `/api/v2/books/${bookUuid}/cover?${searchParams.toString()}&v=${new Date(updatedAt).getTime()}`
-}
 
 export type ListBooksQueryArg = {
   limit?: number | undefined

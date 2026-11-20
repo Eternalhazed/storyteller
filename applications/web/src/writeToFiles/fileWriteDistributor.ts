@@ -5,8 +5,8 @@ import { MessageChannel } from "node:worker_threads"
 import Piscina, { transferableSymbol, valueSymbol } from "piscina"
 
 import {
+  releasePrefixAfterSettle,
   suppressPrefix,
-  unsuppressPrefix,
 } from "@/assets/library/scanner/write-intent"
 import { getBook, updateBook } from "@/database/books"
 import { env } from "@/env"
@@ -60,12 +60,12 @@ if (globalThis.fileWritePiscina) {
     idleTimeout: 30_000,
     // In dev, we don't bundle packages in the worker.
     // These flags allow us to import directly from the
-    // source typescript files for our own packages (e.g. @storyteller-platform/epub)
+    // source typescript files for our own packages (e.g. @storyteller/epub)
     ...(env.NODE_ENV === "development" && {
       env: {
         ...process.env,
         NODE_OPTIONS:
-          "--conditions=@storyteller-node --disable-warning=ExperimentalWarning --experimental-transform-types",
+          "--disable-warning=ExperimentalWarning --experimental-transform-types",
       },
     }),
   })
@@ -164,10 +164,10 @@ export async function queueWritesToFiles(
         audioCover: transferableAudioCover,
         port: port1,
       } satisfies WriteMetadataToFilesInput,
-      { transferList: [port1] },
+      { transferList: [port1] as never },
     )
   } finally {
-    for (const fp of filepaths) unsuppressPrefix(fp)
-    for (const dp of dirpaths) unsuppressPrefix(dp)
+    for (const fp of filepaths) releasePrefixAfterSettle(fp)
+    for (const dp of dirpaths) releasePrefixAfterSettle(dp)
   }
 }

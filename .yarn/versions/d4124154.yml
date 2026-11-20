@@ -1,0 +1,12 @@
+declined:
+  - "@storyteller/mobile"
+  - "@storyteller/web"
+  - "@storyteller/align"
+  - "@storyteller/audiobooks"
+  - "@storyteller/epub"
+  - "@storyteller/ghost-story"
+  - "@storyteller/mapping"
+  - "@storyteller/media-types"
+  - "@storyteller/nodekit"
+  - "@storyteller/okmain"
+  - "@storyteller/opds"

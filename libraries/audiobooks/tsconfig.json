@@ -1,0 +1,35 @@
+{
+  "extends": ["@tsconfig/strictest/tsconfig.json"],
+  "compilerOptions": {
+    // tsgolint (Oxlint's type-aware engine) does not auto-include
+    // @types packages the way tsc does, so list them explicitly.
+    "types": ["node"],
+    "composite": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "incremental": true,
+    "tsBuildInfoFile": ".tsbuild/tsconfig.tsbuildinfo",
+    "outDir": ".tsbuild/types",
+    "rootDir": "src",
+    "module": "NodeNext",
+    "allowJs": true,
+    "moduleResolution": "NodeNext",
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "lib": ["ESNext"]
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    {
+      "path": "../fs"
+    },
+    {
+      "path": "../path"
+    },
+    {
+      "path": "../media-types"
+    }
+  ]
+}
