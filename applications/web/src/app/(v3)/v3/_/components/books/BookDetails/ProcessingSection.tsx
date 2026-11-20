@@ -1,6 +1,7 @@
 "use client"
 
 import { type ReactNode } from "react"
+import { toast } from "sonner"
 
 import { Badge } from "@v3/_/components/ui/badge"
 import { Button } from "@v3/_/components/ui/button"
@@ -27,9 +28,11 @@ import { usePermission } from "@/hooks/usePermission"
 import * as icon from "@/icons"
 import {
   useCancelProcessingMutation,
+  useGenerateXrayMutation,
   useGetAlignmentEstimateQuery,
   useGetBookAlignmentReportQuery,
   useGetJobsQuery,
+  useGetXrayEnabledQuery,
 } from "@/store/api"
 
 import { FilePathRow } from "./FilePathRow"
@@ -84,6 +87,11 @@ export function ProcessingSection({ book }: { book: BookWithRelations }) {
   const [cancelProcessing] = useCancelProcessingMutation()
   const canProcess = usePermission("bookProcess")
   const { start, dialog, positions } = useProcessingRun([book])
+  const tx = useTranslation("Xray")
+  const { data: xray } = useGetXrayEnabledQuery(undefined, {
+    skip: !canProcess,
+  })
+  const [generateXray, { isLoading: xrayPending }] = useGenerateXrayMutation()
 
   const hasEbook = book.ebook !== null
   const hasAudiobook = book.audiobook !== null
@@ -100,12 +108,12 @@ export function ProcessingSection({ book }: { book: BookWithRelations }) {
   const formatDuration = useFormatDuration()
 
   const { data: latestFinishedJob } = useGetJobsQuery(
-    { type: "finished", bookUuid: book.uuid, limit: 1 },
+    { type: "finished", jobType: "book_align", bookUuid: book.uuid, limit: 1 },
     { skip: readaloudStatus !== "ALIGNED" },
   )
 
   const { data: activeJobs } = useGetJobsQuery(
-    { type: "active", bookUuid: book.uuid, limit: 1 },
+    { type: "active", jobType: "book_align", bookUuid: book.uuid, limit: 1 },
     { skip: readaloudStatus !== "PROCESSING" },
   )
 
@@ -261,6 +269,35 @@ export function ProcessingSection({ book }: { book: BookWithRelations }) {
         <span className="text-muted-foreground text-sm">
           {t("unprocessed")}
         </span>
+      )}
+
+      {canProcess && xray?.configured && book.ebook && !book.ebook.missing && (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={xrayPending}
+          onClick={() => {
+            void generateXray({ uuid: book.uuid })
+              .unwrap()
+              .then(() => toast.success(tx("queued")))
+              .catch((error: unknown) => {
+                const serverMessage =
+                  error &&
+                  typeof error === "object" &&
+                  "data" in error &&
+                  error.data &&
+                  typeof error.data === "object" &&
+                  "message" in error.data &&
+                  typeof error.data.message === "string"
+                    ? error.data.message
+                    : tx("failed")
+                toast.error(serverMessage)
+              })
+          }}
+        >
+          <icon.BookAlt className="mr-1 h-4 w-4" />
+          {tx("generate")}
+        </Button>
       )}
 
       {book.alignmentSummary?.grade && <AlignmentReportSummary book={book} />}

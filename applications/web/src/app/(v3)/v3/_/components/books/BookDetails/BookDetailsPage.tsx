@@ -15,7 +15,7 @@ import { useCoverScope } from "@/app/(v3)/v3/_/components/books/CoverScope"
 import { cn } from "@/cn"
 import { type BookWithRelations } from "@/database/books"
 import { usePermissions } from "@/hooks/usePermissions"
-import { api, useGetBookQuery } from "@/store/api"
+import { api, useGetBookQuery, useGetXrayEnabledQuery } from "@/store/api"
 import { useAppDispatch } from "@/store/appState"
 
 import { BookEditBar } from "./BookEditBar"
@@ -155,6 +155,9 @@ function BookDetailsContentInner({
   previousBook?: () => void
 }) {
   const permissions = usePermissions()
+  const { data: xray } = useGetXrayEnabledQuery(undefined, {
+    skip: !permissions?.bookProcess,
+  })
   const [localIsEditing, setLocalIsEditing] = useState(false)
   const [customizeOpen, setCustomizeOpen] = useState(false)
   const { reportMode, setReportMode } = useReportPanel()
@@ -185,7 +188,8 @@ function BookDetailsContentInner({
       !!book.audiobook &&
       !book.audiobook.missing) ||
       !!book.readaloud ||
-      !!book.alignedAt)
+      !!book.alignedAt ||
+      (!!book.ebook && !book.ebook.missing && !!xray?.configured))
 
   const sectionNodes: Record<DetailSectionKey, React.ReactNode> = {
     review: <ReviewSection />,

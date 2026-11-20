@@ -2,7 +2,7 @@ import { basename, dirname, extname, join, resolve } from "node:path"
 
 import { type Book, type BookWithRelations } from "@/database/books"
 import { type Settings } from "@/database/settingsTypes"
-import { ASSETS_DIR, IMAGE_CACHE_DIR } from "@/directories"
+import { ASSETS_DIR, IMAGE_CACHE_DIR, XRAY_DIR } from "@/directories"
 import { type UUID } from "@/uuid"
 
 const base62Chars =
@@ -152,6 +152,14 @@ export function getTranscriptionsFilepath(book: Book, filename = "") {
 
 export function getAlignmentReportFilepath(book: Book) {
   return join(getInternalBookDirectory(book), ".storyteller", "report.json")
+}
+
+export function getXrayFilepath(uuid: UUID) {
+  return join(XRAY_DIR, `${uuid}.json`)
+}
+
+export function getXrayStateFilepath(uuid: UUID) {
+  return join(XRAY_DIR, `${uuid}.state.json`)
 }
 
 export function getTranscriptionFilename(audioFilepath: string) {

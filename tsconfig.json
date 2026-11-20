@@ -29,6 +29,9 @@
       "path": "libraries/align"
     },
     {
+      "path": "libraries/xray"
+    },
+    {
       "path": "libraries/okmain"
     },
     {

@@ -15,7 +15,7 @@ import { type Readaloud } from "./books"
 import { db } from "./connection"
 import { type DB } from "./schema"
 
-export type JobType = "book_align"
+export type JobType = "book_align" | "book_xray"
 
 export const JOB_STATUSES = [
   "QUEUED",
@@ -57,10 +57,10 @@ export function toPublicJob(
 ): PublicJob {
   return {
     ...job,
-    config: summarizeRunConfig(job.config),
+    config: job.type === "book_align" ? summarizeRunConfig(job.config) : null,
     bookTitle,
-    alignmentGrade: alignment?.grade ?? null,
-    alignmentScore: alignment?.score ?? null,
+    alignmentGrade: job.type === "book_align" ? alignment?.grade ?? null : null,
+    alignmentScore: job.type === "book_align" ? alignment?.score ?? null : null,
   }
 }
 
@@ -118,10 +118,14 @@ export async function getJob(uuid: UUID): Promise<Job | null> {
 
 export async function getJobs(filter?: {
   statuses?: readonly JobStatus[]
+  type?: JobType
 }): Promise<Job[]> {
   let query = db.selectFrom("job").selectAll()
   if (filter?.statuses?.length) {
     query = query.where("status", "in", filter.statuses)
+  }
+  if (filter?.type) {
+    query = query.where("type", "=", filter.type)
   }
   const rows = await query
     .orderBy("position", "asc")
@@ -136,6 +140,7 @@ export type JobSort = "finishedAt" | "title" | "status"
 export async function getDisplayJobs(filter?: {
   statuses?: readonly JobStatus[]
   bookUuid?: UUID
+  jobType?: JobType
   search?: string
   sort?: JobSort
   order?: "asc" | "desc"
@@ -163,6 +168,9 @@ export async function getDisplayJobs(filter?: {
         .limit(1)
         .as("alignmentScore"),
     ])
+  if (filter?.jobType) {
+    query = query.where("job.type", "=", filter.jobType)
+  }
 
   if (filter?.statuses?.length) {
     query = query.where("job.status", "in", filter.statuses)
@@ -205,11 +213,15 @@ export async function getDisplayJobs(filter?: {
   )
 }
 
-export async function getActiveJobForBook(bookUuid: UUID): Promise<Job | null> {
+export async function getActiveJobForBook(
+  bookUuid: UUID,
+  type: JobType,
+): Promise<Job | null> {
   const row = await db
     .selectFrom("job")
     .selectAll()
     .where("bookUuid", "=", bookUuid)
+    .where("type", "=", type)
     .where("status", "in", ACTIVE_JOB_STATUSES)
     .orderBy("createdAt", "desc")
     .limit(1)

@@ -12,15 +12,9 @@ import {
 } from "@storyteller-platform/ghost-story"
 
 import { Mark } from "./model.ts"
-import { parseDom } from "./parseDom.ts"
-import { segmentChapter } from "./segmentation.ts"
+import { liftAndSegment } from "./sentences.ts"
 import { serializeDom } from "./serializeDom.ts"
-import {
-  addMark,
-  inlineFootnotes,
-  liftText,
-  replaceFootnotes,
-} from "./transform.ts"
+import { addMark, replaceFootnotes } from "./transform.ts"
 
 export interface MarkupOptions {
   granularity?: "word" | "sentence"
@@ -101,17 +95,12 @@ export async function markupChapter(
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const taggedBody = Epub.findXmlChildByName("body", taggedHtml["html"])!
 
-  const original = parseDom(Epub.getXmlChildren(body))
-
-  const inlined = inlineFootnotes(original)
-
-  const lifted = liftText(inlined.root)
+  const { original, inlined, lifted, segmentation } = await liftAndSegment(
+    body,
+    locale,
+  )
   const invertedLiftMapping = lifted.mapping.invert()
   const cursor = invertedLiftMapping.cursor()
-
-  const segmentation = await segmentChapter(lifted.result, {
-    primaryLocale: locale,
-  })
 
   timing.time("mark up", () => {
     let root = inlined.root

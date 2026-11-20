@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises"
 import { extname, join, resolve } from "node:path"
 import { cwd } from "node:process"
 import { MessageChannel } from "node:worker_threads"
@@ -5,23 +6,28 @@ import { MessageChannel } from "node:worker_threads"
 import { AsyncMutex } from "@esfx/async-mutex"
 import Piscina from "piscina"
 
+import type { CallModel } from "@storyteller-platform/xray"
+
+import { setEbookImportHandler } from "@/assets/library/scanner/ebook-import"
 import { pathBelongsTo } from "@/assets/library/scanner/folder"
 import { filepathFolder, scan } from "@/assets/library/scanner/scan"
 import {
   suppressPrefix,
   unsuppressPrefix,
 } from "@/assets/library/scanner/write-intent"
-import { getReadaloudFilepath } from "@/assets/paths"
+import { getReadaloudFilepath, getXrayFilepath } from "@/assets/paths"
 import {
   type BookRelationsUpdate,
   type BookUpdate,
   type BookWithRelations,
   type Readaloud,
+  getBook,
   getBookOrThrow,
   updateBook,
 } from "@/database/books"
 import {
   type Job,
+  type JobType,
   createJob,
   getActiveJobForBook,
   getJob,
@@ -40,6 +46,7 @@ import type { JobStats } from "./jobStats"
 import { type RunConfig, buildRunConfig } from "./runConfig"
 import { STAGE_ORDER } from "./stages"
 import type processBook from "./worker"
+import { type XraySourceReader, runXrayJob } from "./xray"
 
 export type RestartMode = false | "full" | "transcription" | "sync"
 
@@ -60,6 +67,9 @@ declare global {
   var jobControllers: Map<UUID, AbortController> | undefined
   var jobAbortIntents: Map<UUID, "cancel" | "pause"> | undefined
   var alignmentPiscina: Piscina | undefined
+  var xrayJobControllers: Map<UUID, AbortController> | undefined
+  var jobPumpMutex: AsyncMutex | undefined
+  var jobFinalizationFailures: Set<UUID> | undefined
   /* eslint-enable no-var */
 }
 
@@ -104,14 +114,24 @@ if (globalThis.alignmentPiscina) {
   globalThis.alignmentPiscina = alignmentPiscina
 }
 
-const pumpMutex = new AsyncMutex()
+const xrayControllers = (globalThis.xrayJobControllers ??= new Map<
+  UUID,
+  AbortController
+>())
+const pumpMutex = (globalThis.jobPumpMutex ??= new AsyncMutex())
+const finalizationFailures = (globalThis.jobFinalizationFailures ??=
+  new Set<UUID>())
+
+export function getJobAbortIntent(jobUuid: UUID) {
+  return abortIntents.get(jobUuid)
+}
 
 export async function enqueueBookAlign(
   bookUuid: UUID,
   restart: RestartMode,
   overrides?: Partial<RunConfig>,
 ): Promise<Job> {
-  const existing = await getActiveJobForBook(bookUuid)
+  const existing = await getActiveJobForBook(bookUuid, "book_align")
   if (existing) {
     return existing
   }
@@ -147,38 +167,170 @@ export async function enqueueBookAlign(
   return job
 }
 
-async function claimNextJob(): Promise<Job | undefined> {
+export async function enqueueBookXray(bookUuid: UUID): Promise<Job> {
+  let job: Job
   await pumpMutex.lock()
   try {
-    if (controllers.size >= MAX_CONCURRENT) return undefined
+    const existing = await getActiveJobForBook(bookUuid, "book_xray")
+    if (existing) return existing
+    job = await createJob({
+      type: "book_xray",
+      bookUuid,
+      restart: false,
+      config: null,
+      position: await getNextJobPosition(),
+    })
+  } finally {
+    pumpMutex.unlock()
+  }
+  void pump()
+  return job
+}
 
-    const [next] = await getJobs({ statuses: ["QUEUED", "RUNNING"] })
+export async function maybeEnqueueBookXray(bookUuid: UUID): Promise<void> {
+  try {
+    const settings = await getSettings()
+    if (!settings.xrayAutoGenerate || !settings.xrayAnthropicApiKey?.trim())
+      return
+    const book = await getBook(bookUuid)
+    if (!book?.ebook?.filepath || book.ebook.missing) return
+    try {
+      const file = await stat(getXrayFilepath(bookUuid))
+      if (file.size > 0) return
+    } catch (error) {
+      if (
+        !(error instanceof Error && "code" in error && error.code === "ENOENT")
+      ) {
+        throw error
+      }
+    }
+    await enqueueBookXray(bookUuid)
+  } catch (error) {
+    logger.warn({
+      msg: "Failed to queue automatic X-Ray generation",
+      bookUuid,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+setEbookImportHandler(maybeEnqueueBookXray)
+
+async function claimNextJob(type: JobType): Promise<Job | undefined> {
+  await pumpMutex.lock()
+  try {
+    const lane = type === "book_xray" ? xrayControllers : controllers
+    if (lane.size >= MAX_CONCURRENT) return undefined
+
+    const next = (
+      await getJobs({
+        statuses: ["QUEUED", "RUNNING"],
+        type,
+      })
+    ).find((job) => !finalizationFailures.has(job.uuid))
     if (!next) return undefined
 
     const abortController = new AbortController()
-    controllers.set(next.uuid, abortController)
-    return await updateJob(next.uuid, {
-      status: "RUNNING",
-      startedAt: nowTimestamp(),
-      error: null,
-    })
+    lane.set(next.uuid, abortController)
+    try {
+      return await updateJob(next.uuid, {
+        status: "RUNNING",
+        startedAt:
+          type === "book_xray"
+            ? next.startedAt ?? nowTimestamp()
+            : nowTimestamp(),
+        error: null,
+      })
+    } catch (error) {
+      lane.delete(next.uuid)
+      throw error
+    }
   } finally {
     pumpMutex.unlock()
   }
 }
 
-export async function pump(): Promise<void> {
-  const job = await claimNextJob()
-  if (!job) return
-
-  void runJob(job).finally(() => {
-    controllers.delete(job.uuid)
-    abortIntents.delete(job.uuid)
-    void pump()
-  })
+export async function pump(
+  callModel?: CallModel,
+  readSource?: XraySourceReader,
+): Promise<void> {
+  const running: Promise<void>[] = []
+  for (const type of ["book_align", "book_xray"] as const) {
+    let job: Job | undefined
+    try {
+      job = await claimNextJob(type)
+    } catch (error) {
+      logger.error({
+        msg: "Failed to claim a queued job",
+        type,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      continue
+    }
+    if (!job) continue
+    const claimed = job
+    const lane = type === "book_xray" ? xrayControllers : controllers
+    running.push(
+      runJob(claimed, callModel, readSource)
+        .catch(async (error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error)
+          logger.error({
+            msg: "Job runner failed",
+            jobUuid: claimed.uuid,
+            type,
+            error: message,
+          })
+          const intent = abortIntents.get(claimed.uuid)
+          try {
+            await updateJob(claimed.uuid, {
+              status:
+                intent === "pause"
+                  ? "PAUSED"
+                  : intent === "cancel"
+                    ? "CANCELED"
+                    : "ERROR",
+              finishedAt: intent === "pause" ? null : nowTimestamp(),
+              error: intent ? null : message,
+            })
+          } catch (writeError) {
+            // Do not immediately reclaim a RUNNING row whose final write failed.
+            finalizationFailures.add(claimed.uuid)
+            logger.error({
+              msg: "Failed to record the job runner failure",
+              jobUuid: claimed.uuid,
+              error:
+                writeError instanceof Error
+                  ? writeError.message
+                  : String(writeError),
+            })
+          }
+        })
+        .finally(() => {
+          lane.delete(claimed.uuid)
+          abortIntents.delete(claimed.uuid)
+          void pump(callModel, readSource)
+        }),
+    )
+  }
+  await Promise.all(running)
 }
 
-async function runJob(job: Job): Promise<void> {
+async function runJob(
+  job: Job,
+  callModel?: CallModel,
+  readSource?: XraySourceReader,
+): Promise<void> {
+  if (job.type === "book_xray") {
+    const controller = xrayControllers.get(job.uuid)
+    if (!controller) return
+    await runXrayJob(job, {
+      callModel,
+      readSource,
+      signal: controller.signal,
+      getAbortIntent: () => abortIntents.get(job.uuid) ?? "cancel",
+    })
+    return
+  }
   if (!job.bookUuid) {
     logger.error(`Job ${job.uuid} is not a runnable book_align job`)
     await updateJob(job.uuid, { status: "ERROR", error: "invalid job" })
@@ -312,6 +464,7 @@ async function runJob(job: Job): Promise<void> {
       finishedAt: nowTimestamp(),
       stats: stats ?? undefined,
     })
+    await maybeEnqueueBookXray(bookUuid)
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       const intent = abortIntents.get(job.uuid) ?? "cancel"
@@ -364,7 +517,8 @@ export async function cancelJob(jobUuid: UUID): Promise<void> {
   const job = await getJob(jobUuid)
   if (!job) return
 
-  const controller = controllers.get(jobUuid)
+  const lane = job.type === "book_xray" ? xrayControllers : controllers
+  const controller = lane.get(jobUuid)
   if (controller) {
     abortIntents.set(jobUuid, "cancel")
     controller.abort()
@@ -372,7 +526,8 @@ export async function cancelJob(jobUuid: UUID): Promise<void> {
   }
 
   await updateJob(jobUuid, { status: "CANCELED", finishedAt: nowTimestamp() })
-  if (job.bookUuid) {
+  finalizationFailures.delete(jobUuid)
+  if (job.type === "book_align" && job.bookUuid) {
     await updateBook(job.bookUuid, null, {
       readaloud: {
         status: "STOPPED",
@@ -389,7 +544,8 @@ export async function pauseJob(jobUuid: UUID): Promise<void> {
   const job = await getJob(jobUuid)
   if (!job) return
 
-  const controller = controllers.get(jobUuid)
+  const lane = job.type === "book_xray" ? xrayControllers : controllers
+  const controller = lane.get(jobUuid)
   if (controller) {
     abortIntents.set(jobUuid, "pause")
     controller.abort()
@@ -411,7 +567,8 @@ export async function resumeJob(jobUuid: UUID): Promise<void> {
     position,
     finishedAt: null,
   })
-  if (job.bookUuid) {
+  finalizationFailures.delete(jobUuid)
+  if (job.type === "book_align" && job.bookUuid) {
     await updateBook(job.bookUuid, null, {
       readaloud: {
         status: "QUEUED",
@@ -428,7 +585,7 @@ export async function reorderJobs(orderedUuids: UUID[]): Promise<void> {
 }
 
 export async function cancelProcessing(bookUuid: UUID): Promise<void> {
-  const job = await getActiveJobForBook(bookUuid)
+  const job = await getActiveJobForBook(bookUuid, "book_align")
   if (job) await cancelJob(job.uuid)
 }
 

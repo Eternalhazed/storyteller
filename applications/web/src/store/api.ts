@@ -37,7 +37,7 @@ import {
 } from "@/database/identifiers"
 import { type Image } from "@/database/images"
 import { type ImportRuleWithCollections } from "@/database/importRules"
-import { type PublicJob } from "@/database/jobs"
+import { type JobType, type PublicJob } from "@/database/jobs"
 import {
   type FacetSection,
   type FacetValue,
@@ -2241,6 +2241,7 @@ export const api = createApi({
       {
         type?: "active" | "finished" | "all"
         bookUuid?: UUID
+        jobType?: JobType
         search?: string
         sort?: "finishedAt" | "title" | "status"
         order?: "asc" | "desc"
@@ -2252,6 +2253,7 @@ export const api = createApi({
         const params = new URLSearchParams()
         if (arg?.type) params.set("type", arg.type)
         if (arg?.bookUuid) params.set("bookUuid", arg.bookUuid)
+        if (arg?.jobType) params.set("jobType", arg.jobType)
         if (arg?.search) params.set("search", arg.search)
         if (arg?.sort) params.set("sort", arg.sort)
         if (arg?.order) params.set("order", arg.order)
@@ -2324,6 +2326,17 @@ export const api = createApi({
         url: `/jobs/${uuid}`,
         method: "PATCH",
         body: { action: "resume" },
+      }),
+      invalidatesTags: ["Jobs"],
+    }),
+    getXrayEnabled: build.query<{ configured: boolean }, void>({
+      query: () => "/settings/xray",
+      providesTags: ["Settings"],
+    }),
+    generateXray: build.mutation<void, { uuid: UUID }>({
+      query: ({ uuid }) => ({
+        url: `/books/${uuid}/xray`,
+        method: "POST",
       }),
       invalidatesTags: ["Jobs"],
     }),
@@ -2410,6 +2423,8 @@ export const {
   useMergeBooksMutation,
   useProcessBookMutation,
   useGetJobsQuery,
+  useGetXrayEnabledQuery,
+  useGenerateXrayMutation,
   useGetAlignmentEstimateQuery,
   useGetBookAlignmentReportQuery,
   useUpdateBookAlignmentOverridesMutation,

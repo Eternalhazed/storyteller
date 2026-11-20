@@ -39,6 +39,8 @@ type IngestedBase = {
 
 export type IngestedEpub = IngestedBase & {
   format: "ebook" | "readaloud"
+  /** A new ebook was attached, rather than an existing filepath being rescanned. */
+  ebookImported?: boolean
   // null when ingest didn't open the file (existing-book branch); scanEbook
   // then calls openEpubStep, which upgrades EPUB 2 if needed.
   preopenedEpub: InMemoryEpubReader | null
@@ -260,7 +262,12 @@ export async function ingestCandidate(
         format,
         importMode,
       )
-      return assembleExisting(placed.book, placed.filepath, format)
+      return assembleExisting(
+        placed.book,
+        placed.filepath,
+        format,
+        format === "ebook",
+      )
     }
 
     return assembleExisting(existing, candidate.filepath, format)
@@ -279,6 +286,7 @@ function assembleExisting(
   book: BookWithRelations,
   filepath: string,
   format: ScanFormat,
+  ebookImported = false,
 ): IngestResult {
   if (format === "audiobook") {
     return {
@@ -294,6 +302,7 @@ function assembleExisting(
     filepath,
     format,
     isNew: false,
+    ebookImported,
     preopenedEpub: null,
   }
 }

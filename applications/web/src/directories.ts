@@ -29,3 +29,5 @@ export const CACHE_DIR = join(DATA_DIR, "cache")
 export const BACKUP_DIR = join(DATA_DIR, "backups")
 
 export const LOG_DIR = join(DATA_DIR, "logs")
+
+export const XRAY_DIR = join(DATA_DIR, "xray")

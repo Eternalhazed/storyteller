@@ -80,10 +80,11 @@ export function QueueTab() {
   const queued = list.filter((j) => j.status === "QUEUED")
 
   function move(job: PublicJob, direction: -1 | 1) {
-    const index = queued.findIndex((j) => j.uuid === job.uuid)
+    const lane = queued.filter((queuedJob) => queuedJob.type === job.type)
+    const index = lane.findIndex((j) => j.uuid === job.uuid)
     const target = index + direction
-    if (index < 0 || target < 0 || target >= queued.length) return
-    const next = [...queued]
+    if (index < 0 || target < 0 || target >= lane.length) return
+    const next = [...lane]
     const [removed] = next.splice(index, 1)
     if (!removed) return
     next.splice(target, 0, removed)
@@ -107,13 +108,16 @@ export function QueueTab() {
         ) : (
           <div className="flex flex-col gap-2">
             {list.map((job) => {
-              const queuedIndex = queued.findIndex((j) => j.uuid === job.uuid)
+              const lane = queued.filter(
+                (queuedJob) => queuedJob.type === job.type,
+              )
+              const queuedIndex = lane.findIndex((j) => j.uuid === job.uuid)
               return (
                 <JobItem
                   key={job.uuid}
                   job={job}
                   isFirst={queuedIndex <= 0}
-                  isLast={queuedIndex >= queued.length - 1}
+                  isLast={queuedIndex >= lane.length - 1}
                   move={move}
                   pauseJob={(uuid) => void pauseJob({ uuid })}
                   resumeJob={(uuid) => void resumeJob({ uuid })}
@@ -274,7 +278,7 @@ function StatusBadge({ status }: { status: PublicJob["status"] }) {
 }
 
 function useEstimatedRemaining(job: PublicJob) {
-  const isRunning = job.status === "RUNNING"
+  const isRunning = job.type === "book_align" && job.status === "RUNNING"
   const bookUuid = job.bookUuid ?? ("" as UUID)
 
   const { data } = useGetAlignmentEstimateQuery(
@@ -343,8 +347,8 @@ function JobItem({
 
   const formatDate = useFormatDate()
   const detail =
-    job.status === "RUNNING" && stageLabel ? (
-      `${stageLabel} · ${pct}%`
+    job.status === "RUNNING" ? (
+      `${stageLabel ?? t(`types.${job.type}`)} · ${pct}%`
     ) : job.status === "QUEUED" ? (
       t("detail.waiting")
     ) : job.status === "PAUSED" ? (
@@ -397,19 +401,25 @@ function JobItem({
             {job.bookTitle ?? t("untitled")}
           </V3Link>
           <StatusBadge status={job.status} />
-          {job.status === "DONE" && job.alignmentGrade && job.bookUuid && (
-            <V3Link
-              href={`/books/${job.bookUuid}/alignment`}
-              className="inline-flex items-center gap-1"
-            >
-              <GradePill grade={job.alignmentGrade} />
-              {job.alignmentScore != null && (
-                <span className="text-muted-foreground text-xs tabular-nums">
-                  {job.alignmentScore}%
-                </span>
-              )}
-            </V3Link>
-          )}
+          <span className="text-muted-foreground text-xs">
+            {t(`types.${job.type}`)}
+          </span>
+          {job.type === "book_align" &&
+            job.status === "DONE" &&
+            job.alignmentGrade &&
+            job.bookUuid && (
+              <V3Link
+                href={`/books/${job.bookUuid}/alignment`}
+                className="inline-flex items-center gap-1"
+              >
+                <GradePill grade={job.alignmentGrade} />
+                {job.alignmentScore != null && (
+                  <span className="text-muted-foreground text-xs tabular-nums">
+                    {job.alignmentScore}%
+                  </span>
+                )}
+              </V3Link>
+            )}
         </ItemTitle>
         <ItemDescription>
           {detail}
@@ -504,7 +514,7 @@ function JobItem({
           </TooltipButton>
         ) : null}
 
-        {job.status === "DONE" && job.bookUuid ? (
+        {job.type === "book_align" && job.status === "DONE" && job.bookUuid ? (
           <TooltipButton
             variant="ghost"
             size="icon"

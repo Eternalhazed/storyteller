@@ -240,6 +240,60 @@ alignment phase of the process.
 
 ---
 
+## X-Ray
+
+X-Ray is a spoiler-safe index of a book's characters, places, groups, and
+things. See the [X-Ray guide](reading/x-ray.md) for setup, estimated cost,
+spoiler safety, and generation controls.
+
+In the web settings, configure it in the **X-Ray** section (under **Processing**
+in the v3 interface):
+
+- **Anthropic API key** (`xrayAnthropicApiKey`): required to generate X-Ray. It
+  is stored encrypted with the server's other provider keys. No key is
+  configured by default.
+- **Model** (`xrayModel`): the Anthropic model to use. The default is
+  `claude-haiku-5-5`.
+- **Generate X-Ray automatically** (`xrayAutoGenerate`): disabled by default.
+  Enable it to generate X-Ray after import or readaloud creation.
+
+Generating X-Ray sends book text to Anthropic and uses its paid API. Leaving
+automatic generation disabled does not prevent manually requesting generation.
+These settings can also be provided through
+[declarative configuration](installation/self-hosting.md#declarative-configuration),
+including `xrayAnthropicApiKey_file` for a key stored in a separate secret file.
+
+Users with permission to process books can use **Generate or regenerate X-Ray**
+next to a book's processing actions in either web interface. The action is only
+shown when an Anthropic key is configured and the book has an available ebook.
+
+X-Ray has a separate queue lane: one X-Ray job can run alongside one alignment
+job. Its progress and errors appear in the processing queue, without alignment
+grades. Queue ordering applies within each lane. Pause and cancel finish and
+checkpoint an in-flight passage before stopping; resuming or retrying continues
+from the saved passages. Interrupted jobs are recovered when the server starts.
+X-Ray always reads the source ebook, not the generated readaloud EPUB, and does
+not change the book's readaloud status.
+
+Generated X-Ray data and resumable progress are stored in the server's data
+directory and removed when the book is deleted. A trusted batch tool can also
+provide X-Ray data without a matching job record.
+
+The API provides:
+
+- `GET /api/v2/books/{bookId}/xray`: requires permission to read the book.
+  Returns the JSON file and an `ETag`, or `404` if no file exists. Send
+  `If-None-Match` with the `ETag` to receive `304` when the file is unchanged.
+- `POST /api/v2/books/{bookId}/xray`: requires permission to process the book.
+  Queues generation or regeneration and returns `204`. An unknown book or
+  missing ebook returns `404`; a missing Anthropic API key returns `409`.
+
+The file is shared by all readers of a book and contains no per-user position.
+Clients must filter its contents to the user's current sentence before
+displaying names, descriptions, facts, summaries, or mentions.
+
+---
+
 ## Authentication Providers
 
 If you’d like to set up an OAuth provider for Storyteller, you can do so here.

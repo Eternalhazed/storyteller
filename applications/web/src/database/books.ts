@@ -22,6 +22,7 @@ import {
   getMetadataFromEpub,
 } from "@/assets/metadata"
 import { getDefaultSuffix, getSafeFilepathSegment } from "@/assets/paths"
+import { mergeXrayFiles, removeXrayFiles } from "@/assets/xray"
 import { toIsoDateString } from "@/dates"
 import { ASSETS_DIR } from "@/directories"
 import { BookEvents, type BookUpdatePayload } from "@/events"
@@ -840,6 +841,7 @@ export function booksQuery(userId?: UUID, options?: BooksQueryOptions) {
             "job.finishedAt",
           ])
           .whereRef("job.bookUuid", "=", "book.uuid")
+          .where("job.type", "=", "book_align")
           .where("job.status", "in", ["QUEUED", "RUNNING", "PAUSED"])
           .orderBy("job.createdAt", "desc")
           .limit(1),
@@ -1184,9 +1186,12 @@ export async function deleteBook(
 
   if (tr) {
     await callback(tr)
+    return
   } else {
     await db.transaction().execute(callback)
   }
+
+  await removeXrayFiles(bookUuid)
 
   BookEvents.emit("message", {
     type: "bookDeleted",
@@ -1276,6 +1281,7 @@ export async function updateBook(
   // the asset folder afterwards.
   const before =
     update && update.title !== undefined ? await getBook(uuid, userId) : null
+  let mergedEbooks: { bookUuid: UUID }[] | undefined
 
   await db.transaction().execute(async (tr) => {
     if (update && Object.keys(update).length) {
@@ -1640,6 +1646,12 @@ export async function updateBook(
     }
 
     if (relations.books) {
+      mergedEbooks = await tr
+        .selectFrom("ebook")
+        .select(["bookUuid"])
+        .where("bookUuid", "in", relations.books)
+        .execute()
+
       await tr
         .updateTable("ebook")
         .set({ bookUuid: uuid })
@@ -1713,6 +1725,16 @@ export async function updateBook(
         .execute()
     }
   })
+
+  if (relations.books) {
+    for (const bookUuid of relations.books) {
+      if (mergedEbooks?.some((ebook) => ebook.bookUuid === bookUuid)) {
+        await mergeXrayFiles(bookUuid, uuid)
+      } else {
+        await removeXrayFiles(bookUuid)
+      }
+    }
+  }
 
   let book = await getBook(uuid, userId)
 

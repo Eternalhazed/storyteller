@@ -1,3 +1,4 @@
+import { removeXrayFiles } from "@/assets/xray"
 import { type BookWithRelations, getBooks } from "@/database/books"
 import { getWatchRules } from "@/database/importRules"
 import { getSetting } from "@/database/settings"
@@ -14,6 +15,7 @@ import {
   type ScanOptions,
   type ScanSource,
 } from "./ctx"
+import { notifyEbookImported } from "./ebook-import"
 import {
   canonicalizePath,
   listBookCandidates,
@@ -260,6 +262,7 @@ export async function scan(opts: {
     ...(opts.options ?? {}),
   }
 
+  const importedBookUuids = new Set<UUID>()
   const locked = await withScanLock(
     opts.source,
     startedAt,
@@ -290,11 +293,21 @@ export async function scan(opts: {
       const scannedBookUuids = new Set<UUID>()
       const concurrency =
         baseOptions.concurrency ?? defaultConcurrency(opts.source)
-      await runWorkers(candidates, ctx, concurrency, scannedBookUuids)
+      await runWorkers(
+        candidates,
+        ctx,
+        concurrency,
+        scannedBookUuids,
+        importedBookUuids,
+      )
 
       return { scannedBookUuids, processedCandidates: candidates.length }
     },
   )
+
+  for (const uuid of importedBookUuids) {
+    await notifyEbookImported(uuid)
+  }
 
   report.finish()
   report.logger.info({ msg: report.formatSummary() })
@@ -347,6 +360,7 @@ async function runWorkers(
   ctx: ScanCtx,
   concurrency: number,
   scannedBookUuids: Set<UUID>,
+  importedBookUuids: Set<UUID>,
 ) {
   const total = candidates.length
   if (total === 0) {
@@ -403,6 +417,13 @@ async function runWorkers(
           : await scanEbook(ingested, pipelineCtx)
       if (book) {
         scannedBookUuids.add(book.uuid)
+        if (
+          ingested.format === "ebook" &&
+          (ingested.isNew || ingested.ebookImported)
+        ) {
+          if (!ingested.isNew) await removeXrayFiles(book.uuid)
+          importedBookUuids.add(book.uuid)
+        }
       }
       reportDelta(`${candidate.format} ${candidate.filepath}`, memBefore)
       return book

@@ -6,6 +6,7 @@ import {
   getInternalEpubFilepath,
   getInternalReadaloudFilepath,
 } from "@/assets/paths"
+import { removeXrayFiles } from "@/assets/xray"
 import { type Book, type BookWithRelations, getBook } from "@/database/books"
 import { getSetting } from "@/database/settings"
 import {
@@ -114,6 +115,8 @@ export async function replaceBookAsset(
 
   assertSourceOutsideAssetDir(book, filepath)
 
+  if (format === "ebook") await removeXrayFiles(book.uuid)
+
   // when replacing an existing format, wipe what's on disk first
   if (book[format]) {
     const assetDir = getInternalBookDirectory(book)
@@ -190,6 +193,8 @@ export async function replaceBookAssetFromUpload(
   opts: ReplaceAssetFromUploadOpts,
 ): Promise<BookWithRelations | null> {
   const { book, uploadPath, format, metadataFieldOverrides, signal } = opts
+
+  if (format === "ebook") await removeXrayFiles(book.uuid)
 
   await clearInternalAssetForFormat(book, format)
 

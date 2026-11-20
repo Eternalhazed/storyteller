@@ -214,6 +214,7 @@ function settingsFormValues(settings: Settings) {
     openAiModelName: settings.openAiModelName ?? "",
     deepgramApiKey: settings.deepgramApiKey ?? "",
     deepgramModel: settings.deepgramModel ?? "nova-3",
+    xrayAnthropicApiKey: settings.xrayAnthropicApiKey ?? "",
     disablePasswordLogin: settings.disablePasswordLogin,
     importRules: settings.importRules ?? [],
     autoIgnoreRules: settings.autoIgnoreRules ?? [],

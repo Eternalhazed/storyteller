@@ -257,6 +257,7 @@ export const ENCRYPTED_SETTING_KEYS = [
   "amazonTranscribeSecretAccessKey",
   "openAiApiKey",
   "deepgramApiKey",
+  "xrayAnthropicApiKey",
 ] as const
 
 export type EncryptedSettingKey = (typeof ENCRYPTED_SETTING_KEYS)[number]
@@ -308,6 +309,10 @@ export const SettingsSchema = z.object({
   openAiModelName: z.string().nullable(),
   deepgramApiKey: z.string().nullable(),
   deepgramModel: z.string().nullable(),
+  // X-Ray settings
+  xrayAnthropicApiKey: z.string().nullable(),
+  xrayModel: z.string().trim().min(1),
+  xrayAutoGenerate: z.boolean(),
   // Parallelization settings
   parallelTranscodes: z.number(),
   parallelTranscribes: z.number(),

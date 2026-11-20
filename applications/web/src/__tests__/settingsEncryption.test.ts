@@ -23,19 +23,28 @@ void describe("settings encryption", () => {
       ...settings,
       openAiApiKey: "sk-test-value",
       smtpPassword: "hunter2",
+      xrayAnthropicApiKey: "sk-ant-test-value",
     })
 
     const storedKey = storedValue(ctx, "openAiApiKey")
     const storedPassword = storedValue(ctx, "smtpPassword")
+    const storedXrayKey = storedValue(ctx, "xrayAnthropicApiKey")
 
     assert.ok(typeof storedKey === "string" && isEncrypted(storedKey))
     assert.ok(!storedKey.includes("sk-test-value"))
     assert.ok(typeof storedPassword === "string" && isEncrypted(storedPassword))
     assert.ok(!storedPassword.includes("hunter2"))
+    assert.ok(typeof storedXrayKey === "string" && isEncrypted(storedXrayKey))
+    assert.ok(!storedXrayKey.includes("sk-ant-test-value"))
 
     const readBack = await getSettings()
     assert.strictEqual(readBack.openAiApiKey, "sk-test-value")
     assert.strictEqual(readBack.smtpPassword, "hunter2")
+    assert.strictEqual(readBack.xrayAnthropicApiKey, "sk-ant-test-value")
+    assert.strictEqual(
+      await getSetting("xrayAnthropicApiKey"),
+      "sk-ant-test-value",
+    )
     assert.strictEqual(await getSetting("openAiApiKey"), "sk-test-value")
   })
 

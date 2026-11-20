@@ -21,7 +21,7 @@ export function ProgressVisualization({
 }) {
   const reduce = useReducedMotion()
 
-  if (reduce) {
+  if (reduce || view.stage === null) {
     return (
       <InlineRow percent={percent} className={className}>
         <StaticProgressBar view={view} />

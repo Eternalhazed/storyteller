@@ -1,0 +1,94 @@
+{
+  "name": "@storyteller-platform/xray",
+  "version": "0.1.0",
+  "description": "Builds a spoiler-safe index of the characters, places, groups, and things in an EPUB",
+  "author": "Shane Friedman",
+  "license": "MIT",
+  "keywords": [
+    "epub",
+    "ebook",
+    "x-ray",
+    "index"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://gitlab.com/storyteller-platform/storyteller"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./epub": {
+      "types": "./src/epub.ts",
+      "default": "./src/epub.ts"
+    },
+    "./view": {
+      "types": "./src/view.ts",
+      "default": "./src/view.ts"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "cli": "tsx src/cli.ts",
+    "prepack": "yarn build",
+    "test": "tsx --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "~1.9.0",
+    "@storyteller-platform/align": "workspace:^",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@storyteller-platform/eslint": "workspace:*",
+    "@storyteller-platform/tsup": "workspace:*",
+    "@tsconfig/strictest": "^2.0.5",
+    "@types/node": "^24.0.0",
+    "eslint": "^8.0.0",
+    "tsup": "^8.5.0",
+    "tsx": "^4.19.2",
+    "typescript": "~5.8.3"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.js"
+        },
+        "require": {
+          "types": "./dist/index.d.cts",
+          "default": "./dist/index.cjs"
+        }
+      },
+      "./epub": {
+        "import": {
+          "types": "./dist/epub.d.ts",
+          "default": "./dist/epub.js"
+        },
+        "require": {
+          "types": "./dist/epub.d.cts",
+          "default": "./dist/epub.cjs"
+        }
+      },
+      "./view": {
+        "import": {
+          "types": "./dist/view.d.ts",
+          "default": "./dist/view.js"
+        },
+        "require": {
+          "types": "./dist/view.d.cts",
+          "default": "./dist/view.cjs"
+        }
+      }
+    }
+  }
+}

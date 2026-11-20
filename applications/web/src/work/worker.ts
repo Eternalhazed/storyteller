@@ -15,6 +15,7 @@ import {
   createTiming,
   formatSingleReport,
 } from "@storyteller-platform/ghost-story"
+import { readBookSource } from "@storyteller-platform/xray/epub"
 
 import { getExtractedCover } from "@/assets/covers"
 import { deleteProcessed, deleteTranscriptions } from "@/assets/fs"
@@ -52,6 +53,10 @@ if (process.env["DEBUG_WORKER"] === "true") {
   void import("node:inspector").then(({ default: inspector }) =>
     inspector.open(9231, "0.0.0.0", true),
   )
+}
+
+export async function readXraySource({ epubPath }: { epubPath: string }) {
+  return await readBookSource(epubPath)
 }
 
 export default async function processBook({

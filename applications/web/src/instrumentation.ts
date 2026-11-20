@@ -96,9 +96,7 @@ export async function register() {
       logger.info(`Adding ${book.title} to the queue`)
       void startProcessing(book.uuid, book.readaloud?.restartPending || false)
     }
-    if (queue.length) {
-      void pump()
-    }
+    void pump()
   } catch (err) {
     logger.error("Failed to restart processing queue")
     logger.error(err)

@@ -153,6 +153,7 @@ export function ProcessingToast() {
           <div className="flex items-center justify-between gap-0.5">
             <span className="text-muted-foreground text-xs">
               {headline}
+              {` · ${t(`types.${current.type}`)}`}
               {queuedCount > 0
                 ? ` · ${t("toast.queuedSuffix", { count: queuedCount })}`
                 : ""}
@@ -267,31 +268,49 @@ function useFinishedNotifications(
       const title = job.bookTitle ?? t("toast.aBook")
       if (job.status === "DONE") {
         const href = job.bookUuid ? `${basePath}/books/${job.bookUuid}` : null
-        toast.success(t("toast.ready", { title }), {
-          ...(href && {
-            action: {
-              label: t("toast.open"),
-              onClick: () => {
-                router.push(href)
-              },
-            },
+        toast.success(
+          t(job.type === "book_xray" ? "toast.xrayReady" : "toast.ready", {
+            title,
           }),
-        })
+          {
+            ...(href && {
+              action: {
+                label: t("toast.open"),
+                onClick: () => {
+                  router.push(href)
+                },
+              },
+            }),
+          },
+        )
         if (
           typeof Notification !== "undefined" &&
           Notification.permission === "granted" &&
           typeof document !== "undefined" &&
           document.hidden
         ) {
-          const notification = new Notification(t("toast.notifyReadyTitle"), {
-            body: t("toast.notifyReadyBody", { title }),
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            icon: getCoverUrl(job.bookUuid!, {
-              width: 96,
-              height: 64,
-              updatedAt: job.updatedAt,
-            }),
-          })
+          const notification = new Notification(
+            t(
+              job.type === "book_xray"
+                ? "toast.xrayNotifyReadyTitle"
+                : "toast.notifyReadyTitle",
+            ),
+            {
+              body: t(
+                job.type === "book_xray"
+                  ? "toast.xrayNotifyReadyBody"
+                  : "toast.notifyReadyBody",
+                { title },
+              ),
+              ...(job.bookUuid && {
+                icon: getCoverUrl(job.bookUuid, {
+                  width: 96,
+                  height: 64,
+                  updatedAt: job.updatedAt,
+                }),
+              }),
+            },
+          )
           if (href) {
             notification.onclick = () => {
               window.focus()
@@ -300,9 +319,12 @@ function useFinishedNotifications(
           }
         }
       } else if (job.status === "ERROR") {
-        toast.error(t("toast.failed", { title }), {
-          description: job.error ?? undefined,
-        })
+        toast.error(
+          t(job.type === "book_xray" ? "toast.xrayFailed" : "toast.failed", {
+            title,
+          }),
+          { description: job.error ?? undefined },
+        )
       }
     }
   }, [finishedJobs, basePath, router, t])

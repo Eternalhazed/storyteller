@@ -6,6 +6,8 @@ import { cwd } from "node:process"
 import Db, { type Database } from "better-sqlite3"
 import type { Kysely } from "kysely"
 
+import { DEFAULT_XRAY_MODEL } from "@storyteller-platform/xray"
+
 import { getSafeFilepathSegment } from "@/assets/paths"
 import { replaceDatabase } from "@/database/connection"
 import { createKyselyDb } from "@/database/factory"
@@ -50,6 +52,9 @@ const DEFAULT_SETTINGS: Settings = {
   openAiModelName: null,
   deepgramApiKey: null,
   deepgramModel: null,
+  xrayAnthropicApiKey: null,
+  xrayModel: DEFAULT_XRAY_MODEL,
+  xrayAutoGenerate: false,
   parallelTranscodes: 1,
   parallelTranscribes: 1,
   authProviders: [],

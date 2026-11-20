@@ -47,10 +47,10 @@ export function jobToView(
   }
 }
 
-// overall progress across the three stages, 0..1.
+// Alignment spans three stages; jobs without a stage report overall progress.
 export function overallProgress(view: ProcessingView): number {
   if (view.status === "done") return 1
-  if (view.stage == null) return 0
+  if (view.stage == null) return view.stageProgress
   const index = STAGE_SEQUENCE.indexOf(view.stage)
   return (index + view.stageProgress) / STAGE_SEQUENCE.length
 }
