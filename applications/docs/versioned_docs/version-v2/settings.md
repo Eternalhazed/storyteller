@@ -83,6 +83,17 @@ automatic imports into specific collections is found elsewhere in this
 documentation, but this setting is where you designate the watch folder for
 _uncollected_ books.
 
+Inside a watched folder, a sub-folder named exactly like an existing collection
+(ignoring case) files every new book found in it into that collection. With a
+collection called "David", a book dropped into `<watch folder>/David/` lands in
+it, without a separate import rule.
+
+When a new book's files name no series, Storyteller looks the book up with the
+metadata providers, as the book page's automatic metadata import does, and
+applies the result when it meets the confidence thresholds set under metadata
+settings. A book whose series already exists joins it; the first book of a new
+series creates the series.
+
 ![image of automatic import settings](settings-import.png)
 
 ---

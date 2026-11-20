@@ -166,6 +166,25 @@ export async function updateCollection(
   return collection
 }
 
+/**
+ * The collections whose names match any of the given folder names, ignoring
+ * case and surrounding spaces. Used to file imports from a folder named after
+ * a collection into that collection.
+ */
+export async function getCollectionUuidsNamed(
+  names: readonly string[],
+): Promise<UUID[]> {
+  const wanted = new Set(names.map((name) => name.trim().toLowerCase()))
+  if (!wanted.size) return []
+  const rows = await db
+    .selectFrom("collection")
+    .select(["uuid", "name"])
+    .execute()
+  return rows
+    .filter((row) => wanted.has(row.name.trim().toLowerCase()))
+    .map((row) => row.uuid)
+}
+
 export async function addBooksToCollections(
   collectionUuids: UUID[],
   bookUuids: UUID[],

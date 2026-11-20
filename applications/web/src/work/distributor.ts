@@ -48,6 +48,7 @@ import type { UUID } from "@/uuid"
 
 import type { JobStats } from "./jobStats"
 import { type RunConfig, buildRunConfig } from "./runConfig"
+import { lookUpSeriesForNewBook } from "./seriesLookup"
 import { STAGE_ORDER } from "./stages"
 import type processBook from "./worker"
 import { type XraySourceReader, runXrayJob } from "./xray"
@@ -302,7 +303,12 @@ export async function backfillXray(): Promise<void> {
   }
 }
 
-setEbookImportHandler(maybeEnqueueBookXray)
+// A new book first gets its series (so it lands in the right series, or
+// starts one), then its X-Ray.
+setEbookImportHandler(async (bookUuid) => {
+  await lookUpSeriesForNewBook(bookUuid)
+  await maybeEnqueueBookXray(bookUuid)
+})
 
 async function claimNextJob(
   type: JobType,

@@ -1,5 +1,5 @@
 import { rm } from "node:fs/promises"
-import { basename, extname } from "node:path"
+import { basename, dirname, extname } from "node:path"
 
 import { Audiobook, type AudiobookInputs } from "@storyteller/audiobooks"
 import { Epub, type InMemoryEpubReader, MemoryAdapter } from "@storyteller/epub"
@@ -17,7 +17,10 @@ import {
   createBookFromAudiobook,
   createBookFromEpub,
 } from "@/database/books"
-import { addBooksToCollections } from "@/database/collections"
+import {
+  addBooksToCollections,
+  getCollectionUuidsNamed,
+} from "@/database/collections"
 import {
   addIgnoreRule,
   removeImportBackupIgnoreRule,
@@ -224,6 +227,17 @@ export async function openAudiobookDir(
   return { audiobook }
 }
 
+/**
+ * The collections a new book joins: its import rule's, plus any collection
+ * named like a folder the book was found in, so that a file dropped into
+ * "book-imports/David/…" lands in the "David" collection.
+ */
+async function collectionsFor(candidate: Candidate): Promise<UUID[]> {
+  const folders = dirname(candidate.filepath).split(/[\\/]/).filter(Boolean)
+  const named = await getCollectionUuidsNamed(folders)
+  return [...new Set([...(candidate.collections ?? []), ...named])]
+}
+
 export async function createBookFromOpenedEpub(
   candidate: Candidate,
   epub: InMemoryEpubReader,
@@ -235,6 +249,7 @@ export async function createBookFromOpenedEpub(
 
   let book: BookWithRelations
   try {
+    const collections = await collectionsFor(candidate)
     book = await createBookFromEpub(
       epub,
       {
@@ -248,15 +263,11 @@ export async function createBookFromOpenedEpub(
               status: "ALIGNED",
               currentStage: "SPLIT_TRACKS",
             },
-            ...(candidate.collections?.length && {
-              collections: candidate.collections,
-            }),
+            ...(collections.length && { collections }),
           }
         : {
             ebook: { filepath: candidate.filepath },
-            ...(candidate.collections?.length && {
-              collections: candidate.collections,
-            }),
+            ...(collections.length && { collections }),
           },
     )
   } catch (error) {
@@ -286,6 +297,7 @@ export async function createBookFromOpenedAudiobook(
 
   let book: BookWithRelations
   try {
+    const collections = await collectionsFor(candidate)
     book = await createBookFromAudiobook(
       opened.audiobook,
       {
@@ -294,9 +306,7 @@ export async function createBookFromOpenedAudiobook(
       },
       {
         audiobook: { filepath: candidate.filepath },
-        ...(candidate.collections?.length && {
-          collections: candidate.collections,
-        }),
+        ...(collections.length && { collections }),
       },
     )
   } catch (error) {
