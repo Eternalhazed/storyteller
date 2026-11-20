@@ -1,0 +1,152 @@
+name: Android APK
+
+# Builds the "Storyteller 2.0" Android app and attaches the APK to a GitHub
+# release, where Obtainium on the device picks it up.
+#
+# To release: push a tag such as v2.0.1, or use "Run workflow" and enter the
+# version. Every release must use a higher version than the one before.
+#
+# Repository secrets, copied from Doppler (agent-tools/local):
+#   ANDROID_KEYSTORE_BASE64    the release keystore (PKCS12), base64 encoded
+#   ANDROID_KEYSTORE_PASSWORD  its password
+# Releases must keep using the same keystore, or Android will refuse to install
+# them over the previous one.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, for example 2.0.1
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      APP_VARIANT: fork
+      KEY_ALIAS: storyteller
+      KEYSTORE_PATH: ${{ runner.temp }}/release.p12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${INPUT_VERSION#v}"
+          fi
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$version' is not a version like 2.0.1"
+            exit 1
+          fi
+          {
+            echo "APP_VERSION=$version"
+            # Minutes since 1970: always higher than the previous build.
+            echo "APP_VERSION_CODE=$(( $(date +%s) / 60 ))"
+            echo "RELEASE_TAG=v$version"
+          } >> "$GITHUB_ENV"
+
+      - name: Free disk space
+        run:
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          /opt/hostedtoolcache/CodeQL /usr/share/swift
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Load the release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ]; then
+            echo "::error::Set the ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD repository secrets"
+            exit 1
+          fi
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          fingerprint=$(keytool -list -v -keystore "$KEYSTORE_PATH" \
+            -storetype PKCS12 -storepass:env ANDROID_KEYSTORE_PASSWORD \
+            -alias "$KEY_ALIAS" | sed -n 's/^.*SHA256: //p' | tr -d ':' | tr 'A-F' 'a-f')
+          if [ -z "$fingerprint" ]; then
+            echo "::error::The keystore has no '$KEY_ALIAS' key"
+            exit 1
+          fi
+          echo "KEY_FINGERPRINT=$fingerprint" >> "$GITHUB_ENV"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build
+
+      - name: Install dependencies
+        run: |
+          corepack enable
+          yarn install --immutable
+
+      - name: Generate the Android project
+        run:
+          yarn workspace @storyteller-platform/mobile expo prebuild --platform
+          android --clean --no-install
+
+      - name: Build the APK
+        working-directory: applications/mobile/android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          ./gradlew :app:assembleRelease --no-daemon \
+            -PreactNativeArchitectures=armeabi-v7a,arm64-v8a \
+            -Pandroid.injected.signing.store.file="$KEYSTORE_PATH" \
+            -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$ANDROID_KEYSTORE_PASSWORD"
+
+      - name: Check the APK is signed with the release key
+        run: |
+          apk="$RUNNER_TEMP/Storyteller-$APP_VERSION.apk"
+          cp applications/mobile/android/app/build/outputs/apk/release/app-release.apk "$apk"
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          signed=$("$apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          if [ "$signed" != "$KEY_FINGERPRINT" ]; then
+            echo "::error::The APK is not signed with the release key"
+            exit 1
+          fi
+          echo "APK_PATH=$apk" >> "$GITHUB_ENV"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$APK_PATH" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$APK_PATH" \
+              --target "$GITHUB_SHA" \
+              --title "Storyteller 2.0 $APP_VERSION" \
+              --generate-notes
+          fi

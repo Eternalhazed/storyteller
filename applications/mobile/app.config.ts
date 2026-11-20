@@ -4,14 +4,22 @@ import "tsx/cjs"
 import packageInfo from "./package.json"
 
 const IS_DEV = process.env["APP_VARIANT"] === "development"
+// The fork build installs next to the official app. Its release workflow
+// supplies the version, so each release installs over the previous one.
+const IS_FORK = process.env["APP_VARIANT"] === "fork"
+const forkVersionCode = Number(process.env["APP_VERSION_CODE"])
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   return {
     ...config,
     owner: "storyteller-platform",
-    name: IS_DEV ? "Storyteller (dev)" : "Storyteller",
+    name: IS_DEV
+      ? "Storyteller (dev)"
+      : IS_FORK
+        ? "Storyteller 2.0"
+        : "Storyteller",
     slug: "storyteller",
-    version: packageInfo.version,
+    version: (IS_FORK && process.env["APP_VERSION"]) || packageInfo.version,
     icon: "./assets/Storyteller_Logo.png",
     userInterfaceStyle: "automatic",
     scheme: "storyteller",
@@ -194,7 +202,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     android: {
       package: IS_DEV
         ? "dev.smoores.Storyteller.dev"
-        : "dev.smoores.Storyteller",
+        : IS_FORK
+          ? "io.github.eternalhazed.storyteller"
+          : "dev.smoores.Storyteller",
+      ...(IS_FORK && forkVersionCode > 0 && { versionCode: forkVersionCode }),
       adaptiveIcon: {
         foregroundImage: "./assets/Storyteller_Logo.png",
         backgroundColor: "#ffffff",
