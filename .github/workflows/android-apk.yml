@@ -37,7 +37,7 @@ jobs:
       APP_VARIANT: fork
       KEY_ALIAS: storyteller
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve the version
         env:
@@ -65,11 +65,12 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup
           /opt/hostedtoolcache/CodeQL /usr/share/swift
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
+          package-manager-cache: false
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
@@ -93,7 +94,7 @@ jobs:
           fi
           echo "KEY_FINGERPRINT=$fingerprint" >> "$GITHUB_ENV"
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches
@@ -119,7 +120,9 @@ jobs:
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
+          # The generated project allows Gradle 2 GB, which is too little here.
           ./gradlew :app:assembleRelease --no-daemon \
+            -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g" \
             -PreactNativeArchitectures=armeabi-v7a,arm64-v8a \
             -Pandroid.injected.signing.store.file="$KEYSTORE_PATH" \
             -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
