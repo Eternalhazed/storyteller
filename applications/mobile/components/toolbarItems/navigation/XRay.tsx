@@ -3,7 +3,8 @@ import { skipToken } from "@reduxjs/toolkit/query"
 import { useFocusEffect } from "expo-router"
 import { ArrowLeft, ArrowUpDown } from "lucide-react-native"
 import { useCallback, useMemo, useState } from "react"
-import { BackHandler, View } from "react-native"
+import { BackHandler, type ScrollViewProps, View } from "react-native"
+import { ScrollView } from "react-native-gesture-handler"
 import { withUniwind } from "uniwind"
 
 import {
@@ -49,6 +50,11 @@ import {
 
 const EntityList = withUniwind(LegendList<XrayEntityView>)
 const DetailList = withUniwind(LegendList<XrayDetailRow>)
+
+// The same scroll view the other reader menu tabs use.
+function renderSheetScrollView(props: ScrollViewProps) {
+  return <ScrollView {...props} />
+}
 const scopes: XrayScope[] = ["now", "chapter", "book"]
 const entityTypes: {
   type: XrayEntityView["type"]
@@ -236,6 +242,7 @@ function XrayContent({
         data={scoped.entities}
         estimatedItemSize={96}
         recycleItems
+        renderScrollComponent={renderSheetScrollView}
         keyExtractor={(item) => String(item.id)}
         ListHeaderComponent={
           scoped.scope !== scope && scoped.entities.length ? (
@@ -359,6 +366,7 @@ function XrayDetails({
         data={rows}
         estimatedItemSize={88}
         recycleItems
+        renderScrollComponent={renderSheetScrollView}
         getItemType={(item) => item.kind}
         keyExtractor={(item) => item.key}
         ListHeaderComponent={
