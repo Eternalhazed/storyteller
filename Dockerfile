@@ -23,7 +23,7 @@ COPY libraries/fs/package.json ./libraries/fs/package.json
 COPY libraries/mapping/package.json ./libraries/mapping/package.json
 COPY libraries/epub/package.json ./libraries/epub/package.json
 COPY libraries/path/package.json ./libraries/path/package.json
-COPY libraries/audiobook/package.json ./libraries/audiobook/package.json
+COPY libraries/audiobooks/package.json ./libraries/audiobooks/package.json
 COPY libraries/ghost-story/package.json ./libraries/ghost-story/package.json
 COPY libraries/opds/package.json ./libraries/opds/package.json
 COPY libraries/nodekit/package.json ./libraries/nodekit/package.json
