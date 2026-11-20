@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { AliasMatcher, aliasKey } from "./matcher.ts"
+import { AliasMatcher, UNSPACED_SCRIPT, aliasKey } from "./matcher.ts"
 import {
   type XrayEntityType,
   type XrayStamped,
@@ -52,6 +52,12 @@ const NOT_NAMES = new Set(
   ),
 )
 
+const BARE_TITLES_AND_INTERJECTIONS = new Set(
+  "sir madam madame ma'am mister miss mr mrs ms dr lord lady yes no oh ah well okay ok hey hello".split(
+    " ",
+  ),
+)
+
 /**
  * Whether a string can stand for one entity throughout the book.
  *
@@ -64,6 +70,7 @@ function isUsableAlias(alias: string, type: XrayEntityType): boolean {
   const key = aliasKey(alias)
   if (key.length < 2 || key.length > MAX_ALIAS_LENGTH) return false
   if (NOT_NAMES.has(key)) return false
+  if (BARE_TITLES_AND_INTERJECTIONS.has(key.replace(/\.$/u, ""))) return false
 
   const needsCapital = type === "character" || type === "place"
   const hasCase = alias.toLowerCase() !== alias.toUpperCase()
@@ -142,6 +149,121 @@ export function pruneSharedTitles(entities: readonly DraftEntity[]) {
       }),
     }
   })
+}
+
+interface MergeAlias {
+  entity: DraftEntity
+  key: string
+  words: string[]
+}
+
+/**
+ * Join differently recorded forms of one name before deciding visibility.
+ *
+ * A shared word is evidence only when it points to these entities alone.
+ * Several holders are safe only if their names nest from shorter to fuller:
+ * "Macro", "Lucius Macro", "Lucius Cornelius Macro". Siblings such as
+ * "Bilbo Baggins" and "Frodo Baggins" must stay separate.
+ */
+export function mergeDuplicates(drafts: readonly DraftEntity[]): DraftEntity[] {
+  const entities = [...drafts].sort((a, b) => a.id - b.id)
+  const contains = (fuller: MergeAlias, shorter: MergeAlias) => {
+    if (UNSPACED_SCRIPT.test(fuller.key) || UNSPACED_SCRIPT.test(shorter.key)) {
+      return fuller.key.includes(shorter.key)
+    }
+    return (
+      shorter.words.length > 0 &&
+      shorter.words.every((word) => fuller.words.includes(word))
+    )
+  }
+  const combine = (
+    left: readonly XrayStamped[],
+    right: readonly XrayStamped[],
+    keyOf = (item: XrayStamped) => `${item.at}:${item.text}`,
+  ) => {
+    const seen = new Set<string>()
+    return [...left, ...right]
+      .sort((a, b) => a.at - b.at)
+      .filter((item) => {
+        const key = keyOf(item)
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+  }
+
+  for (;;) {
+    const titles = new Set(
+      [...leadingWordUsers(entities)]
+        .filter(([, users]) => users.size > 1)
+        .map(([word]) => word),
+    )
+    const aliases: MergeAlias[] = entities.flatMap((entity) =>
+      entity.aliases.map((alias) => {
+        const key = aliasKey(alias.text)
+        return {
+          entity,
+          key,
+          words: key
+            .split(/[^\p{L}\p{N}']+/u)
+            .filter((word) => word.length > 2 && !titles.has(word)),
+        }
+      }),
+    )
+    let pair: [DraftEntity, DraftEntity] | undefined
+    search: for (const source of aliases) {
+      const holders = aliases.filter((alias) =>
+        UNSPACED_SCRIPT.test(source.key)
+          ? alias.key.includes(source.key)
+          : source.words.some((word) => alias.words.includes(word)),
+      )
+      const nested = holders.every((first) =>
+        holders.every(
+          (second) =>
+            first.entity === second.entity ||
+            contains(first, second) ||
+            contains(second, first),
+        ),
+      )
+      for (const target of aliases) {
+        if (
+          source.entity === target.entity ||
+          source.entity.type !== target.entity.type ||
+          !contains(target, source)
+        ) {
+          continue
+        }
+        if (
+          !nested &&
+          holders.some(
+            (alias) =>
+              alias.entity !== source.entity && alias.entity !== target.entity,
+          )
+        ) {
+          continue
+        }
+        pair =
+          source.entity.id < target.entity.id
+            ? [source.entity, target.entity]
+            : [target.entity, source.entity]
+        break search
+      }
+    }
+    if (!pair) return entities
+
+    const [first, second] = pair
+    entities[entities.indexOf(first)] = {
+      ...first,
+      aliases: combine(first.aliases, second.aliases, (alias) =>
+        aliasKey(alias.text),
+      ),
+      names: combine(first.names, second.names),
+      descriptions: combine(first.descriptions, second.descriptions),
+      facts: combine(first.facts, second.facts),
+      lastSeen: Math.max(first.lastSeen, second.lastSeen),
+    }
+    entities.splice(entities.indexOf(second), 1)
+  }
 }
 
 /**

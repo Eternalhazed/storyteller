@@ -157,4 +157,143 @@ void describe("buildIndex", () => {
     assert.deepStrictEqual(viewXray(xray, 16)[0]?.mentions, [2, 16])
     assert.deepStrictEqual(viewXray(xray, 19)[0]?.mentions, [2, 13, 16])
   })
+
+  void it("stamps merged names without revealing a later name early", () => {
+    const merged = {
+      ...xray,
+      ...buildIndex(
+        [
+          draft(0, "Macro", [["Macro", 0]]),
+          draft(1, "Centurion Macro", [["Centurion Macro", 13]]),
+          draft(2, "Cato", [["Cato", 5]]),
+        ],
+        segments,
+        new Map([
+          [0, "Macro watched the recruits."],
+          [5, "Cato waited beside him."],
+          [13, "Centurion Macro saluted."],
+        ]),
+      ),
+    }
+    assert.deepStrictEqual(
+      merged.entities.map((entity) => entity.id),
+      [0, 2],
+    )
+    const early = findEntity(viewXray(merged, 8), "Macro")
+    assert.strictEqual(early?.name, "Macro")
+    assert.deepStrictEqual(early.aliases, ["Macro"])
+    assert.strictEqual(findEntity(viewXray(merged, 8), "Centurion"), null)
+    assert.strictEqual(
+      findEntity(viewXray(merged, 13), "Centurion Macro")?.id,
+      0,
+    )
+    assert.strictEqual(findEntity(viewXray(merged, 8), "Cato")?.id, 2)
+    assert.deepStrictEqual(merged.entities[0]?.mentions, [
+      [0, 0],
+      [13, 1],
+    ])
+  })
+})
+
+void describe("buildIndex common words", () => {
+  const mentionsOf = (name: string, sentences: string[]) =>
+    buildIndex(
+      [draft(0, name, [[name, 0]])],
+      [{ start: 0, end: sentences.length }],
+      new Map(sentences.entries()),
+    ).entities[0]?.mentions.map(([ordinal]) => ordinal)
+
+  void it("skips sentence-start common words but keeps mid-sentence names", () => {
+    assert.deepStrictEqual(
+      mentionsOf("Keep", [
+        "Keep it down, he said.",
+        "They keep their voices low.",
+        "He walked to the Keep.",
+      ]),
+      [2],
+    )
+  })
+
+  void it("skips utterance-start names when lowercase uses outnumber name uses", () => {
+    assert.deepStrictEqual(
+      mentionsOf("Keep", [
+        "Keep it down.",
+        "They keep watch and keep their voices low.",
+        "He walked to the Keep.",
+      ]),
+      [2],
+    )
+  })
+
+  void it("keeps utterance-start names when name uses outnumber lowercase uses", () => {
+    assert.deepStrictEqual(
+      mentionsOf("Hook", [
+        "Hook watched the ship.",
+        "He raised his hook.",
+        "Wendy saw Hook.",
+        "Peter challenged Hook.",
+        "“Hook is coming,” she said.",
+      ]),
+      [0, 2, 3, 4],
+    )
+  })
+
+  void it("keeps lowercase aliases when their matched spelling is capitalised", () => {
+    assert.deepStrictEqual(
+      mentionsOf("mermaids", [
+        "The mermaids swam nearby.",
+        "Mermaids circled the rock.",
+      ]),
+      [0, 1],
+    )
+  })
+
+  void it("keeps sentence-start names whose lowercase form never appears", () => {
+    assert.deepStrictEqual(
+      mentionsOf("Wendy", [
+        "Wendy opened the door.",
+        "They keep their voices low.",
+      ]),
+      [0],
+    )
+  })
+
+  void it("skips common words opening quotations and utterances", () => {
+    assert.deepStrictEqual(
+      mentionsOf("Keep", [
+        "They keep their voices low and keep watch.",
+        "He said, “Keep it down.”",
+        "She replied: ‘Keep quiet.’",
+        "They shouted — Keep it down.",
+        "They whispered – Keep quiet.",
+        "He warned: Keep quiet.",
+        "He wrote “home” beside the Keep.",
+        "He called it “home” Keep.",
+      ]),
+      [6, 7],
+    )
+  })
+
+  void it("uses only whole lowercase words as evidence of common usage", () => {
+    assert.deepStrictEqual(
+      mentionsOf("Keep", [
+        "Keep watch over the gate.",
+        "The keepers were silent.",
+        "A KEEP stood on the hill.",
+      ]),
+      [0, 2],
+    )
+  })
+
+  void it("normalizes accented words before checking utterance starts", () => {
+    assert.deepStrictEqual(
+      mentionsOf("Élan", [
+        "They admired his e\u0301lan.",
+        "Élan was all he needed.",
+        "He called, “E\u0301lan is everything.”",
+        "He spoke to Élan.",
+      ]),
+      [3],
+    )
+  })
 })

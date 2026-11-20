@@ -2,7 +2,7 @@ import assert from "node:assert"
 import { describe, it } from "node:test"
 
 import { AliasMatcher } from "./matcher.ts"
-import { XRAY_SCHEMA_VERSION, type Xray } from "./model.ts"
+import { XRAY_SCHEMA_VERSION, type Xray, xraySchema } from "./model.ts"
 import {
   chapterIndexForHref,
   findEntity,
@@ -71,6 +71,12 @@ const xray: Xray = {
 }
 
 void describe("viewXray", () => {
+  void it("reads generator-version-1 files without changing them", () => {
+    const loaded = xraySchema.parse(JSON.parse(JSON.stringify(xray)))
+    assert.deepStrictEqual(loaded, xray)
+    assert.deepStrictEqual(viewXray(loaded, 5), viewXray(xray, 5))
+  })
+
   void it("hides an entity until the text names it", () => {
     assert.deepStrictEqual(
       viewXray(xray, 1).map((view) => view.name),

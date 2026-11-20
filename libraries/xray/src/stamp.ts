@@ -3,6 +3,7 @@ import type { XrayEntity } from "./model.ts"
 import {
   type DraftEntity,
   leadingWordUsers,
+  mergeDuplicates,
   pruneSharedTitles,
 } from "./registry.ts"
 import type { SegmentRange } from "./segments.ts"
@@ -31,6 +32,7 @@ export function stampEntities(
   drafts: readonly DraftEntity[],
   segments: readonly SegmentRange[],
 ): StampedEntity[] {
+  const entities = mergeDuplicates(drafts)
   const passageEnd = (ordinal: number) =>
     (segments.find(
       (segment) => ordinal >= segment.start && ordinal < segment.end,
@@ -38,7 +40,7 @@ export function stampEntities(
 
   // Titles and common first names do not show that two names belong together.
   const titles = new Set(
-    [...leadingWordUsers(drafts)]
+    [...leadingWordUsers(entities)]
       .filter(([, users]) => users.size > 1)
       .map(([word]) => word),
   )
@@ -54,7 +56,7 @@ export function stampEntities(
     return wordsOf(b).some((word) => words.has(word))
   }
 
-  return pruneSharedTitles(drafts).map(({ lastSeen: _, ...entity }) => {
+  return pruneSharedTitles(entities).map(({ lastSeen: _, ...entity }) => {
     const visibleAt = new Map<string, number>()
     const inOrder = [...entity.aliases].sort((a, b) => a.at - b.at)
     for (const alias of inOrder) {

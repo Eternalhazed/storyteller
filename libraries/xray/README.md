@@ -23,9 +23,20 @@ it.
    sentence.
 4. Nothing the model returns is trusted beyond what the text backs up: a name is
    kept only if it appears literally in the passage, and a fact only if it cites
-   a sentence in the passage.
-5. Mentions are found without the model, by matching every known name against
-   every sentence.
+   a sentence in the passage. Bare honorifics and interjections are not names.
+5. Duplicate entries of the same type are combined when one name's distinctive
+   words fit inside another's. Shared titles are ignored, and another holder of
+   a shared word prevents a merge unless all the names nest from shorter to
+   fuller. Names in unspaced scripts use substring containment instead. The
+   earliest entry survives, with every recorded item kept in sentence order.
+6. Mentions are found without the model, by matching every known name against
+   every sentence. A capitalised one-word alias is treated as an ordinary word
+   only when the book uses its lowercase spelling at least as often as its
+   capitalised spelling away from sentence or utterance starts. Such an alias is
+   skipped at the start of a sentence or an utterance (an opening quotation
+   mark, a dash, or a colon). Mid-sentence uses still count. These usage counts
+   are collected once for the book; intentionally lowercase aliases are not
+   skipped.
 
 ### What is visible when
 
@@ -94,10 +105,16 @@ without paying to reread what it has finished. A passage the model cannot answer
 after several attempts is skipped and reported, so one bad passage does not stop
 the book. `show` prints what a reader a quarter of the way through would see.
 
+Generator rule changes invalidate saved generation progress, not completed
+files: schema-1 files from generator version 1 remain readable until
+regenerated.
+
 ## Limits
 
-- Two entries that the text later reveals to be the same character are not
-  merged. A stranger who is renamed on being identified keeps one entry.
+- Entries with unrelated names are not merged just because later text reveals an
+  identity. The model must attach the new name to the known entry.
+- A name used at least as often as an ordinary lowercase word can be missed at
+  the start of a sentence or speech, even when it really refers to the entity.
 - Pronouns and descriptions ("the captain") are not resolved to an entity, so
   mentions are the sentences that use a name.
 - The model is told to use only the passage in front of it, and invented names
