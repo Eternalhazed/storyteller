@@ -36,7 +36,6 @@ jobs:
     env:
       APP_VARIANT: fork
       KEY_ALIAS: storyteller
-      KEYSTORE_PATH: ${{ runner.temp }}/release.p12
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +57,7 @@ jobs:
             # Minutes since 1970: always higher than the previous build.
             echo "APP_VERSION_CODE=$(( $(date +%s) / 60 ))"
             echo "RELEASE_TAG=v$version"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/release.p12"
           } >> "$GITHUB_ENV"
 
       - name: Free disk space
