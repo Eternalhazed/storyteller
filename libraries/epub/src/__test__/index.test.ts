@@ -72,6 +72,21 @@ describe("Epub", () => {
     assert.equal(title, "Test Title")
   })
 
+  it("reads a placeholder dc:date as no publication date", async () => {
+    const outputPath = join(
+      "__fixtures__",
+      "__output__",
+      "placeholder-date.epub",
+    )
+    using epub = await Epub.using(TmpFsAdapter).create(outputPath, {
+      title: "Title",
+      language: new Intl.Locale("en-US"),
+      identifier: "1",
+    })
+    await epub.addMetadata({ type: "dc:date", properties: {}, value: "NONE" })
+    assert.strictEqual(await epub.getPublicationDate(), null)
+  })
+
   it("can read from an archived .epub file", async () => {
     const filepath = join("__fixtures__", "moby-dick.epub")
     using epub = await Epub.using(TmpFsAdapter).from(filepath)

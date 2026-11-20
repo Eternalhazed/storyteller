@@ -1463,7 +1463,8 @@ export class Epub {
    * Retrieve the publication date from the dc:date element
    * in the EPUB metadata as a Date object.
    *
-   * If there is no dc:date element, returns null.
+   * If there is no dc:date element, or its value is not a date (some files
+   * carry placeholders such as "NONE"), returns null.
    *
    * @link https://www.w3.org/TR/epub-33/#sec-opf-dcdate
    */
@@ -1471,7 +1472,8 @@ export class Epub {
     const metadata = await this.getMetadata()
     const entry = metadata.find(({ type }) => type === "dc:date")
     if (!entry?.value) return null
-    return new Date(entry.value)
+    const date = new Date(entry.value)
+    return Number.isNaN(date.getTime()) ? null : date
   }
 
   /**
