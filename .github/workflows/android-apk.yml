@@ -112,8 +112,8 @@ jobs:
 
       - name: Generate the Android project
         run:
-          yarn workspace @storyteller/mobile expo prebuild --platform
-          android --clean --no-install
+          yarn workspace @storyteller/mobile expo prebuild --platform android
+          --clean --no-install
 
       - name: Build the APK
         working-directory: applications/mobile/android

@@ -143,7 +143,7 @@ function parseUsages(usages: unknown): DefinitionEntry[] {
         partOfSpeech,
         definitions: senses.map((sense) => sense.text),
         formOf: senses.every((sense) => sense.lemma)
-          ? senses[0]?.lemma ?? null
+          ? (senses[0]?.lemma ?? null)
           : null,
       },
     ]

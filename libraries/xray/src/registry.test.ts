@@ -1,5 +1,6 @@
 import assert from "node:assert"
-import { describe, it } from "node:test"
+
+import { describe, it } from "vitest"
 
 import {
   type DraftEntity,
@@ -34,8 +35,8 @@ function entity(
   }
 }
 
-void describe("applySegmentOutput", () => {
-  void it("stamps a new entity at the sentence that first names it", () => {
+describe("applySegmentOutput", () => {
+  it("stamps a new entity at the sentence that first names it", () => {
     const entities: DraftEntity[] = []
     const rejections = applySegmentOutput(
       entities,
@@ -59,7 +60,7 @@ void describe("applySegmentOutput", () => {
     ])
   })
 
-  void it("stamps the listed name where the text first uses it", () => {
+  it("stamps the listed name where the text first uses it", () => {
     const entities: DraftEntity[] = []
     applySegmentOutput(
       entities,
@@ -84,7 +85,7 @@ void describe("applySegmentOutput", () => {
     ])
   })
 
-  void it("drops names the passage does not contain", () => {
+  it("drops names the passage does not contain", () => {
     const entities: DraftEntity[] = []
     const rejections = applySegmentOutput(
       entities,
@@ -107,7 +108,7 @@ void describe("applySegmentOutput", () => {
     assert.strictEqual(rejections.length, 3)
   })
 
-  void it("drops descriptions offered as names", () => {
+  it("drops descriptions offered as names", () => {
     const entities: DraftEntity[] = []
     applySegmentOutput(
       entities,
@@ -123,7 +124,7 @@ void describe("applySegmentOutput", () => {
     )
   })
 
-  void it("rejects bare honorifics and interjections for every entity type", () => {
+  it("rejects bare honorifics and interjections for every entity type", () => {
     const words =
       "Sir Madam Madame Ma’am Mister Miss Mr. Mrs. Ms. Dr. Lord Lady Yes No Oh Ah Well Okay OK Hey Hello".split(
         " ",
@@ -146,7 +147,7 @@ void describe("applySegmentOutput", () => {
     }
   })
 
-  void it("rejects a bare title alias without discarding the full name", () => {
+  it("rejects a bare title alias without discarding the full name", () => {
     const entities: DraftEntity[] = []
     applySegmentOutput(
       entities,
@@ -167,7 +168,7 @@ void describe("applySegmentOutput", () => {
     assert.deepStrictEqual(entities[0]?.aliases, [{ text: "Sir Macro", at: 0 }])
   })
 
-  void it("folds a repeat of a known name into the known entity", () => {
+  it("folds a repeat of a known name into the known entity", () => {
     const entities: DraftEntity[] = []
     applySegmentOutput(
       entities,
@@ -204,7 +205,7 @@ void describe("applySegmentOutput", () => {
     )
   })
 
-  void it("keeps the known name when no new name backs a change", () => {
+  it("keeps the known name when no new name backs a change", () => {
     const entities: DraftEntity[] = []
     applySegmentOutput(
       entities,
@@ -228,7 +229,7 @@ void describe("applySegmentOutput", () => {
     )
   })
 
-  void it("ignores notes whose id and name point at different entities", () => {
+  it("ignores notes whose id and name point at different entities", () => {
     const entities: DraftEntity[] = []
     applySegmentOutput(
       entities,
@@ -271,7 +272,7 @@ void describe("applySegmentOutput", () => {
     )
   })
 
-  void it("drops facts that cite a sentence outside the passage", () => {
+  it("drops facts that cite a sentence outside the passage", () => {
     const entities: DraftEntity[] = []
     const rejections = applySegmentOutput(
       entities,
@@ -299,7 +300,7 @@ void describe("applySegmentOutput", () => {
   })
 })
 
-void describe("pruneSharedTitles", () => {
+describe("pruneSharedTitles", () => {
   const draft = (id: number, name: string, aliases: string[]): DraftEntity => ({
     id,
     type: "character",
@@ -314,7 +315,7 @@ void describe("pruneSharedTitles", () => {
       entity.aliases.map((alias) => alias.text),
     )
 
-  void it("drops a bare title that another entity also carries", () => {
+  it("drops a bare title that another entity also carries", () => {
     assert.deepStrictEqual(
       aliasesOf([
         draft(0, "Caius", ["Caius", "Tribune", "Tribune Britannicus"]),
@@ -327,14 +328,14 @@ void describe("pruneSharedTitles", () => {
     )
   })
 
-  void it("keeps a title only one entity carries", () => {
+  it("keeps a title only one entity carries", () => {
     assert.deepStrictEqual(
       aliasesOf([draft(0, "Alaric", ["Alaric", "Bishop", "Bishop Alaric"])]),
       [["Alaric", "Bishop", "Bishop Alaric"]],
     )
   })
 
-  void it("never drops the name an entity is listed under", () => {
+  it("never drops the name an entity is listed under", () => {
     assert.deepStrictEqual(
       aliasesOf([
         draft(0, "Tom", ["Tom"]),
@@ -345,7 +346,7 @@ void describe("pruneSharedTitles", () => {
   })
 })
 
-void describe("mergeDuplicates", () => {
+describe("mergeDuplicates", () => {
   const draft = (id: number, name: string, at = 0): DraftEntity => ({
     id,
     type: "character",
@@ -356,7 +357,7 @@ void describe("mergeDuplicates", () => {
     lastSeen: 0,
   })
 
-  void it("merges Macro with Centurion Macro and keeps ordered records", () => {
+  it("merges Macro with Centurion Macro and keeps ordered records", () => {
     const macro = {
       ...draft(0, "Macro"),
       descriptions: [{ text: "A soldier.", at: 4 }],
@@ -403,7 +404,7 @@ void describe("mergeDuplicates", () => {
     assert.deepStrictEqual(macro.aliases, [{ text: "Macro", at: 0 }])
   })
 
-  void it("merges a nested chain of three names until stable", () => {
+  it("merges a nested chain of three names until stable", () => {
     const merged = mergeDuplicates([
       draft(0, "Macro"),
       draft(1, "Lucius Macro", 8),
@@ -417,7 +418,7 @@ void describe("mergeDuplicates", () => {
     ])
   })
 
-  void it("does not merge non-nested holders of Macro", () => {
+  it("does not merge non-nested holders of Macro", () => {
     const drafts = [
       draft(0, "Macro"),
       draft(1, "Centurion Macro"),
@@ -426,7 +427,7 @@ void describe("mergeDuplicates", () => {
     assert.deepStrictEqual(mergeDuplicates(drafts), drafts)
   })
 
-  void it("does not merge Baggins when a third entity holds the surname", () => {
+  it("does not merge Baggins when a third entity holds the surname", () => {
     const drafts = [
       draft(0, "Baggins"),
       draft(1, "Bilbo Baggins"),
@@ -435,7 +436,7 @@ void describe("mergeDuplicates", () => {
     assert.deepStrictEqual(mergeDuplicates(drafts), drafts)
   })
 
-  void it("never merges across entity types", () => {
+  it("never merges across entity types", () => {
     const drafts = [
       draft(0, "Macro"),
       { ...draft(1, "Centurion Macro"), type: "place" as const },
@@ -443,7 +444,7 @@ void describe("mergeDuplicates", () => {
     assert.deepStrictEqual(mergeDuplicates(drafts), drafts)
   })
 
-  void it("does not use a shared title as a distinctive word", () => {
+  it("does not use a shared title as a distinctive word", () => {
     const drafts = [
       {
         ...draft(0, "Captain"),
@@ -457,7 +458,7 @@ void describe("mergeDuplicates", () => {
     assert.deepStrictEqual(mergeDuplicates(drafts), drafts)
   })
 
-  void it("merges nested names in unspaced scripts by substring", () => {
+  it("merges nested names in unspaced scripts by substring", () => {
     const merged = mergeDuplicates([
       draft(0, "太郎"),
       draft(1, "望月太郎", 8),
@@ -470,7 +471,7 @@ void describe("mergeDuplicates", () => {
     )
   })
 
-  void it("does not merge ambiguous substrings in unspaced scripts", () => {
+  it("does not merge ambiguous substrings in unspaced scripts", () => {
     const drafts = [
       draft(0, "太郎"),
       draft(1, "望月太郎"),

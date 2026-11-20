@@ -59,7 +59,7 @@ export default function NavigationMenuLayout() {
   }, [pathname])
 
   const navigateToTab =
-    (name: "toc" | "bookmarks" | "highlights") =>
+    (name: "toc" | "bookmarks" | "highlights" | "xray") =>
     (event: { preventDefault: () => void }) => {
       event.preventDefault()
       router.navigate({ pathname: `/navigation-menu/${name}`, params })
@@ -163,7 +163,7 @@ export default function NavigationMenuLayout() {
           />
           <Tabs.Screen
             name="xray"
-            initialParams={params}
+            listeners={{ tabPress: navigateToTab("xray") }}
             options={{
               title: "X-Ray",
               ...(hasXray ? {} : { href: null }),

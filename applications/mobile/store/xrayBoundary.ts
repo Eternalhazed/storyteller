@@ -80,7 +80,7 @@ function boundaryAtLocator(
   ) {
     return textEnd === 0
       ? -1
-      : ordinalAtTextOffset(xray, chapterIndex, textEnd - 1) ?? -1
+      : (ordinalAtTextOffset(xray, chapterIndex, textEnd - 1) ?? -1)
   }
 
   for (const fragment of boundaryLocator.locations?.fragments ?? []) {

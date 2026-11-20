@@ -442,6 +442,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@anthropic-ai/sdk@npm:~1.9.0":
+  version: 1.9.0
+  resolution: "@anthropic-ai/sdk@npm:1.9.0"
+  dependencies:
+    "@opentelemetry/api": "npm:^1.4.1"
+    json-schema-to-ts: "npm:^3.1.1"
+    standardwebhooks: "npm:^1.0.0"
+  peerDependencies:
+    zod: ^3.25.0 || ^4.0.0
+  peerDependenciesMeta:
+    zod:
+      optional: true
+  bin:
+    anthropic-ai-sdk: bin/cli
+  checksum: 10c0/9d4a49399fa38248921950b241ab1439421653951835be2b9348a620cedabe988dd1ab7a5dc42fcbdae2eae775a75bf483e6edaebb9f00c41e65f86d9f58a878
+  languageName: node
+  linkType: hard
+
 "@apidevtools/json-schema-ref-parser@npm:^11.5.5, @apidevtools/json-schema-ref-parser@npm:^11.9.3":
   version: 11.9.3
   resolution: "@apidevtools/json-schema-ref-parser@npm:11.9.3"
@@ -4351,6 +4369,13 @@ __metadata:
   version: 7.29.7
   resolution: "@babel/runtime@npm:7.29.7"
   checksum: 10c0/ca11572f7146b21e0bde6a9ed4bb6a89eafbee5f0944c7eb54d0d8a2dac962c33638a1d611e14faa71dfbb92b4b5f9236232208568a6b7d5c6f3f39ddb91771e
+  languageName: node
+  linkType: hard
+
+"@babel/runtime@npm:^7.18.3":
+  version: 7.29.14
+  resolution: "@babel/runtime@npm:7.29.14"
+  checksum: 10c0/dd809ac74c2154a549c9a9fbe73a3da84927c987d1291a1f1618f9263fa372a0de0d575c2616b3b420586a9974114c81ee47953c5d25074da66b58bf9d33d870
   languageName: node
   linkType: hard
 
@@ -10816,6 +10841,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@opentelemetry/api@npm:^1.4.1":
+  version: 1.10.0
+  resolution: "@opentelemetry/api@npm:1.10.0"
+  checksum: 10c0/c666f89d882e2e3ea3780b4e419de3ba7e00a80bf334269c3c8507a5e2b4e453e2bc8368f6230f894d789b206c14dde313ea6f51fa7bc629f0eff8480b5d356b
+  languageName: node
+  linkType: hard
+
 "@optique/core@npm:1.3.2, @optique/core@npm:^1.3.2":
   version: 1.3.2
   resolution: "@optique/core@npm:1.3.2"
@@ -15644,6 +15676,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@stablelib/base64@npm:^1.0.0":
+  version: 1.0.1
+  resolution: "@stablelib/base64@npm:1.0.1"
+  checksum: 10c0/6330720f021819d19cecfe274111b79a256caa81df478d6b0ae7effc8842b96915b6aeed85926ff05b4d48ec1fc78ad043d928b730ee4e6cc6e8cba6aa097bed
+  languageName: node
+  linkType: hard
+
 "@standard-schema/spec@npm:1.1.0":
   version: 1.1.0
   resolution: "@standard-schema/spec@npm:1.1.0"
@@ -15813,7 +15852,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@storyteller/align@workspace:*, @storyteller/align@workspace:libraries/align":
+"@storyteller/align@workspace:*, @storyteller/align@workspace:^, @storyteller/align@workspace:libraries/align":
   version: 0.0.0-use.local
   resolution: "@storyteller/align@workspace:libraries/align"
   dependencies:
@@ -16136,6 +16175,7 @@ __metadata:
     "@rn-primitives/tabs": "npm:^1.5.2"
     "@sentry/react-native": "npm:~8.28.0"
     "@storyteller/web": "workspace:^"
+    "@storyteller/xray": "workspace:^"
     "@tsconfig/strictest": "catalog:"
     "@types/base-64": "npm:^1.0.0"
     "@types/node": "catalog:"
@@ -16374,6 +16414,7 @@ __metadata:
     "@storyteller/media-types": "workspace:^"
     "@storyteller/opds": "workspace:*"
     "@storyteller/uri-fragment": "workspace:^"
+    "@storyteller/xray": "workspace:*"
     "@t3-oss/env-nextjs": "npm:^0.13.8"
     "@tabler/icons-react": "npm:^3.35.0"
     "@tailwindcss/postcss": "catalog:"
@@ -16461,6 +16502,22 @@ __metadata:
     vitest: "catalog:"
     yauzl: "npm:^3.2.0"
     yazl: "catalog:"
+    zod: "catalog:"
+  languageName: unknown
+  linkType: soft
+
+"@storyteller/xray@workspace:*, @storyteller/xray@workspace:^, @storyteller/xray@workspace:libraries/xray":
+  version: 0.0.0-use.local
+  resolution: "@storyteller/xray@workspace:libraries/xray"
+  dependencies:
+    "@anthropic-ai/sdk": "npm:~1.9.0"
+    "@storyteller/align": "workspace:^"
+    "@tsconfig/strictest": "catalog:"
+    "@types/node": "catalog:"
+    tsx: "catalog:"
+    typescript: "catalog:"
+    vite: "catalog:"
+    vitest: "catalog:"
     zod: "catalog:"
   languageName: unknown
   linkType: soft
@@ -26108,6 +26165,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"fast-sha256@npm:^1.3.0":
+  version: 1.3.0
+  resolution: "fast-sha256@npm:1.3.0"
+  checksum: 10c0/87f9e4baa7639576cf60a2b6235c9f436e1a1c52323abbd8a705b5bea8355500acf176f2aed0c14f2ecd6d6007e26151461bab2f27b8953bcca8d9d6b76a86e4
+  languageName: node
+  linkType: hard
+
 "fast-string-truncated-width@npm:^3.0.2":
   version: 3.0.3
   resolution: "fast-string-truncated-width@npm:3.0.3"
@@ -29610,6 +29674,16 @@ __metadata:
   version: 2.3.1
   resolution: "json-parse-even-better-errors@npm:2.3.1"
   checksum: 10c0/140932564c8f0b88455432e0f33c4cb4086b8868e37524e07e723f4eaedb9425bdc2bafd71bd1d9765bd15fd1e2d126972bc83990f55c467168c228c24d665f3
+  languageName: node
+  linkType: hard
+
+"json-schema-to-ts@npm:^3.1.1":
+  version: 3.1.1
+  resolution: "json-schema-to-ts@npm:3.1.1"
+  dependencies:
+    "@babel/runtime": "npm:^7.18.3"
+    ts-algebra: "npm:^2.0.0"
+  checksum: 10c0/609bae04aa5e860a11b6d30ccf41445fae1c7f66fb600c1d170257cf33aa468aa9d03aa046428c3688aff0ff450c2b0c76584b66fa4a5d0da8e33799e4c439a6
   languageName: node
   linkType: hard
 
@@ -40091,6 +40165,16 @@ __metadata:
   languageName: node
   linkType: hard
 
+"standardwebhooks@npm:^1.0.0":
+  version: 1.3.0
+  resolution: "standardwebhooks@npm:1.3.0"
+  dependencies:
+    "@stablelib/base64": "npm:^1.0.0"
+    fast-sha256: "npm:^1.3.0"
+  checksum: 10c0/46d3239465fb3f7dfb6c90a28334e3ca1867aa16837b8a12e2f6f6d9cef387b32f7475ea04f08f553fce014d4c98387ddd6c38c6fa7b618024414a6148ef16af
+  languageName: node
+  linkType: hard
+
 "stats-gl@npm:^2.2.8":
   version: 2.4.2
   resolution: "stats-gl@npm:2.4.2"
@@ -41220,6 +41304,13 @@ __metadata:
   version: 2.2.0
   resolution: "trough@npm:2.2.0"
   checksum: 10c0/58b671fc970e7867a48514168894396dd94e6d9d6456aca427cc299c004fe67f35ed7172a36449086b2edde10e78a71a284ec0076809add6834fb8f857ccb9b0
+  languageName: node
+  linkType: hard
+
+"ts-algebra@npm:^2.0.0":
+  version: 2.0.0
+  resolution: "ts-algebra@npm:2.0.0"
+  checksum: 10c0/4ae93bec1bada635bba425854eec323dad50b6ffe86bc04ad2d7f9ce3fb129d673dcf483e19a6e70d07a3a9083e6a0a7f4e004bb8d2164cddc60cc9540ba187f
   languageName: node
   linkType: hard
 

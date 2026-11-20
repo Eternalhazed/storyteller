@@ -2515,7 +2515,8 @@ export const api = createApi({
       providesTags: ["Jobs"],
       onCacheEntryAdded: async (
         arg,
-        /* eslint-disable-next-line @typescript-eslint/unbound-method */
+        // RTK Query's lifecycle helpers are safe to use unbound.
+        /* eslint-disable @typescript-eslint/unbound-method */
         {
           cacheDataLoaded,
           cacheEntryRemoved,
@@ -2523,6 +2524,7 @@ export const api = createApi({
           dispatch,
           getCacheEntry,
         },
+        /* eslint-enable @typescript-eslint/unbound-method */
       ) => {
         try {
           await cacheDataLoaded

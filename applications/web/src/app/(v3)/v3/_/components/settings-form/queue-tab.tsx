@@ -710,13 +710,13 @@ function JobItem({
             job.status === "DONE" &&
             job.alignmentGrade &&
             job.bookUuid && (
-            <V3Link
-              href={`/books/${job.bookUuid}?report=true`}
-              className="inline-flex shrink-0 items-center gap-1"
-            >
-              <GradePill grade={job.alignmentGrade} />
-            </V3Link>
-          )}
+              <V3Link
+                href={`/books/${job.bookUuid}?report=true`}
+                className="inline-flex shrink-0 items-center gap-1"
+              >
+                <GradePill grade={job.alignmentGrade} />
+              </V3Link>
+            )}
           {job.alignmentAudioCoverage != null &&
           job.alignmentSentenceCoverage != null ? (
             <Tooltip>

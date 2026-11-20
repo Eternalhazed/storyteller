@@ -1,5 +1,6 @@
 import assert from "node:assert"
-import { describe, it } from "node:test"
+
+import { describe, it } from "vitest"
 
 import { buildIndex } from "./generate.ts"
 import type { DraftEntity } from "./registry.ts"
@@ -32,8 +33,8 @@ function draft(
 const stampsOf = (entity: { aliases: { text: string; at: number }[] }) =>
   Object.fromEntries(entity.aliases.map((alias) => [alias.text, alias.at]))
 
-void describe("stampEntities", () => {
-  void it("shows the name an entity enters under where it appears", () => {
+describe("stampEntities", () => {
+  it("shows the name an entity enters under where it appears", () => {
     const [strider] = stampEntities(
       [draft(0, "Strider", [["Strider", 2]])],
       segments,
@@ -43,7 +44,7 @@ void describe("stampEntities", () => {
     assert.deepStrictEqual(strider!.names, [{ text: "Strider", at: 2 }])
   })
 
-  void it("holds an unrelated second name until its passage ends", () => {
+  it("holds an unrelated second name until its passage ends", () => {
     // "Aragorn" is first written at 13, but only the passage as a whole
     // (10 to 19) says that he is Strider.
     const [strider] = stampEntities(
@@ -69,7 +70,7 @@ void describe("stampEntities", () => {
     ])
   })
 
-  void it("shows a fuller or shorter form of a known name at once", () => {
+  it("shows a fuller or shorter form of a known name at once", () => {
     const [hook] = stampEntities(
       [
         draft(0, "Hook", [
@@ -88,7 +89,7 @@ void describe("stampEntities", () => {
     })
   })
 
-  void it("does not let a shared title tie two names together", () => {
+  it("does not let a shared title tie two names together", () => {
     const [nemo] = stampEntities(
       [
         draft(0, "Captain Smith", [
@@ -106,7 +107,7 @@ void describe("stampEntities", () => {
     })
   })
 
-  void it("keeps a fact's sentence but holds it to the end of its passage", () => {
+  it("keeps a fact's sentence but holds it to the end of its passage", () => {
     const [strider] = stampEntities(
       [draft(0, "Strider", [["Strider", 2]], [["Sits in the corner.", 2]])],
       segments,
@@ -118,7 +119,7 @@ void describe("stampEntities", () => {
   })
 })
 
-void describe("buildIndex", () => {
+describe("buildIndex", () => {
   const sentences = new Map([
     [2, "Strider sat in the corner."],
     [13, "Gandalf had written of one called Aragorn."],
@@ -143,7 +144,7 @@ void describe("buildIndex", () => {
     ...index,
   }
 
-  void it("does not reveal a name before the passage that ties it ends", () => {
+  it("does not reveal a name before the passage that ties it ends", () => {
     const view = viewXray(xray, 16)[0]
 
     assert.deepStrictEqual(view?.aliases, ["Strider"])
@@ -151,14 +152,14 @@ void describe("buildIndex", () => {
     assert.strictEqual(findEntity(viewXray(xray, 19), "Aragorn")?.id, 0)
   })
 
-  void it("counts a sentence as soon as the reader knows one of its names", () => {
+  it("counts a sentence as soon as the reader knows one of its names", () => {
     // Sentence 16 uses both names. It is a mention of Strider at once, not
     // only when "Aragorn" becomes visible at 19.
     assert.deepStrictEqual(viewXray(xray, 16)[0]?.mentions, [2, 16])
     assert.deepStrictEqual(viewXray(xray, 19)[0]?.mentions, [2, 13, 16])
   })
 
-  void it("stamps merged names without revealing a later name early", () => {
+  it("stamps merged names without revealing a later name early", () => {
     const merged = {
       ...xray,
       ...buildIndex(
@@ -195,7 +196,7 @@ void describe("buildIndex", () => {
   })
 })
 
-void describe("buildIndex common words", () => {
+describe("buildIndex common words", () => {
   const mentionsOf = (name: string, sentences: string[]) =>
     buildIndex(
       [draft(0, name, [[name, 0]])],
@@ -203,7 +204,7 @@ void describe("buildIndex common words", () => {
       new Map(sentences.entries()),
     ).entities[0]?.mentions.map(([ordinal]) => ordinal)
 
-  void it("skips sentence-start common words but keeps mid-sentence names", () => {
+  it("skips sentence-start common words but keeps mid-sentence names", () => {
     assert.deepStrictEqual(
       mentionsOf("Keep", [
         "Keep it down, he said.",
@@ -214,7 +215,7 @@ void describe("buildIndex common words", () => {
     )
   })
 
-  void it("skips utterance-start names when lowercase uses outnumber name uses", () => {
+  it("skips utterance-start names when lowercase uses outnumber name uses", () => {
     assert.deepStrictEqual(
       mentionsOf("Keep", [
         "Keep it down.",
@@ -225,7 +226,7 @@ void describe("buildIndex common words", () => {
     )
   })
 
-  void it("keeps utterance-start names when name uses outnumber lowercase uses", () => {
+  it("keeps utterance-start names when name uses outnumber lowercase uses", () => {
     assert.deepStrictEqual(
       mentionsOf("Hook", [
         "Hook watched the ship.",
@@ -238,7 +239,7 @@ void describe("buildIndex common words", () => {
     )
   })
 
-  void it("keeps lowercase aliases when their matched spelling is capitalised", () => {
+  it("keeps lowercase aliases when their matched spelling is capitalised", () => {
     assert.deepStrictEqual(
       mentionsOf("mermaids", [
         "The mermaids swam nearby.",
@@ -248,7 +249,7 @@ void describe("buildIndex common words", () => {
     )
   })
 
-  void it("keeps sentence-start names whose lowercase form never appears", () => {
+  it("keeps sentence-start names whose lowercase form never appears", () => {
     assert.deepStrictEqual(
       mentionsOf("Wendy", [
         "Wendy opened the door.",
@@ -258,7 +259,7 @@ void describe("buildIndex common words", () => {
     )
   })
 
-  void it("skips common words opening quotations and utterances", () => {
+  it("skips common words opening quotations and utterances", () => {
     assert.deepStrictEqual(
       mentionsOf("Keep", [
         "They keep their voices low and keep watch.",
@@ -274,7 +275,7 @@ void describe("buildIndex common words", () => {
     )
   })
 
-  void it("uses only whole lowercase words as evidence of common usage", () => {
+  it("uses only whole lowercase words as evidence of common usage", () => {
     assert.deepStrictEqual(
       mentionsOf("Keep", [
         "Keep watch over the gate.",
@@ -285,7 +286,7 @@ void describe("buildIndex common words", () => {
     )
   })
 
-  void it("normalizes accented words before checking utterance starts", () => {
+  it("normalizes accented words before checking utterance starts", () => {
     assert.deepStrictEqual(
       mentionsOf("Élan", [
         "They admired his e\u0301lan.",

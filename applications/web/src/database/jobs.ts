@@ -50,13 +50,14 @@ export function toDisplayJob(
     ...job,
     config: job.type === "book_align" ? summarizeRunConfig(job.config) : null,
     bookTitle,
-    alignmentGrade: job.type === "book_align" ? alignment?.grade ?? null : null,
+    alignmentGrade:
+      job.type === "book_align" ? (alignment?.grade ?? null) : null,
     alignmentSentenceCoverage:
-      job.type === "book_align" ? alignment?.sentenceCoverage ?? null : null,
+      job.type === "book_align" ? (alignment?.sentenceCoverage ?? null) : null,
     alignmentAudioCoverage:
-      job.type === "book_align" ? alignment?.audioCoverage ?? null : null,
+      job.type === "book_align" ? (alignment?.audioCoverage ?? null) : null,
     alignmentReportUuid:
-      job.type === "book_align" ? alignment?.reportUuid ?? null : null,
+      job.type === "book_align" ? (alignment?.reportUuid ?? null) : null,
   }
 }
 

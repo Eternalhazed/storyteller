@@ -1,6 +1,7 @@
 import assert from "node:assert"
 import { join } from "node:path"
-import { describe, it } from "node:test"
+
+import { describe, it } from "vitest"
 
 import { readBookSource } from "./epub.ts"
 import {
@@ -59,8 +60,8 @@ function createFakeModel(prompts: string[], failOnCall?: number): CallModel {
   }
 }
 
-void describe("generateXray", () => {
-  void it("shows the model the book in order, one passage at a time", async () => {
+describe("generateXray", () => {
+  it("shows the model the book in order, one passage at a time", async () => {
     const source = await readBookSource(epubPath)
     const book = flattenBook(source.chapters)
     const prompts: string[] = []
@@ -88,7 +89,7 @@ void describe("generateXray", () => {
     assert.strictEqual(xray.generator.version, 2)
   })
 
-  void it("resumes an interrupted run without rereading", async () => {
+  it("resumes an interrupted run without rereading", async () => {
     const source = await readBookSource(epubPath)
     const whole = await generateXray(source, {
       model: "fake",
@@ -123,8 +124,8 @@ void describe("generateXray", () => {
   })
 })
 
-void describe("generateXray failures", () => {
-  void it("skips a passage the model cannot answer and reads on", async () => {
+describe("generateXray failures", () => {
+  it("skips a passage the model cannot answer and reads on", async () => {
     const source = await readBookSource(epubPath)
     const prompts: string[] = []
     const fake = createFakeModel(prompts)
@@ -147,7 +148,7 @@ void describe("generateXray failures", () => {
     )
   })
 
-  void it("refuses progress saved for a differently numbered book", async () => {
+  it("refuses progress saved for a differently numbered book", async () => {
     const source = await readBookSource(epubPath)
     let saved: GenerationState | undefined
     await generateXray(source, {
@@ -182,7 +183,7 @@ void describe("generateXray failures", () => {
   })
 })
 
-void describe("segmentBook", () => {
+describe("segmentBook", () => {
   const sentence = "word ".repeat(40).trim()
   const book: BookText = {
     chapters: [
@@ -217,7 +218,7 @@ void describe("segmentBook", () => {
     ],
   }
 
-  void it("never lets a passage cross a chapter", () => {
+  it("never lets a passage cross a chapter", () => {
     const segments = segmentBook(book, { maxTokens: 10_000 })
 
     assert.deepStrictEqual(segments, [
@@ -226,7 +227,7 @@ void describe("segmentBook", () => {
     ])
   })
 
-  void it("joins a sliver at the end of a chapter to the passage before", () => {
+  it("joins a sliver at the end of a chapter to the passage before", () => {
     // Three sentences fill the first passage. What is left is too small to
     // be sent on its own, so without joining it the chapter's closing lines
     // would never be read.
@@ -248,7 +249,7 @@ void describe("segmentBook", () => {
     ])
   })
 
-  void it("cuts a long chapter at a paragraph break", () => {
+  it("cuts a long chapter at a paragraph break", () => {
     // Chapter b is 450 tokens, so two passages of about 225 each. The even
     // cut falls after its 5th sentence; the paragraph ends one before that
     // and one well after, so the cut waits for neither past the slack.

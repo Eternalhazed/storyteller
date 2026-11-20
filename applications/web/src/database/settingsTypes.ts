@@ -470,6 +470,10 @@ export const SETTINGS_DEFAULTS = {
   epub2BackupSuffix: DEFAULT_EPUB_SUFFIX_TEMPLATE,
   cleanCacheAfterReadaloud: false,
   metadataAutoImportThresholds: { audnexus: "high", hardcover: "high" },
+  xrayAnthropicApiKey: null,
+  // Matches the default seeded by migration 114_xray_settings.sql.
+  xrayModel: "claude-haiku-5-5",
+  xrayAutoGenerate: false,
 } satisfies Settings
 
 // settings-only schema for config file validation;

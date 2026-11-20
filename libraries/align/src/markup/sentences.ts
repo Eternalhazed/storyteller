@@ -98,7 +98,7 @@ export async function extractSentences(
   for (const spineItem of spine) {
     if (manifest[spineItem.id]?.properties?.includes("nav")) continue
 
-    let chapterXml: ParsedXml
+    let chapterXml: Document
     try {
       chapterXml = await epub.readXhtmlItemContents(spineItem.id)
     } catch (cause) {

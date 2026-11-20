@@ -11,10 +11,10 @@ import {
 } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, it } from "node:test"
 import { setImmediate } from "node:timers/promises"
 
 import { NextRequest } from "next/server"
+import { describe, it } from "vitest"
 
 import { DEFAULT_XRAY_MODEL } from "@storyteller/xray"
 
@@ -135,8 +135,8 @@ async function setupXrayBook(
   }
 }
 
-void describe("X-Ray storage and settings", () => {
-  void it("inserts default settings without replacing existing values", async () => {
+describe("X-Ray storage and settings", () => {
+  it("inserts default settings without replacing existing values", async () => {
     using ctx = setupTestDb()
     ctx.sqlite.prepare("DELETE FROM settings WHERE name LIKE 'xray%'").run()
     const migration = await readFile(
@@ -156,7 +156,7 @@ void describe("X-Ray storage and settings", () => {
     assert.equal(await getSetting("xrayModel"), "custom-model")
   })
 
-  void it("removes the file and saved state when deleting a book", async () => {
+  it("removes the file and saved state when deleting a book", async () => {
     await using fixture = await setupXrayBook()
     await fixture.writeXray()
     await writeFile(getXrayStateFilepath(fixture.bookUuid), "{}")
@@ -171,7 +171,7 @@ void describe("X-Ray storage and settings", () => {
     })
   })
 
-  void it("does not fail a committed deletion when derived-file cleanup fails", async () => {
+  it("does not fail a committed deletion when derived-file cleanup fails", async () => {
     await using fixture = await setupXrayBook()
     await mkdir(getXrayFilepath(fixture.bookUuid), { recursive: true })
     await writeFile(getXrayStateFilepath(fixture.bookUuid), "{}")
@@ -189,7 +189,7 @@ void describe("X-Ray storage and settings", () => {
     }
   })
 
-  void it("does not remove files inside a caller's transaction that rolls back", async () => {
+  it("does not remove files inside a caller's transaction that rolls back", async () => {
     await using fixture = await setupXrayBook()
     await fixture.writeXray()
     await writeFile(getXrayStateFilepath(fixture.bookUuid), "{}")
@@ -211,7 +211,7 @@ void describe("X-Ray storage and settings", () => {
     )
   })
 
-  void it("moves X-Ray and saved progress with an ebook after a merge commits", async () => {
+  it("moves X-Ray and saved progress with an ebook after a merge commits", async () => {
     await using fixture = await setupXrayBook()
     const target = seedBooks(fixture.ctx, [
       { title: "Merge target" },
@@ -246,7 +246,7 @@ void describe("X-Ray storage and settings", () => {
     }
   })
 
-  void it("keeps the merge target's existing X-Ray instead of replacing it", async () => {
+  it("keeps the merge target's existing X-Ray instead of replacing it", async () => {
     await using fixture = await setupXrayBook()
     const target = seedBooks(fixture.ctx, [
       { title: "Merge target" },
@@ -271,7 +271,7 @@ void describe("X-Ray storage and settings", () => {
     }
   })
 
-  void it("does not roll back a merge when moving its derived files fails", async () => {
+  it("does not roll back a merge when moving its derived files fails", async () => {
     await using fixture = await setupXrayBook()
     const target = seedBooks(fixture.ctx, [
       { title: "Merge target" },
@@ -290,7 +290,7 @@ void describe("X-Ray storage and settings", () => {
     }
   })
 
-  void it("invalidates old X-Ray before replacing an ebook from a server path", async () => {
+  it("invalidates old X-Ray before replacing an ebook from a server path", async () => {
     await using fixture = await setupXrayBook()
     const book = await getBook(fixture.bookUuid)
     assert.ok(book)
@@ -317,7 +317,7 @@ void describe("X-Ray storage and settings", () => {
     })
   })
 
-  void it("invalidates a re-imported ebook even when optional background work fails", async () => {
+  it("invalidates a re-imported ebook even when optional background work fails", async () => {
     await using fixture = await setupXrayBook()
     const book = await getBook(fixture.bookUuid)
     assert.ok(book)
@@ -363,7 +363,7 @@ void describe("X-Ray storage and settings", () => {
     }
   })
 
-  void it("keeps alignment and X-Ray jobs separate for the same book", async () => {
+  it("keeps alignment and X-Ray jobs separate for the same book", async () => {
     await using fixture = await setupXrayBook()
     const xray = await createJob({
       type: "book_xray",
@@ -404,8 +404,8 @@ void describe("X-Ray storage and settings", () => {
   })
 })
 
-void describe("GET book X-Ray", () => {
-  void it("serves a trusted file placed on disk without a job record", async () => {
+describe("GET book X-Ray", () => {
+  it("serves a trusted file placed on disk without a job record", async () => {
     await using fixture = await setupXrayBook()
     const contents = '{"schemaVersion":1,"from":"batch"}'
     await fixture.writeXray(contents)
@@ -426,7 +426,7 @@ void describe("GET book X-Ray", () => {
     assert.deepEqual(await getJobs(), [])
   })
 
-  void it("returns 304 for strong, weak, list, and wildcard ETags", async () => {
+  it("returns 304 for strong, weak, list, and wildcard ETags", async () => {
     await using fixture = await setupXrayBook()
     await fixture.writeXray()
     const first = await fixture.request("GET")
@@ -442,7 +442,7 @@ void describe("GET book X-Ray", () => {
     }
   })
 
-  void it("changes its ETag when the file changes", async () => {
+  it("changes its ETag when the file changes", async () => {
     await using fixture = await setupXrayBook()
     await fixture.writeXray()
     const first = await fixture.request("GET")
@@ -459,13 +459,13 @@ void describe("GET book X-Ray", () => {
     await response.text()
   })
 
-  void it("returns 404 for an absent file or unknown book", async () => {
+  it("returns 404 for an absent file or unknown book", async () => {
     await using fixture = await setupXrayBook()
     assert.equal((await fixture.request("GET")).status, 404)
     assert.equal((await fixture.request("GET", {}, randomUUID())).status, 404)
   })
 
-  void it("treats an empty file as missing, even with If-None-Match", async () => {
+  it("treats an empty file as missing, even with If-None-Match", async () => {
     await using fixture = await setupXrayBook()
     await fixture.writeXray("")
     assert.equal((await fixture.request("GET")).status, 404)
@@ -475,7 +475,7 @@ void describe("GET book X-Ray", () => {
     )
   })
 
-  void it("handles cancellation mid-download without an uncaught stream error", async () => {
+  it("handles cancellation mid-download without an uncaught stream error", async () => {
     await using fixture = await setupXrayBook()
     await fixture.writeXray(`{"large":"${"x".repeat(512 * 1024)}"}`)
     const uncaught: unknown[] = []
@@ -498,7 +498,7 @@ void describe("GET book X-Ray", () => {
     }
   })
 
-  void it("requires read permission", async () => {
+  it("requires read permission", async () => {
     await using fixture = await setupXrayBook()
     await fixture.writeXray()
     fixture.ctx.sqlite.prepare("UPDATE user_permission SET book_read = 0").run()
@@ -506,8 +506,8 @@ void describe("GET book X-Ray", () => {
   })
 })
 
-void describe("HEAD book X-Ray", () => {
-  void it("returns GET's file metadata without a response body", async () => {
+describe("HEAD book X-Ray", () => {
+  it("returns GET's file metadata without a response body", async () => {
     await using fixture = await setupXrayBook()
     await fixture.writeXray()
     const get = await fixture.request("GET")
@@ -527,7 +527,7 @@ void describe("HEAD book X-Ray", () => {
     }
   })
 
-  void it("returns 304 with the same ETag and Last-Modified as GET", async () => {
+  it("returns 304 with the same ETag and Last-Modified as GET", async () => {
     await using fixture = await setupXrayBook()
     await fixture.writeXray()
     const first = await fixture.request("HEAD")
@@ -552,7 +552,7 @@ void describe("HEAD book X-Ray", () => {
     }
   })
 
-  void it("returns a bodyless 404 for missing, unknown, and empty files", async () => {
+  it("returns a bodyless 404 for missing, unknown, and empty files", async () => {
     await using fixture = await setupXrayBook()
     for (const bookId of [fixture.bookUuid, randomUUID()]) {
       const get = await fixture.request("GET", {}, bookId)
@@ -572,7 +572,7 @@ void describe("HEAD book X-Ray", () => {
     assert.equal(head.body, null)
   })
 
-  void it("uses GET's read permission checks without returning an error body", async () => {
+  it("uses GET's read permission checks without returning an error body", async () => {
     await using fixture = await setupXrayBook()
     await fixture.writeXray()
     fixture.ctx.sqlite.prepare("UPDATE user_permission SET book_read = 0").run()
@@ -583,8 +583,8 @@ void describe("HEAD book X-Ray", () => {
   })
 })
 
-void describe("POST book X-Ray", () => {
-  void it("requires an Anthropic key and leaves no queued job when absent", async () => {
+describe("POST book X-Ray", () => {
+  it("requires an Anthropic key and leaves no queued job when absent", async () => {
     await using fixture = await setupXrayBook()
     const response = await fixture.request("POST")
     assert.equal(response.status, 409)
@@ -592,13 +592,13 @@ void describe("POST book X-Ray", () => {
     assert.deepEqual(await getJobs(), [])
   })
 
-  void it("returns 404 for unknown books and absent ebook files", async () => {
+  it("returns 404 for unknown books and absent ebook files", async () => {
     await using noEbook = await setupXrayBook({ ebook: false, apiKey: true })
     assert.equal((await noEbook.request("POST")).status, 404)
     assert.equal((await noEbook.request("POST", {}, randomUUID())).status, 404)
   })
 
-  void it("returns 404 when the ebook path no longer exists", async () => {
+  it("returns 404 when the ebook path no longer exists", async () => {
     await using fixture = await setupXrayBook({
       fileExists: false,
       apiKey: true,
@@ -607,7 +607,7 @@ void describe("POST book X-Ray", () => {
     assert.deepEqual(await getJobs(), [])
   })
 
-  void it("durably queues X-Ray without storing the API key and deduplicates active requests", async () => {
+  it("durably queues X-Ray without storing the API key and deduplicates active requests", async () => {
     await using fixture = await setupXrayBook({ apiKey: true })
     assert.equal((await fixture.request("POST")).status, 204)
     assert.equal((await fixture.request("POST")).status, 204)
@@ -625,7 +625,7 @@ void describe("POST book X-Ray", () => {
     assert.equal((await getJobs({ type: "book_xray" })).length, 2)
   })
 
-  void it("returns a clear conflict instead of claiming a paused job was queued", async () => {
+  it("returns a clear conflict instead of claiming a paused job was queued", async () => {
     await using fixture = await setupXrayBook({ apiKey: true })
     await fixture.request("POST")
     const job = (await getJobs({ type: "book_xray" }))[0]!
@@ -640,7 +640,7 @@ void describe("POST book X-Ray", () => {
     assert.equal((await getJobs({ type: "book_xray" })).length, 1)
   })
 
-  void it("returns a clear conflict while a running job finishes a pause or cancellation", async () => {
+  it("returns a clear conflict while a running job finishes a pause or cancellation", async () => {
     await using fixture = await setupXrayBook({ apiKey: true })
     await fixture.request("POST")
     const job = (await getJobs({ type: "book_xray" }))[0]!
@@ -659,7 +659,7 @@ void describe("POST book X-Ray", () => {
     }
   })
 
-  void it("requires processing permission", async () => {
+  it("requires processing permission", async () => {
     await using fixture = await setupXrayBook({ apiKey: true })
     fixture.ctx.sqlite
       .prepare("UPDATE user_permission SET book_process = 0")

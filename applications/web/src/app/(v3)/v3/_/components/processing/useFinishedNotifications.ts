@@ -41,7 +41,8 @@ export function useFinishedNotifications() {
         const href = job.bookUuid
           ? `${basePath}/books/${job.bookUuid}${job.type === "book_align" ? "?report=true" : ""}`
           : null
-        const alignment = job.type === "book_align" ? job.stats?.alignment : null
+        const alignment =
+          job.type === "book_align" ? job.stats?.alignment : null
         const skipped = alignment
           ? alignment.excluded + alignment.excludedByRule
           : 0
