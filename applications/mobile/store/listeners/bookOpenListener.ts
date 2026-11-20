@@ -18,6 +18,7 @@ import { localApi } from "@/store/localApi"
 import {
   firstClipInResource,
   isStandaloneAudiobookLocator,
+  nearestClipToResource,
   positionForProgression,
 } from "@/store/locatorFormat"
 import { getLocalBookExtractedUrl } from "@/store/persistence/files"
@@ -266,8 +267,12 @@ startAppListening({
         }
 
         // A remapped position names a resource but not a fragment within it, so
-        // resume at the first sentence of wherever the reader was left.
-        clip = clip ?? firstClipInResource(clips, book.position.locator.href)
+        // resume at the first sentence of wherever the reader was left. A
+        // resource with no narration resumes at the nearest one that has it.
+        clip =
+          clip ??
+          firstClipInResource(clips, book.position.locator.href) ??
+          nearestClipToResource(clips, positions, book.position.locator.href)
       }
 
       listenerApi.throwIfCancelled()
