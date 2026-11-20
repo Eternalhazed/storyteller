@@ -1153,6 +1153,16 @@ export async function getBookOrThrow(uuid: UUID) {
   return book
 }
 
+/** Every book with an ebook file that is still on disk. */
+export async function getBookUuidsWithEbook(): Promise<UUID[]> {
+  const rows = await db
+    .selectFrom("ebook")
+    .select("bookUuid")
+    .where("missing", "=", false)
+    .execute()
+  return rows.map((row) => row.bookUuid)
+}
+
 export async function getBookByAudiobookFilepathPrefix(
   audiobookFilepath: string,
 ) {

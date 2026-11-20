@@ -1,4 +1,4 @@
-import { stat } from "node:fs/promises"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { extname, join, resolve } from "node:path"
 import { cwd } from "node:process"
 import { MessageChannel } from "node:worker_threads"
@@ -6,7 +6,7 @@ import { MessageChannel } from "node:worker_threads"
 import { AsyncMutex } from "@esfx/async-mutex"
 import Piscina from "piscina"
 
-import type { CallModel } from "@storyteller/xray"
+import { type CallModel, XRAY_GENERATOR_VERSION } from "@storyteller/xray"
 
 import { filepathFolder, pathBelongsTo } from "@/assets/library/paths"
 import { setEbookImportHandler } from "@/assets/library/scanner/ebook-import"
@@ -22,6 +22,7 @@ import {
   type Readaloud,
   getBook,
   getBookOrThrow,
+  getBookUuidsWithEbook,
   updateBook,
 } from "@/database/books"
 import {
@@ -38,6 +39,7 @@ import {
   updateJob,
 } from "@/database/jobs"
 import { getSettings } from "@/database/settings"
+import { XRAY_DIR } from "@/directories"
 import { env } from "@/env"
 import { queueJobNext } from "@/jobList"
 import { ACTIVE_JOB_STATUSES } from "@/jobStatuses"
@@ -202,8 +204,29 @@ export async function enqueueBookXray(bookUuid: UUID): Promise<DisplayJob> {
   } finally {
     pumpMutex.unlock()
   }
-  void pump()
+  // Only the X-Ray lane: queueing X-Ray must not restart alignment jobs that
+  // were left queued when the server last stopped.
+  void pump(undefined, undefined, ["book_xray"])
   return job
+}
+
+/**
+ * Whether a book's X-Ray file exists and was built by the current generation
+ * rules. An unreadable file counts as missing, so it is rebuilt.
+ */
+async function hasCurrentXray(bookUuid: UUID): Promise<boolean> {
+  try {
+    const xray = JSON.parse(
+      await readFile(getXrayFilepath(bookUuid), "utf8"),
+    ) as { generator?: { version?: unknown } }
+    return xray.generator?.version === XRAY_GENERATOR_VERSION
+  } catch (error) {
+    if (error instanceof SyntaxError) return false
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return false
+    }
+    throw error
+  }
 }
 
 export async function maybeEnqueueBookXray(bookUuid: UUID): Promise<void> {
@@ -213,21 +236,66 @@ export async function maybeEnqueueBookXray(bookUuid: UUID): Promise<void> {
       return
     const book = await getBook(bookUuid)
     if (!book?.ebook?.filepath || book.ebook.missing) return
-    try {
-      const file = await stat(getXrayFilepath(bookUuid))
-      if (file.size > 0) return
-    } catch (error) {
-      if (
-        !(error instanceof Error && "code" in error && error.code === "ENOENT")
-      ) {
-        throw error
-      }
-    }
+    if (await hasCurrentXray(bookUuid)) return
     await enqueueBookXray(bookUuid)
   } catch (error) {
     logger.warn({
       msg: "Failed to queue automatic X-Ray generation",
       bookUuid,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+/** Records the generation rules the last library-wide pass ran under. */
+const BACKFILL_MARKER = join(XRAY_DIR, "backfill-version")
+
+/**
+ * Queue X-Ray for every book that lacks a current one: books added before
+ * automatic generation was turned on, books that failed, and books built by
+ * older generation rules.
+ *
+ * Runs once per version of the rules, not at every start, so a book that
+ * cannot be read is retried when the rules change rather than on every
+ * restart.
+ */
+export async function backfillXray(): Promise<void> {
+  try {
+    const settings = await getSettings()
+    if (!settings.xrayAutoGenerate || !settings.xrayAnthropicApiKey?.trim())
+      return
+
+    const done = await readFile(BACKFILL_MARKER, "utf8").catch(
+      (error: unknown) => {
+        if (
+          error instanceof Error &&
+          "code" in error &&
+          error.code === "ENOENT"
+        ) {
+          return null
+        }
+        throw error
+      },
+    )
+    if (done?.trim() === String(XRAY_GENERATOR_VERSION)) return
+
+    const bookUuids = await getBookUuidsWithEbook()
+    let queued = 0
+    for (const bookUuid of bookUuids) {
+      if (await hasCurrentXray(bookUuid)) continue
+      await enqueueBookXray(bookUuid)
+      queued++
+    }
+    await mkdir(XRAY_DIR, { recursive: true })
+    await writeFile(BACKFILL_MARKER, `${XRAY_GENERATOR_VERSION}\n`)
+    logger.info({
+      msg: "Queued X-Ray for books without a current one",
+      queued,
+      generatorVersion: XRAY_GENERATOR_VERSION,
+    })
+  } catch (error) {
+    logger.warn({
+      msg: "Failed to queue X-Ray for the library",
       error: error instanceof Error ? error.message : String(error),
     })
   }
@@ -258,7 +326,7 @@ async function claimNextJob(
         status: "RUNNING",
         startedAt:
           type === "book_xray"
-            ? next.startedAt ?? nowTimestamp()
+            ? (next.startedAt ?? nowTimestamp())
             : nowTimestamp(),
         error: null,
       })

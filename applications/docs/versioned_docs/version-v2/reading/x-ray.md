@@ -12,9 +12,8 @@ book at once.
 
 ## Enable X-Ray
 
-A server administrator can configure X-Ray on the web **Settings** page. In the
-v3 interface, open **Processing**, then find the **X-Ray** section; the earlier
-web interface has an **X-Ray** section directly on the Settings page.
+A server administrator can configure X-Ray on the web **Settings** page: open
+**Processing**, then find the **X-Ray** section.
 
 1. Enter an **Anthropic API key**. This is a separate provider credential, not
    your Storyteller password. Storyteller stores the key encrypted with its
@@ -22,7 +21,12 @@ web interface has an **X-Ray** section directly on the Settings page.
 2. Choose a **Model**, or keep the default, `claude-haiku-5-5`.
 3. Optionally enable **Generate X-Ray automatically**. It is off by default.
    When enabled, Storyteller queues X-Ray for newly imported ebooks and after
-   successful readaloud creation, provided the book does not already have X-Ray.
+   successful readaloud creation, unless the book already has a current X-Ray.
+   When the server starts, it also queues every book that has no X-Ray, or one
+   built by older generation rules. That pass runs once per version of the
+   rules, so a book that cannot be read is retried after an update, not at every
+   restart. Turning the setting on takes effect for existing books at the next
+   server start.
 4. Save the settings.
 
 You can also provide these settings through
@@ -39,12 +43,14 @@ comfortable sending to that provider.
 
 ## Cost
 
-With the default model, measured generation costs are about **US $0.05 for a
-short novel** and **US $0.20–$0.25 for a long novel of 150,000 words or more**.
-These are estimates, not fixed prices: book length, the selected model, and
-Anthropic's current pricing affect the actual charge. Regenerating a completed
-X-Ray uses the API again. Paused or interrupted generation saves completed
-passages so a resume or retry does not need to send those passages again.
+With the default model, measured generation costs are about **US
+$0.05 for a
+short novel** and **US $0.20–$0.25 for a long novel of 150,000 words
+or more**. These are estimates, not fixed prices: book length, the selected
+model, and Anthropic's current pricing affect the actual charge. Regenerating a
+completed X-Ray uses the API again. Paused or interrupted generation saves
+completed passages so a resume or retry does not need to send those passages
+again.
 
 ## How spoiler safety works
 
@@ -61,11 +67,11 @@ can be missing.
 
 ## Generate or regenerate a book
 
-Open a book's processing actions in either web interface. The X-Ray state next
-to the action says **No X-Ray yet**, or **X-Ray ready** with its generation
-date. Choose **Generate X-Ray** to create one. You need permission to process
-books, an available ebook, and a configured Anthropic key. The action works for
-ebooks without an audiobook as well as books with synchronized narration.
+Open a book's processing actions in the web interface. The X-Ray state next to
+the action says **No X-Ray yet**, or **X-Ray ready** with its generation date.
+Choose **Generate X-Ray** to create one. You need permission to process books,
+an available ebook, and a configured Anthropic key. The action works for ebooks
+without an audiobook as well as books with synchronized narration.
 
 Generation runs in the **processing queue**, where it is labelled **X-Ray**. The
 book page shows when its X-Ray job is queued, running (with progress), or

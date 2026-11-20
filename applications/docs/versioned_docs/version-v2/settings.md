@@ -251,7 +251,9 @@ in the v3 interface):
 - **Model** (`xrayModel`): the Anthropic model to use. The default is
   `claude-haiku-5-5`.
 - **Generate X-Ray automatically** (`xrayAutoGenerate`): disabled by default.
-  Enable it to generate X-Ray after import or readaloud creation.
+  Enable it to generate X-Ray after import or readaloud creation, and, at each
+  server start after an update to the generation rules, for every book whose
+  X-Ray is missing or out of date.
 
 Generating X-Ray sends book text to Anthropic and uses its paid API. Leaving
 automatic generation disabled does not prevent manually requesting generation.
@@ -260,7 +262,7 @@ These settings can also be provided through
 including `xrayAnthropicApiKey_file` for a key stored in a separate secret file.
 
 Users with permission to process books can use **Generate or regenerate X-Ray**
-next to a book's processing actions in either web interface. The action is only
+next to a book's processing actions in the web interface. The action is only
 shown when an Anthropic key is configured and the book has an available ebook.
 
 X-Ray has a separate queue lane: one X-Ray job can run alongside one alignment

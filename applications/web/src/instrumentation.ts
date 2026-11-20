@@ -28,7 +28,7 @@ export async function register() {
   const { syncChangelog } = await import("./database/changelog")
   const { getQueuedBooks } = await import("./database/books")
   // Load the server-only worker inside register, outside the edge runtime.
-  const { pump } = await import("./work/distributor")
+  const { backfillXray, pump } = await import("./work/distributor")
   const { getReadiumService } = await import("./services/readiumService")
   const { env } = await import("./env")
   const { startLogRetention } = await import("./logRetention")
@@ -105,7 +105,10 @@ export async function register() {
       })
     }
     // X-Ray resumes independently; alignment still requires a manual restart.
+    // (pump resolves only when the jobs it started finish, so the backfill
+    // does not wait for it.)
     void pump(undefined, undefined, ["book_xray"])
+    void backfillXray()
   } catch (err) {
     logger.error("Failed to restart processing queue")
     logger.error(err)
