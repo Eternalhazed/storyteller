@@ -1,0 +1,8 @@
+releases:
+  "@storyteller/okmain": minor
+  "@storyteller/opds": minor
+
+declined:
+  - "@storyteller/docs"
+  - "@storyteller/mobile"
+  - "@storyteller/web"

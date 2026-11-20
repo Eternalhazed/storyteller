@@ -57,7 +57,12 @@ function copy(from: string, to: string, what: string) {
   console.log(`copied ${what}`)
 }
 
+const standalone = join(webRoot, ".next", "standalone")
+
+rmSync(stagingDir, { recursive: true, force: true })
+
 if (!skipBuild) {
+  rmSync(standalone, { recursive: true, force: true })
   const envFiles = [
     ".env",
     ".env.local",
@@ -69,7 +74,7 @@ if (!skipBuild) {
   for (const path of envFiles) renameSync(path, `${path}.tauri-build-backup`)
   try {
     run(
-      "yarn workspaces foreach -Rpt --from @storyteller-platform/web --exclude @storyteller-platform/eslint run build",
+      "yarn workspaces foreach -Rpt --from @storyteller/web --exclude @storyteller/eslint run build",
       repoRoot,
     )
   } finally {
@@ -79,26 +84,13 @@ if (!skipBuild) {
   }
 }
 
-const standalone = join(webRoot, ".next", "standalone")
 if (!existsSync(join(standalone, "applications", "web", "server.js"))) {
   throw new Error(
     `no standalone server at ${standalone} — run the web build first (or drop --skip-build)`,
   )
 }
 
-const uuidExt = {
-  darwin: "uuid.c.dylib",
-  linux: "uuid.c.so",
-  win32: "uuid.c.dll",
-}[target.platform]
-if (!existsSync(join(webRoot, "sqlite", uuidExt))) {
-  throw new Error(
-    `missing sqlite extension ${uuidExt} — on darwin/linux the web build produces it via build-sqlite-ext.sh; on windows compile it manually (cl /LD sqlite/uuid.c)`,
-  )
-}
-
 console.log(`staging runtime tree for ${triple}`)
-rmSync(stagingDir, { recursive: true, force: true })
 mkdirSync(stagingDir, { recursive: true })
 
 const webStaging = join(stagingDir, "applications", "web")
@@ -114,11 +106,6 @@ copy(
   join(webStaging, ".next", "static"),
   "static assets",
 )
-copy(
-  join(webRoot, "sqlite", uuidExt),
-  join(webStaging, "sqlite", uuidExt),
-  "sqlite uuid extension",
-)
 copy(join(webRoot, "migrations"), join(webStaging, "migrations"), "migrations")
 copy(join(webRoot, "work-dist"), join(webStaging, "work-dist"), "worker bundle")
 copy(
@@ -127,32 +114,37 @@ copy(
   "file write worker bundle",
 )
 
-const alignPrebuild = join(
-  repoRoot,
-  "libraries",
-  "align",
-  "prebuilds",
-  target.alignPrebuild,
-)
-copy(
-  alignPrebuild,
-  join(
-    webStaging,
-    "work-dist",
-    "@storyteller-platform",
-    "align",
-    "prebuilds",
-    target.alignPrebuild,
-  ),
-  "align native addon prebuild",
-)
-for (const entry of readdirSync(alignPrebuild)) {
-  const content = readFileSync(join(alignPrebuild, entry))
-  if (content.subarray(0, 30).toString().includes("git-lfs")) {
-    throw new Error(
-      `${entry} is a git-lfs pointer, not a real binary — run: git lfs pull`,
-    )
+function stagePrebuild(library: string, prebuild: string, what: string) {
+  const from = join(repoRoot, "libraries", library, "prebuilds", prebuild)
+  copy(
+    from,
+    join(
+      webStaging,
+      "work-dist",
+      "@storyteller-platform",
+      library,
+      "prebuilds",
+      prebuild,
+    ),
+    what,
+  )
+  for (const entry of readdirSync(from)) {
+    const content = readFileSync(join(from, entry))
+    if (content.subarray(0, 30).toString().includes("git-lfs")) {
+      throw new Error(
+        `${entry} is a git-lfs pointer, not a real binary — run: git lfs pull`,
+      )
+    }
   }
+}
+
+stagePrebuild("align", target.alignPrebuild, "align native addon prebuild")
+if (target.platform === "darwin" && target.arch === "arm64") {
+  stagePrebuild(
+    "mlx-audio",
+    `${target.platform}-${target.arch}`,
+    "mlx-audio native binding and metal library",
+  )
 }
 
 const wasmDir = join(
@@ -166,34 +158,20 @@ for (const entry of readdirSync(wasmDir).filter((f) => f.endsWith(".wasm"))) {
   copy(join(wasmDir, entry), join(webStaging, "work-dist", entry), entry)
 }
 
-copy(
-  join(repoRoot, "node_modules", "@parcel"),
-  join(stagingDir, "node_modules", "@parcel"),
-  "@parcel packages",
-)
-
-// kuroshiro
-copy(
-  join(repoRoot, "node_modules", "kuromoji"),
-  join(stagingDir, "node_modules", "kuromoji"),
-  "kuromoji",
-)
-
-const sqliteBinding = join(
+const sqlitePrebuild = join(
   stagingDir,
   "node_modules",
   "better-sqlite3",
-  "build",
-  "Release",
-  "better_sqlite3.node",
+  "prebuilds",
+  `${target.platform}-${target.arch}.node`,
 )
-if (!existsSync(sqliteBinding)) {
-  throw new Error(`better-sqlite3 native binding missing at ${sqliteBinding}`)
+if (!existsSync(sqlitePrebuild)) {
+  throw new Error(`better-sqlite3 prebuild missing at ${sqlitePrebuild}`)
 }
 
 // symlink extraction on windows
 const symlinkSourceRoots: [string, string][] = [
-  [join(webRoot, ".next", "standalone"), stagingDir],
+  [standalone, stagingDir],
   [repoRoot, stagingDir],
 ]
 function* findSymlinks(dir: string): Generator<string> {

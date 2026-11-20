@@ -7,6 +7,7 @@ import { sql } from "kysely"
 import { getBook, removeBookDownloads } from "@/database/books"
 import { db, rawDb } from "@/database/db"
 import { getServer } from "@/database/servers"
+import { describeError } from "@/describeError"
 import { logger } from "@/logger"
 import {
   type ReadiumManifest,
@@ -27,6 +28,7 @@ import {
   getLocalBookExtractedUrl,
 } from "@/store/persistence/files"
 import { getDownloadUrl } from "@/store/serverApi"
+import { transferFeedbackSlice } from "@/store/slices/transferFeedbackSlice"
 import { randomUUID } from "@/uuid"
 
 import { createDownloadProgressHandler } from "./downloadProgress"
@@ -50,6 +52,10 @@ startAppListening({
     }
 
     listenerApi.unsubscribe()
+
+    // A cancelled download rejects, but it is not a failure worth telling the
+    // user about.
+    let downloadCancelled = false
 
     try {
       const { bookUuid, format } = action.meta.arg.originalArgs
@@ -149,6 +155,7 @@ startAppListening({
 
         if (bookUuid !== cancelledBookUuid || format !== cancelledFormat) return
 
+        downloadCancelled = true
         await download.cancelAsync()
       })
 
@@ -355,7 +362,7 @@ startAppListening({
       }
     } catch (e) {
       logger.error(`Failed to download book`)
-      logger.error({ err: e })
+      logger.error(describeError(e))
       const { bookUuid, format } = action.meta.arg.originalArgs
 
       await db
@@ -369,6 +376,14 @@ startAppListening({
       updateCachedDownloadState({
         downloadStatus: "ERROR",
       })
+
+      if (!downloadCancelled) {
+        listenerApi.dispatch(
+          transferFeedbackSlice.actions.bookTransferFailed(
+            `Failed to download ${format}: ${describeError(e)}`,
+          ),
+        )
+      }
 
       listenerApi.subscribe()
     }

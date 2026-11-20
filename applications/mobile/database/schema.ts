@@ -50,6 +50,9 @@ export interface Book {
   serverUuid: UUID | null
   ebookCoverUrl: string | null
   audiobookCoverUrl: string | null
+  textCoverSha256: string | null
+  audioCoverSha256: string | null
+  serverUpdatedAt: string | null
   updatedAt: Generated<string>
   uuid: UUID
 }
@@ -83,9 +86,7 @@ export interface BookToCreator {
   bookUuid: UUID
   createdAt: Generated<string>
   creatorUuid: UUID
-  role:
-    | import("@storyteller-platform/web/src/components/books/edit/marcRelators").Role
-    | null
+  role: import("@storyteller/web/src/metadata/marcRelators").Role | null
   updatedAt: Generated<string>
   uuid: UUID
 }

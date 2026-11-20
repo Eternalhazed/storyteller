@@ -18,7 +18,7 @@ import {
   type XrayEntityView,
   chapterIndexOf,
   viewXray,
-} from "@storyteller-platform/xray/view"
+} from "@storyteller/xray/view"
 
 import { LoadingView } from "@/components/LoadingView"
 import { XrayTypeBadge, xrayEntityTypeIcons } from "@/components/XrayTypeBadge"

@@ -1,27 +1,23 @@
 import { createHash } from "node:crypto"
 import { createWriteStream } from "node:fs"
-import { type FileHandle, mkdir, open, readdir } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { dirname, extname, join } from "node:path"
+import { type FileHandle, mkdir, open } from "node:fs/promises"
+import { relative, dirname, extname, join } from "node:path"
 
 import { createReadableStreamFromReadable } from "@remix-run/node"
 import contentDisposition from "content-disposition"
-import { lookup } from "mime-types"
 import { after } from "next/server"
 import { ZipFile } from "yazl"
 
-import {
-  Audiobook,
-  type AudiobookInputs,
-} from "@storyteller-platform/audiobook"
-import { Epub } from "@storyteller-platform/epub"
+import { Audiobook } from "@storyteller/audiobooks"
+import { Epub } from "@storyteller/epub"
+import { scratchPath } from "@storyteller/fs"
+import { MediaType } from "@storyteller/media-types"
 
+import { getAudiobookTracks } from "@/assets/audiobooks.ts"
 import { getExtractedCover } from "@/assets/covers"
 import { computeFileHash } from "@/assets/fs"
-import { isAudioFile, isZipArchive } from "@/audio"
 import { withHasPermission } from "@/auth/auth"
 import {
-  type BookFormat,
   type BookWithRelations,
   getBook,
   getBookUuid,
@@ -34,6 +30,21 @@ type Params = Promise<{
 }>
 
 type Format = "readaloud" | "audiobook" | "audiobook-rpf" | "ebook"
+
+function explicitlyAccepts(
+  header: string | null,
+  mediaType: MediaType,
+): boolean {
+  if (!header) return false
+  return header.split(",").some((part) => {
+    const [essence = "", ...parameters] = part.split(";")
+    const q = parameters
+      .map((parameter) => parameter.trim().split("="))
+      .find(([key]) => key?.trim().toLowerCase() === "q")?.[1]
+    if (q !== undefined && !(Number.parseFloat(q) > 0)) return false
+    return MediaType.fromMime(essence) === mediaType
+  })
+}
 
 function determineFormat(book: BookWithRelations, format: Format | null) {
   if (format === "audiobook-rpf") {
@@ -61,22 +72,15 @@ async function getFilepath(
     return filepath
   }
 
-  const entries = await readdir(filepath, { recursive: true })
-  const audioFiles = entries.filter(
-    (entry) => isAudioFile(entry) || isZipArchive(entry),
-  )
+  const audioFiles = await getAudiobookTracks(filepath)
 
   if (audioFiles.length === 1 && !rpf) {
     // We just confirmed there was one of these
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    return join(filepath, audioFiles[0]!)
+    return join(filepath, audioFiles[0])
   }
 
-  const zipFilepath = join(
-    tmpdir(),
-    "storyteller-downloads",
-    `${book.uuid}.zip`,
-  )
+  const zipFilepath = scratchPath("storyteller-downloads", `${book.uuid}.zip`)
   await mkdir(dirname(zipFilepath), { recursive: true })
 
   // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
@@ -94,18 +98,16 @@ async function getFilepath(
   zipfile.outputStream.pipe(writeStream)
 
   for (const audioFile of audioFiles) {
-    zipfile.addFile(join(filepath, audioFile), audioFile, { compress: false })
+    zipfile.addFile(audioFile, relative(filepath, audioFile), {
+      compress: false,
+    })
   }
 
   if (rpf) {
     const epubPath = book.readaloud?.filepath ?? book.ebook?.filepath
     using epub = epubPath ? await Epub.from(epubPath) : null
 
-    using audiobook = await Audiobook.from(
-      ...(audioFiles.map((audioFile) =>
-        join(filepath, audioFile),
-      ) as AudiobookInputs),
-    )
+    using audiobook = await Audiobook.from(...audioFiles)
 
     const audiocover = await getExtractedCover(book, "audiobook")
     if (audiocover) {
@@ -141,7 +143,7 @@ async function getFilepath(
         {
           rel: "self",
           href: "manifest.json",
-          type: "application/audiobook+json",
+          type: MediaType.AUDIOBOOK_MANIFEST.mime,
         },
       ],
       readingOrder: (await audiobook.getResources()).map(
@@ -213,10 +215,13 @@ export const GET = withHasPermission<Params>("bookRead", {
       { status: 404 },
     )
   }
-  const contentType = request.headers.get("Accept")
   const rpf =
-    contentType?.includes("application/audiobook+zip") ||
-    optionalFormat === "audiobook-rpf"
+    explicitlyAccepts(
+      request.headers.get("Accept"),
+      MediaType.AUDIOBOOK_PACKAGE,
+    ) || optionalFormat === "audiobook-rpf"
+
+  const packageExtension = MediaType.AUDIOBOOK_PACKAGE.extension ?? ""
 
   const normalizedTitle = book.title
     .normalize("NFD")
@@ -227,7 +232,7 @@ export const GET = withHasPermission<Params>("bookRead", {
   try {
     filepath = await getFilepath(book, format, rpf)
   } catch {
-    after(() => markFormatMissing(bookUuid, format as BookFormat))
+    after(() => markFormatMissing(bookUuid, format))
 
     return Response.json(
       { message: `Could not open ${format} for book with id ${bookId}` },
@@ -247,7 +252,7 @@ export const GET = withHasPermission<Params>("bookRead", {
   try {
     file = stack.use(await open(filepath))
   } catch {
-    after(() => markFormatMissing(bookUuid, format as BookFormat))
+    after(() => markFormatMissing(bookUuid, format))
 
     return Response.json(
       { message: `Could not open ${format} for book with id ${bookId}` },
@@ -323,14 +328,14 @@ export const GET = withHasPermission<Params>("bookRead", {
     status: partialResponse ? 206 : 200,
     headers: {
       "Content-Disposition": contentDisposition(
-        `${book.title}${rpf ? ".audiobook" : extname(filepath)}`,
+        `${book.title}${rpf ? packageExtension : extname(filepath)}`,
         {
-          fallback: `${normalizedTitle}${rpf ? ".audiobook" : extname(filepath)}`,
+          fallback: `${normalizedTitle}${rpf ? packageExtension : extname(filepath)}`,
         },
       ),
       "Content-Type": rpf
-        ? "application/audiobook+zip"
-        : (lookup(filepath) as string),
+        ? MediaType.AUDIOBOOK_PACKAGE.mime
+        : (MediaType.fromPath(filepath) ?? MediaType.OCTET_STREAM).mime,
       "Content-Length": `${end - start + 1}`,
       "Accept-Ranges": "bytes",
       "Last-Modified": new Date(stats.mtime).toISOString(),

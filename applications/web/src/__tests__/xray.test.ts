@@ -16,13 +16,14 @@ import { setImmediate } from "node:timers/promises"
 
 import { NextRequest } from "next/server"
 
-import { DEFAULT_XRAY_MODEL } from "@storyteller-platform/xray"
+import { DEFAULT_XRAY_MODEL } from "@storyteller/xray"
 
 import { GET, HEAD, POST } from "@/app/api/v2/books/[bookId]/xray/route"
+import { filepathFolder } from "@/assets/library/paths"
 import { setEbookImportHandler } from "@/assets/library/scanner/ebook-import"
 import { canonicalizePath } from "@/assets/library/scanner/folder"
 import { replaceBookAsset } from "@/assets/library/scanner/replaceAsset"
-import { filepathFolder, scan } from "@/assets/library/scanner/scan"
+import { scan } from "@/assets/library/scanner/scan"
 import {
   getInternalBookDirectory,
   getXrayFilepath,

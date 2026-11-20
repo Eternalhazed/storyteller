@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { type MessagePort } from "node:worker_threads"
 
-import { Epub } from "@storyteller-platform/epub"
+import { Epub } from "@storyteller/epub"
 
 import { deleteCachedCoverImages } from "@/assets/fs"
 import {
@@ -175,10 +175,10 @@ export default async function writeMetadataToFiles({
         },
       })
     } catch (e) {
-      logger.error(
-        `Failed to write metadata to readaloud ${book.title} ${book.assetDir}, skipping`,
-      )
-      logger.error(e)
+      logger.error({
+        msg: `Failed to write metadata to readaloud ${book.title} ${book.assetDir}, skipping`,
+        err: e,
+      })
     }
   }
 

@@ -1,4 +1,5 @@
 check:
+  extends: .yarn_cache
   image: registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:main
   stage: check
   tags: [saas-linux-large-amd64]
@@ -9,10 +10,10 @@ check:
   script:
     - npm i -g corepack
     - yarn
-    - yarn workspace @storyteller-platform/align build
     - yarn check
 
 check-versions:
+  extends: .yarn_cache
   image: registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:main
   stage: check
   variables:
@@ -26,6 +27,7 @@ check-versions:
     - yarn node ./scripts/checkVersions.mts
 
 check-docs:
+  extends: .yarn_cache
   image: registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:main
   stage: check
   tags: [saas-linux-large-amd64]
@@ -34,13 +36,14 @@ check-docs:
         ($CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_COMMIT_BRANCH ==
         "main" && $CI_COMMIT_TAG == null))
       changes:
-        - docs/**/*
+        - applications/docs/**/*
   script:
     - npm i -g corepack
     - yarn
     - yarn build:docs
 
 test-web:
+  extends: .yarn_cache
   image: registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:main
   stage: check
   tags: [saas-linux-large-amd64]
@@ -49,13 +52,62 @@ test-web:
         ($CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_COMMIT_BRANCH ==
         "main" && $CI_COMMIT_TAG == null))
       changes:
-        - web/**/*
+        - applications/web/**/*
   script:
     - npm i -g corepack
     - yarn
     - yarn test:web
 
+test-uri-fragment:
+  extends: .yarn_cache
+  image: registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:main
+  stage: check
+  tags: [saas-linux-large-amd64]
+  rules:
+    - if:
+        ($CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_COMMIT_BRANCH ==
+        "main" && $CI_COMMIT_TAG == null))
+      changes:
+        - libraries/uri-fragment/**/*
+  script:
+    - npm i -g corepack
+    - yarn
+    - yarn test:uri-fragment
+
+test-fs:
+  extends: .yarn_cache
+  image: registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:main
+  stage: check
+  tags: [saas-linux-large-amd64]
+  rules:
+    - if:
+        ($CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_COMMIT_BRANCH ==
+        "main" && $CI_COMMIT_TAG == null))
+      changes:
+        - libraries/fs/**/*
+  script:
+    - npm i -g corepack
+    - yarn
+    - yarn test:fs
+
+test-crengine-xpointer:
+  extends: .yarn_cache
+  image: registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:main
+  stage: check
+  tags: [saas-linux-large-amd64]
+  rules:
+    - if:
+        ($CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_COMMIT_BRANCH ==
+        "main" && $CI_COMMIT_TAG == null))
+      changes:
+        - libraries/crengine-xpointer/**/*
+  script:
+    - npm i -g corepack
+    - yarn
+    - yarn test:crengine-xpointer
+
 test-mobile:
+  extends: .yarn_cache
   image: registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:main
   stage: check
   tags: [saas-linux-large-amd64]
@@ -73,6 +125,7 @@ test-mobile:
     - yarn test:mobile
 
 test-epub:
+  extends: .yarn_cache
   image: registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:main
   stage: check
   tags: [saas-linux-large-amd64]
@@ -81,7 +134,7 @@ test-epub:
         ($CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_COMMIT_BRANCH ==
         "main" && $CI_COMMIT_TAG == null))
       changes:
-        - epub/**/*
+        - libraries/epub/**/*
   script:
     # install java
     - apt update && apt install -y --no-install-recommends openjdk-17-jdk
@@ -90,6 +143,7 @@ test-epub:
     - yarn test:epub
 
 test-audiobook:
+  extends: .yarn_cache
   image: registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:main
   stage: check
   tags: [saas-linux-large-amd64]
@@ -98,13 +152,14 @@ test-audiobook:
         ($CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_COMMIT_BRANCH ==
         "main" && $CI_COMMIT_TAG == null))
       changes:
-        - audiobook/**/*
+        - libraries/audiobook/**/*
   script:
     - npm i -g corepack
     - yarn
     - yarn test:audiobook
 
 test-align:
+  extends: .yarn_cache
   image: registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:main
   stage: check
   tags: [saas-linux-large-amd64]
@@ -113,8 +168,24 @@ test-align:
         ($CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_COMMIT_BRANCH ==
         "main" && $CI_COMMIT_TAG == null))
       changes:
-        - align/**/*
+        - libraries/align/**/*
   script:
     - npm i -g corepack
     - yarn
     - yarn test:align
+
+test-ghost-story:
+  extends: .yarn_cache
+  image: registry.gitlab.com/storyteller-platform/storyteller/storyteller-base:main
+  stage: check
+  tags: [saas-linux-large-amd64]
+  rules:
+    - if:
+        ($CI_PIPELINE_SOURCE == "merge_request_event" || ($CI_COMMIT_BRANCH ==
+        "main" && $CI_COMMIT_TAG == null))
+      changes:
+        - libraries/ghost-story/**/*
+  script:
+    - npm i -g corepack
+    - yarn
+    - yarn test:ghost-story

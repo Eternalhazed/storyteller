@@ -1,0 +1,4 @@
+declined:
+  - "@storyteller/tauri"
+  - "@storyteller/web"
+  - "@storyteller/epub"

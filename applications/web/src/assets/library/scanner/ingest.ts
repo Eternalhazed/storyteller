@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto"
 import { rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 
-import { type Audiobook } from "@storyteller-platform/audiobook"
-import { type InMemoryEpubReader } from "@storyteller-platform/epub"
+import { type Audiobook } from "@storyteller/audiobooks"
+import { type InMemoryEpubReader } from "@storyteller/epub"
+import { scratchPath } from "@storyteller/fs"
 
 import { reserveBookDirectory } from "@/assets/fs"
 import {
@@ -12,7 +11,6 @@ import {
   createBookFromOpenedAudiobook,
   createBookFromOpenedEpub,
   ensureCollections,
-  isReadaloudEpub,
   openAudiobookDir,
   openOrUpgradeEpub,
 } from "@/assets/library/scanner/create-book"
@@ -25,6 +23,7 @@ import { relocateIfNeeded } from "@/assets/library/scanner/relocate"
 import { type Candidate, type ScanFormat } from "@/assets/library/scanner/types"
 import { type BookWithRelations, updateBook } from "@/database/books"
 import { type ImportMode } from "@/database/settingsTypes"
+import { isReadaloudEpub } from "@/epub"
 
 /**
  * format-agnostic resolved candidate ready to feed into the pipeline. the
@@ -119,7 +118,7 @@ function resolveEpubOpenOpts(importMode: ImportMode): OpenEpubOpts {
   if (importMode === "copy") {
     return {
       strategyOverride: "replace",
-      upgradeTo: join(tmpdir(), `storyteller-upgrade-${randomUUID()}.epub`),
+      upgradeTo: scratchPath(`storyteller-upgrade-${randomUUID()}.epub`),
     }
   }
 

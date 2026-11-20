@@ -20,7 +20,7 @@ import {
   type GenerationState,
   UnansweredError,
   xraySchema,
-} from "@storyteller-platform/xray"
+} from "@storyteller/xray"
 
 import { seedBooks, setupTestDb } from "@/__tests__/harness/testDb"
 import {
@@ -118,7 +118,12 @@ async function setupBook() {
         config: null,
         position: (await getJobs()).length,
       })
-      return queued ? job : updateJob(job.uuid, { status: "RUNNING" })
+      if (queued) {
+        const queuedJob = await getJob(job.uuid)
+        assert.ok(queuedJob)
+        return queuedJob
+      }
+      return updateJob(job.uuid, { status: "RUNNING" })
     },
     async [Symbol.asyncDispose]() {
       await rm(getXrayFilepath(bookUuid), { force: true })

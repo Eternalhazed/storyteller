@@ -1,4 +1,27 @@
+import { format } from "date-fns"
+
+import { MediaType } from "@storyteller/media-types"
+import { OPDS_AUTHENTICATION_JSON } from "@storyteller/opds"
+
+import { READING_SCOPE, createApiToken } from "@/database/apiTokens"
 import { getSettings } from "@/database/settings"
+import { describeUserAgent } from "@/userAgent"
+import { type UUID } from "@/uuid"
+
+const OPDS_TOKEN_IDLE_DAYS = 365
+export function opdsTokenName(userAgent: string | null, now = new Date()) {
+  const client = describeUserAgent(userAgent)
+  const date = format(now, "yyyy-MM-dd")
+  return client
+    ? `OPDS sign-in from ${client}, ${date}`
+    : `OPDS sign-in, ${date}`
+}
+
+export function createOPDSToken(userId: UUID, userAgent: string | null) {
+  return createApiToken(userId, opdsTokenName(userAgent), READING_SCOPE, {
+    idleTimeoutDays: OPDS_TOKEN_IDLE_DAYS,
+  })
+}
 
 export interface OPDSAuthenticationDocument {
   id: string
@@ -38,18 +61,18 @@ export async function createOPDSAuthenticationDocument(): Promise<OPDSAuthentica
     id: `/opds/auth/auth.json`,
     title: libraryName,
     description:
-      "Enter your email or username and password to access your library.",
+      "Sign in with your email or username, and your password or an API token from your preferences.",
     links: [
       settings.serverIconSha256
         ? {
             rel: "logo",
             href: `/api/v2/server/icon?s=512`,
-            type: "image/webp",
+            type: MediaType.WEBP.mime,
           }
         : {
             rel: "logo",
             href: `/Storyteller_Logo.png`,
-            type: "image/png",
+            type: MediaType.PNG.mime,
           },
     ],
     authentication: [
@@ -73,7 +96,7 @@ export async function createOPDSAuthenticationDocument(): Promise<OPDSAuthentica
           {
             rel: "authenticate",
             href: `/opds/authorize`,
-            type: "text/html",
+            type: MediaType.HTML.mime,
           },
         ],
       },
@@ -96,10 +119,10 @@ export function createOPDSAuthResponse(
   return new Response(JSON.stringify(authDocument, null, 2), {
     status: 401,
     headers: {
-      "Content-Type": "application/opds-authentication+json",
+      "Content-Type": OPDS_AUTHENTICATION_JSON,
       // many clients will not check for auth if Basic Auth is not supported
       "WWW-Authenticate": 'Basic realm="Storyteller"',
-      Link: `<${authDocument.id}>; rel="http://opds-spec.org/auth/document"; type="application/opds-authentication+json"`,
+      Link: `<${authDocument.id}>; rel="http://opds-spec.org/auth/document"; type="${OPDS_AUTHENTICATION_JSON}"`,
     },
   })
 }

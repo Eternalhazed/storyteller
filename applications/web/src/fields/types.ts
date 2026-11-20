@@ -25,7 +25,7 @@ export type FieldScale = {
   min?: number
   max?: number
   step?: number
-  unit?: "bytes" | "seconds" | "count" | "ratio" | "year"
+  unit?: "bytes" | "seconds" | "count" | "ratio" | "year" | "percent"
 }
 
 export type FieldType = "string" | "number" | "date" | "uuid" | "array" | "enum"
@@ -35,6 +35,7 @@ export type QualifierKind =
   | "ratingAxis"
   | "identifierScheme"
   | "datePart"
+  | "series"
 
 export type FilterEntityType =
   | "tag"
@@ -44,6 +45,8 @@ export type FilterEntityType =
   | "creator"
   | "identifierType"
 
+export type ImportMode = "whole" | "each"
+
 export const ASSET_FORMATS = ["ebook", "audiobook", "readaloud"] as const
 export type AssetFormat = (typeof ASSET_FORMATS)[number]
 
@@ -51,6 +54,7 @@ export type DatePreset = { label: string; days: number }
 
 export type FieldDefBase = {
   sortable: boolean
+  displayOnly?: true
   defaultSort?: "asc" | "desc"
   quick: boolean
   token: string
@@ -60,9 +64,12 @@ export type FieldDefBase = {
   qualifier?: { kind: QualifierKind }
   formats?: readonly AssetFormat[]
   countable?: true
+  compact?: true
+  importable?: ImportMode
   entity?: FilterEntityType
   qualifierEntity?: FilterEntityType
   alias?: { of: string; qualifier: string }
+  filterUnder?: string
   extraOperators?: ShelfFilterOperator[]
   defaultOperator?: ShelfFilterOperator
 }
@@ -98,6 +105,11 @@ export type FieldDefDuration = FieldDefBase & {
   control: "duration-range"
   scale: FieldScale
   options?: { min: number; max: number; label: string }[]
+}
+
+export type RetiredFieldDef = {
+  labelKey: string
+  replacedBy: string | null
 }
 
 export type FieldDef =

@@ -1,6 +1,6 @@
 import { type Insertable, sql } from "kysely"
 
-import { type BookWithRelations as ServerBook } from "@storyteller-platform/web/src/database/books"
+import { type BookWithRelations as ServerBook } from "@storyteller/web/src/database/books"
 
 import { type ReadiumLocator } from "@/modules/readium/src/Readium.types"
 import { type UUID, randomUUID } from "@/uuid"
@@ -122,6 +122,12 @@ export async function upsertServerBooks(
         alignedAt: serverBook.alignedAt,
         alignedByStorytellerVersion: serverBook.alignedByStorytellerVersion,
         alignedWith: serverBook.alignedWith,
+        textCoverSha256:
+          serverBook.ebook?.cover?.sha256 ??
+          serverBook.readaloud?.cover?.sha256 ??
+          null,
+        audioCoverSha256: serverBook.audiobook?.cover?.sha256 ?? null,
+        serverUpdatedAt: serverBook.updatedAt,
         createdAt: serverBook.createdAt,
       })
 
@@ -414,6 +420,9 @@ export async function upsertServerBooks(
             createdAt: eb.ref("excluded.createdAt"),
             ebookCoverUrl: null,
             audiobookCoverUrl: null,
+            textCoverSha256: eb.ref("excluded.textCoverSha256"),
+            audioCoverSha256: eb.ref("excluded.audioCoverSha256"),
+            serverUpdatedAt: eb.ref("excluded.serverUpdatedAt"),
           })),
         )
         .execute()
@@ -616,6 +625,12 @@ export async function createBookFromServer(
         alignedAt: serverBook.alignedAt,
         alignedByStorytellerVersion: serverBook.alignedByStorytellerVersion,
         alignedWith: serverBook.alignedWith,
+        textCoverSha256:
+          serverBook.ebook?.cover?.sha256 ??
+          serverBook.readaloud?.cover?.sha256 ??
+          null,
+        audioCoverSha256: serverBook.audiobook?.cover?.sha256 ?? null,
+        serverUpdatedAt: serverBook.updatedAt,
         createdAt: serverBook.createdAt,
       })
       .execute()

@@ -1,11 +1,12 @@
 import { exec } from "child_process"
 import assert from "node:assert"
-import { before, describe, it } from "node:test"
 import { promisify } from "node:util"
 
 import { Manifest } from "@readium/shared"
+import { beforeAll, describe, it } from "vitest"
 
-import { Epub, MemoryAdapter } from "@storyteller-platform/epub"
+import { Epub, MemoryAdapter } from "@storyteller/epub"
+import { MediaType } from "@storyteller/media-types"
 
 import { generateReadiumManifest } from "../manifest.ts"
 import { type ReadiumWebPublicationManifest } from "../manifest.types.ts"
@@ -24,7 +25,11 @@ async function createReadiumCLIManifest(
   // bug in readium cli, does not output links
   // or bug in readium shared depending on how you think about it
   parsed.links = [
-    { href: "manifest.json", rel: ["self"], type: "application/webpub+json" },
+    {
+      href: "manifest.json",
+      rel: ["self"],
+      type: MediaType.WEBPUB_MANIFEST.mime,
+    },
   ]
   const deserialized = Manifest.deserialize(parsed)
   assert.ok(deserialized, "cli manifest should deserialize")
@@ -52,14 +57,14 @@ function flattenTocHrefs(
   return out.sort()
 }
 
-void describe("generateReadiumManifest", () => {
-  before(async () => {
+describe("generateReadiumManifest", () => {
+  beforeAll(async () => {
     await execPromise(
-      `${new URL("../../../../../applications/web/install-readium-cli.sh", import.meta.url).pathname} 0.7.1`,
+      `${new URL("../../../../../applications/web/install-readium-cli.sh", import.meta.url).pathname} 0.9.1`,
     )
   })
 
-  void it("matches the readium cli on moby-dick", async () => {
+  it("matches the readium cli on moby-dick", async () => {
     const outputPath = new URL(
       "../../__fixtures__/moby-dick.epub",
       import.meta.url,

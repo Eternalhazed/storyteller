@@ -10,10 +10,11 @@ import { useBookInSidePanel } from "@/app/(v3)/v3/_/hooks/use-open-book"
 import * as icon from "@/icons"
 import { isTauriApp } from "@/isTauriApp"
 import { useCreateBookMutation } from "@/store/api"
+import { bookDialogExtensions } from "@/uploadFileTypes"
 import { type UUID } from "@/uuid"
 
 import { ImportBookDialog } from "./books/ImportBookDialog"
-import { UploadBookDialog } from "./books/UploadBookDialog"
+import { useOpenBookUpload } from "./books/UploadBookProvider"
 import { openTauriFileDialog } from "./files/ServerFileBrowser"
 import {
   FilterableMenu,
@@ -23,44 +24,31 @@ import {
 } from "./ui/filterable-menu"
 import { TooltipButton } from "./ui/tooltip-button"
 
-const BOOK_FILTERS = [
-  {
-    name: "Books",
-    extensions: [
-      "epub",
-      "mp3",
-      "m4a",
-      "m4b",
-      "aac",
-      "mp4",
-      "opus",
-      "ogg",
-      "oga",
-      "wav",
-      "flac",
-      "zip",
-    ],
-  },
-]
+const BOOK_FILTERS = [{ name: "Books", extensions: bookDialogExtensions }]
 
-export function AddBookButton(props: ButtonProps) {
-  const t = useTranslation("BooksPage")
-
-  const [open, setOpen] = useState(false)
-  useHotkey("Shift+A", () => {
-    setOpen((prev) => !prev)
-  })
-
+export function useImportBookPaths() {
   const { setSelectedBookUuid } = useBookInSidePanel()
-
-  const [uploadOpen, setUploadOpen] = useState(false)
-  const [importOpen, setImportOpen] = useState(false)
-
   const [createBook] = useCreateBookMutation()
 
-  function handleBookCreated(bookUuid: UUID) {
-    void setSelectedBookUuid(bookUuid)
+  return async (paths: string[], collection?: UUID) => {
+    const response = await createBook({
+      paths,
+      collection,
+      importMode: "reference",
+    }).unwrap()
+
+    if ("uuid" in response) {
+      void setSelectedBookUuid(response.uuid)
+    }
   }
+}
+
+export function useAddBook() {
+  const t = useTranslation("BooksPage")
+
+  const openBookUpload = useOpenBookUpload()
+  const importBookPaths = useImportBookPaths()
+  const [importOpen, setImportOpen] = useState(false)
 
   async function handleTauriImport() {
     const result = await openTauriFileDialog({
@@ -73,18 +61,59 @@ export function AddBookButton(props: ButtonProps) {
     const paths = Array.isArray(result) ? result : [result]
     if (paths.length === 0) return
 
-    const response = await createBook({
-      paths,
-      collection: undefined,
-      importMode: "reference",
-    }).unwrap()
-
-    if ("uuid" in response) {
-      handleBookCreated(response.uuid)
-    }
+    await importBookPaths(paths)
   }
 
-  const isTauri = isTauriApp()
+  const menuItems = !isTauriApp() ? (
+    <>
+      <FilterableMenuItem
+        icon={<icon.FileUpload className="size-4" />}
+        textValue={t.plain("uploadBook")}
+        onSelect={() => {
+          openBookUpload()
+        }}
+      >
+        {t("uploadBook")}
+      </FilterableMenuItem>
+
+      <FilterableMenuItem
+        icon={<icon.FileImport className="size-4" />}
+        textValue={t.plain("importBook")}
+        onSelect={() => {
+          setImportOpen(true)
+        }}
+      >
+        {t("importBook")}
+      </FilterableMenuItem>
+    </>
+  ) : (
+    <FilterableMenuItem
+      icon={<icon.FileImport className="size-4" />}
+      textValue={t.plain("importBook")}
+      onSelect={() => {
+        void handleTauriImport()
+      }}
+    >
+      {t("importBook")}
+    </FilterableMenuItem>
+  )
+
+  const dialogs = (
+    <ImportBookDialog open={importOpen} onOpenChange={setImportOpen} />
+  )
+
+  return { menuItems, dialogs }
+}
+
+export function AddBookButton(props: ButtonProps) {
+  const t = useTranslation("BooksPage")
+
+  const [open, setOpen] = useState(false)
+  useHotkey("Shift+A", () => {
+    setOpen((prev) => !prev)
+  })
+
+  const { menuItems, dialogs } = useAddBook()
 
   return (
     <>
@@ -104,49 +133,11 @@ export function AddBookButton(props: ButtonProps) {
           }
         />
         <FilterableMenuContent searchable={false}>
-          {!isTauri ? (
-            <>
-              <FilterableMenuItem
-                icon={<icon.FileUpload className="size-4" />}
-                textValue={t.plain("uploadBook")}
-                onSelect={() => {
-                  setUploadOpen(true)
-                }}
-              >
-                {t("uploadBook")}
-              </FilterableMenuItem>
-
-              <FilterableMenuItem
-                icon={<icon.FileImport className="size-4" />}
-                textValue={t.plain("importBook")}
-                onSelect={() => {
-                  setImportOpen(true)
-                }}
-              >
-                {t("importBook")}
-              </FilterableMenuItem>
-            </>
-          ) : (
-            <FilterableMenuItem
-              icon={<icon.FileImport className="size-4" />}
-              textValue={t.plain("importBook")}
-              onSelect={() => {
-                void handleTauriImport()
-              }}
-            >
-              {t("importBook")}
-            </FilterableMenuItem>
-          )}
+          {menuItems}
         </FilterableMenuContent>
       </FilterableMenu>
 
-      <UploadBookDialog
-        open={uploadOpen}
-        onOpenChange={setUploadOpen}
-        onBookCreated={handleBookCreated}
-      />
-
-      <ImportBookDialog open={importOpen} onOpenChange={setImportOpen} />
+      {dialogs}
     </>
   )
 }

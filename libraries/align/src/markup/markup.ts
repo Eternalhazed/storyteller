@@ -4,12 +4,19 @@ import { basename } from "node:path/posix"
 
 import { type Logger } from "pino"
 
-import { Epub, type ParsedXml } from "@storyteller-platform/epub"
+import {
+  Epub,
+  type Document,
+  type Element,
+  findXmlChildByName,
+  insert,
+  NS,
+} from "@storyteller/epub"
 import {
   type TimingAggregator,
   createAggregator,
   createTiming,
-} from "@storyteller-platform/ghost-story"
+} from "@storyteller/ghost-story"
 
 import { Mark } from "./model.ts"
 import { liftAndSegment } from "./sentences.ts"
@@ -76,24 +83,17 @@ export async function markup(
 
 export async function markupChapter(
   chapterId: string,
-  chapterXml: ParsedXml,
+  chapterXml: Document,
   granularity: "word" | "sentence",
   locale: Intl.Locale | null,
 ) {
   const timing = createTiming()
-  const html = Epub.findXmlChildByName("html", chapterXml)
+
+  const html = chapterXml.documentElement
   if (!html) throw new Error("Invalid XHTML document: no html element")
 
-  const body = Epub.findXmlChildByName("body", html["html"])
+  const body = findXmlChildByName("body", html)
   if (!body) throw new Error("Invalid XHTML document: No body element")
-
-  clearBodyElement(chapterXml)
-
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  const taggedHtml = Epub.findXmlChildByName("html", chapterXml)!
-
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  const taggedBody = Epub.findXmlChildByName("body", taggedHtml["html"])!
 
   const { original, inlined, lifted, segmentation } = await liftAndSegment(
     body,
@@ -120,7 +120,10 @@ export async function markupChapter(
                 wordPos + word.text.replace(/\n$/, "").length,
                 "start",
               ),
-              new Mark("span", { id: `${chapterId}-s${i}-w${j}` }),
+              new Mark("span", {
+                id: `${chapterId}-s${i}-w${j}`,
+                "epub:type": "storyteller:word-span",
+              }),
             )
             j++
           }
@@ -133,7 +136,10 @@ export async function markupChapter(
           root,
           cursor.map(pos, "end"),
           cursor.map(pos + sentence.text.replace(/\n$/, "").length, "start"),
-          new Mark("span", { id: `${chapterId}-s${i}` }),
+          new Mark("span", {
+            id: `${chapterId}-s${i}`,
+            "epub:type": "storyteller:sentence-span",
+          }),
         )
         i++
       }
@@ -146,22 +152,56 @@ export async function markupChapter(
       inlined.footnotePairs,
       inlined.mapping,
     )
-    taggedBody["body"] = serializeDom(replaced)
+    const markedUpBody = serializeDom(replaced)
+
+    while (body.firstChild) body.removeChild(body.firstChild)
+    for (const node of markedUpBody) insert(body, node)
   })
+
+  addStorytellerPrefix(html)
 
   return { markedUp: chapterXml, timing }
 }
 
-function clearBodyElement(xml: ParsedXml) {
-  const html = Epub.findXmlChildByName("html", xml)
-  if (!html) throw new Error("Invalid XHTML: Found no html element")
+function addStorytellerPrefix(html: Element) {
+  // Both of these need setAttributeNS, never plain setAttribute, so that the
+  // tree in memory matches the bytes written out.
+  //
+  // The declaration has to carry the XMLNS namespace: the serializer only
+  // registers a prefix for its descendants when the declaration's `prefix` is
+  // `"xmlns"`, which setAttribute never sets, and the result is otherwise a
+  // redundant `xmlns:epub` on every generated span. `epub:prefix` is an
+  // ordinary attribute in the epub namespace, which is also how `x()` builds
+  // it everywhere else.
+  html.setAttributeNS(NS.xmlns, "xmlns:epub", NS.epub)
 
-  const bodyIndex = html["html"].findIndex((element) => "body" in element)
-  const body = html["html"][bodyIndex]
-  if (!body) throw new Error("Invalid XHTML: Found no body element")
+  const existingPrefixValue = html.getAttribute("epub:prefix")
+  if (!existingPrefixValue) {
+    html.setAttributeNS(
+      NS.epub,
+      "epub:prefix",
+      "storyteller: https://storyteller-platform.dev/docs/vocabulary",
+    )
+    return
+  }
 
-  html["html"].splice(bodyIndex, 1, {
-    ...body,
-    body: [],
-  })
+  const matches = existingPrefixValue.matchAll(/(?:([a-z]+): +(\S+)\s*)/gs)
+  const existingPrefixes = Array.from(matches).reduce<Record<string, string>>(
+    (acc, match) =>
+      match[1] && match[2] ? { ...acc, [match[1]]: match[2] } : acc,
+    {},
+  )
+
+  const prefixes = {
+    ...existingPrefixes,
+    storyteller: "https://storyteller-platform.dev/docs/vocabulary",
+  }
+
+  html.setAttributeNS(
+    NS.epub,
+    "epub:prefix",
+    Object.entries(prefixes)
+      .map(([p, u]) => `${p}: ${u}`)
+      .join("\n    "),
+  )
 }

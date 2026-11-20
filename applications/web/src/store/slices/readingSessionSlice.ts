@@ -6,8 +6,8 @@ import {
   createSlice,
 } from "@reduxjs/toolkit"
 
-import { isSameLocator } from "@/components/reader/locators"
 import type { BookWithRelations } from "@/database/books"
+import { isSameLocator } from "@/reader/locators"
 import type { RootState } from "@/store/appState"
 import {
   getPublication,
@@ -30,6 +30,7 @@ type ReadingSessionState = {
   isLoadingPublication: boolean
 
   currentLocator: Locator | null
+  startLocator: Locator | null
 
   mode: ReadingMode
 
@@ -51,6 +52,7 @@ const initialState: ReadingSessionState = {
   currentbook: null,
   isLoadingPublication: false,
   currentLocator: null,
+  startLocator: null,
   mode: "readaloud",
   syncing: false,
   lastPositionUpdate: null,
@@ -73,9 +75,11 @@ export const readingSessionSlice = createSlice({
       action: PayloadAction<{
         book: BookWithRelations
         requestedMode?: ReadingMode | undefined
+        startHref?: string | undefined
       }>,
     ) => {
       state.currentbook = action.payload.book
+      state.startLocator = null
       state.isLoadingPublication = true
       state.error = null
       state.errorMessage = null
@@ -106,13 +110,17 @@ export const readingSessionSlice = createSlice({
       state.isLoadingPublication = false
     },
 
+    setStartLocator: (state, action: PayloadAction<Locator | null>) => {
+      state.startLocator = action.payload
+    },
+
     clearReaderError: (state) => {
       state.error = null
       state.errorMessage = null
     },
 
     setActiveFrame: (state, action: PayloadAction<FrameManager | null>) => {
-      state.activeFrameUrl = action.payload?.iframe.src ?? null
+      state.activeFrameUrl = action.payload?.source ?? null
       registerActiveFrame(action.payload)
     },
 
@@ -174,6 +182,7 @@ export const readingSessionSlice = createSlice({
     closeBook: (state) => {
       state.currentbook = null
       state.currentLocator = null
+      state.startLocator = null
       state.isLoadingPublication = false
     },
 
@@ -193,6 +202,9 @@ export const selectCurrentlyHighlightedFragment = (state: RootState) =>
   state.readingSession.currentlyHighlightedFragment ?? null
 
 export const selectReadingMode = (state: RootState) => state.readingSession.mode
+
+export const selectStartLocator = (state: RootState) =>
+  state.readingSession.startLocator
 
 export const selectIsSyncing = (state: RootState) =>
   state.readingSession.syncing

@@ -1,5 +1,6 @@
 /* eslint-disable no-console */
 
+import { createHash } from "node:crypto"
 import {
   createReadStream,
   createWriteStream,
@@ -7,7 +8,6 @@ import {
   statSync,
 } from "node:fs"
 import { mkdir, rm } from "node:fs/promises"
-import os from "node:os"
 import path from "node:path"
 import { pipeline } from "node:stream/promises"
 import { createGunzip } from "node:zlib"
@@ -15,6 +15,8 @@ import { createGunzip } from "node:zlib"
 import chalk from "chalk"
 import { Presets, SingleBar } from "cli-progress"
 import { extract } from "tar"
+
+import { scratchPath } from "@storyteller/fs"
 
 import {
   type BuildVariant,
@@ -45,6 +47,8 @@ export interface DownloadOptions {
   url: string
   destPath: string
   expectedSize?: number
+  /** verified after the download, the file is removed when it doesn't match */
+  expectedSha256?: string | undefined
   printOutput?: boolean
   onProgress?: ((downloaded: number, total: number) => void) | undefined
   signal?: AbortSignal | null | undefined
@@ -55,6 +59,7 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
     url,
     destPath,
     expectedSize,
+    expectedSha256,
     printOutput = true,
     onProgress,
     signal,
@@ -72,7 +77,7 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
   const contentLength = response.headers.get("content-length")
   const totalSize = contentLength
     ? parseInt(contentLength, 10)
-    : expectedSize ?? 0
+    : (expectedSize ?? 0)
 
   if (!response.body) {
     throw new Error("Response body is null")
@@ -95,6 +100,7 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
 
   const reader =
     response.body.getReader() as ReadableStreamDefaultReader<Uint8Array>
+  const hash = expectedSha256 ? createHash("sha256") : null
 
   let downloaded = 0
   let lastTime = Date.now()
@@ -119,6 +125,7 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
 
       downloaded += value.length
       fileStream.write(value)
+      hash?.update(value)
 
       onProgress?.(downloaded, totalSize)
 
@@ -152,6 +159,16 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
     fileStream.on("finish", resolve)
     fileStream.on("error", reject)
   })
+
+  if (expectedSha256) {
+    const actualSha256 = hash?.digest("hex")
+    if (actualSha256 !== expectedSha256) {
+      await rm(destPath, { force: true })
+      throw new Error(
+        `Checksum mismatch for ${destPath} (expected ${expectedSha256}, got ${actualSha256})`,
+      )
+    }
+  }
 }
 
 export class PlatformMismatchError extends Error {
@@ -207,7 +224,7 @@ export async function installBinary(
   }
 
   const url = getBinaryDownloadUrl(variant)
-  const tmpDir = path.join(os.tmpdir(), "ghost-story-whisper-install")
+  const tmpDir = scratchPath("ghost-story-whisper-install")
   const tarballPath = path.join(tmpDir, `whisper-cpp-${variant}.tar.gz`)
 
   if (printOutput) {
@@ -351,7 +368,7 @@ export async function installCoremlModel(
   }
 
   const url = getCoremlModelDownloadUrl(model)
-  const tmpDir = path.join(os.tmpdir(), "ghost-story-coreml-install")
+  const tmpDir = scratchPath("ghost-story-coreml-install")
   const tarballPath = path.join(tmpDir, `ggml-${model}-encoder.mlmodelc.tar.gz`)
 
   if (printOutput) {

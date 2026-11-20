@@ -1,7 +1,8 @@
 import assert from "node:assert"
-import { describe, it } from "node:test"
 
-import { type SentenceRange } from "../getSentenceRanges.ts"
+import { describe, it } from "vitest"
+
+import { SentenceRange } from "../getSentenceRanges.ts"
 import {
   interpolateSentenceRanges,
   slotKey,
@@ -21,7 +22,15 @@ function sr(
   end: number,
   audiofile = "audio.mp3",
 ): SentenceRange {
-  return { chapterId, id, start, end, audiofile }
+  return new SentenceRange(id, chapterId, [{ start, end, audiofile }])
+}
+
+function run(
+  ...args: Parameters<typeof interpolateSentenceRanges>
+): SentenceRange[] {
+  return interpolateSentenceRanges(...args).map(
+    (range) => new SentenceRange(range.id, range.chapterId, range.audioRanges),
+  )
 }
 
 /** Assert that start/end times are monotonically non-decreasing within each
@@ -29,244 +38,196 @@ function sr(
 
 // ─── basic cases ────────────────────────────────────────────────────────────
 
-void describe("no gaps", () => {
-  void it("returns input unchanged when the chapter is complete", () => {
+describe("no gaps", () => {
+  it("returns input unchanged when the chapter is complete", () => {
     const input = [
       sr("ch1", 0, 0, 5),
       sr("ch1", 1, 5, 10),
       sr("ch1", 2, 10, 15),
     ]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 3 },
-      { "audio.mp3": 20 },
-    )
+    const result = run(input, { ch1: 3 }, { "audio.mp3": 20 })
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 5, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, start: 5, end: 10, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 2, start: 10, end: 15, audiofile: "audio.mp3" },
+      sr("ch1", 0, 0, 5, "audio.mp3"),
+      sr("ch1", 1, 5, 10, "audio.mp3"),
+      sr("ch1", 2, 10, 15, "audio.mp3"),
     ])
   })
 
-  void it("handles multiple complete chapters with no gaps", () => {
+  it("handles multiple complete chapters with no gaps", () => {
     const input = [
       sr("ch1", 0, 0, 10),
       sr("ch1", 1, 10, 20),
       sr("ch2", 0, 20, 30),
       sr("ch2", 1, 30, 40),
     ]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 2, ch2: 2 },
-      { "audio.mp3": 50 },
-    )
+    const result = run(input, { ch1: 2, ch2: 2 }, { "audio.mp3": 50 })
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 10, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, start: 10, end: 20, audiofile: "audio.mp3" },
-      { chapterId: "ch2", id: 0, start: 20, end: 30, audiofile: "audio.mp3" },
-      { chapterId: "ch2", id: 1, start: 30, end: 40, audiofile: "audio.mp3" },
+      sr("ch1", 0, 0, 10, "audio.mp3"),
+      sr("ch1", 1, 10, 20, "audio.mp3"),
+      sr("ch2", 0, 20, 30, "audio.mp3"),
+      sr("ch2", 1, 30, 40, "audio.mp3"),
     ])
   })
 })
 
-void describe("empty input", () => {
-  void it("returns an empty array", () => {
-    const result = interpolateSentenceRanges([], {}, {})
+describe("empty input", () => {
+  it("returns an empty array", () => {
+    const result = run([], {}, {})
     assert.deepStrictEqual(result, [])
   })
 })
 
 // ─── within-chapter gaps ────────────────────────────────────────────────────
 
-void describe("within-chapter gap (same audiofile)", () => {
-  void it("fills a gap of 2 sentences between two known sentences", () => {
+describe("within-chapter gap (same audiofile)", () => {
+  it("fills a gap of 2 sentences between two known sentences", () => {
     // Known: #0 ends at t=10, #3 starts at t=40
     // Missing: #1, #2 → should occupy [10, 40] evenly
     const input = [sr("ch1", 0, 0, 10), sr("ch1", 3, 40, 50)]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 4 },
-      { "audio.mp3": 60 },
-    )
+    const result = run(input, { ch1: 4 }, { "audio.mp3": 60 })
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 10, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 10, end: 25 },
-      { chapterId: "ch1", id: 2, audiofile: "audio.mp3", start: 25, end: 40 },
-      { chapterId: "ch1", id: 3, start: 40, end: 50, audiofile: "audio.mp3" },
+      sr("ch1", 0, 0, 10, "audio.mp3"),
+      sr("ch1", 1, 10, 25, "audio.mp3"),
+      sr("ch1", 2, 25, 40, "audio.mp3"),
+      sr("ch1", 3, 40, 50, "audio.mp3"),
     ])
   })
 
-  void it("fills a single missing sentence", () => {
+  it("fills a single missing sentence", () => {
     const input = [sr("ch1", 0, 0, 10), sr("ch1", 2, 20, 30)]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 3 },
-      { "audio.mp3": 40 },
-    )
+    const result = run(input, { ch1: 3 }, { "audio.mp3": 40 })
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 10, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 10, end: 20 },
-      { chapterId: "ch1", id: 2, start: 20, end: 30, audiofile: "audio.mp3" },
+      sr("ch1", 0, 0, 10, "audio.mp3"),
+      sr("ch1", 1, 10, 20, "audio.mp3"),
+      sr("ch1", 2, 20, 30, "audio.mp3"),
     ])
   })
 
-  void it("fills multiple disjoint gaps within a chapter", () => {
+  it("fills multiple disjoint gaps within a chapter", () => {
     // Known: #0, #2, #4  →  missing #1, #3
     const input = [
       sr("ch1", 0, 0, 10),
       sr("ch1", 2, 20, 30),
       sr("ch1", 4, 40, 50),
     ]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 5 },
-      { "audio.mp3": 60 },
-    )
+    const result = run(input, { ch1: 5 }, { "audio.mp3": 60 })
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 10, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 10, end: 20 },
-      { chapterId: "ch1", id: 2, start: 20, end: 30, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 3, audiofile: "audio.mp3", start: 30, end: 40 },
-      { chapterId: "ch1", id: 4, start: 40, end: 50, audiofile: "audio.mp3" },
+      sr("ch1", 0, 0, 10, "audio.mp3"),
+      sr("ch1", 1, 10, 20, "audio.mp3"),
+      sr("ch1", 2, 20, 30, "audio.mp3"),
+      sr("ch1", 3, 30, 40, "audio.mp3"),
+      sr("ch1", 4, 40, 50, "audio.mp3"),
     ])
   })
 })
 
 // ─── leading-gap cases ──────────────────────────────────────────────────────
 
-void describe("leading gap (chapter starts at id > 0)", () => {
-  void it("fills missing sentences before the first known sentence", () => {
+describe("leading gap (chapter starts at id > 0)", () => {
+  it("fills missing sentences before the first known sentence", () => {
     // First known is #2; need to interpolate #0 and #1 from t=0 to t=20
     const input = [sr("ch1", 2, 20, 30)]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 3 },
-      { "audio.mp3": 40 },
-    )
+    const result = run(input, { ch1: 3 }, { "audio.mp3": 40 })
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, audiofile: "audio.mp3", start: 0, end: 10 },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 10, end: 20 },
-      { chapterId: "ch1", id: 2, start: 20, end: 30, audiofile: "audio.mp3" },
+      sr("ch1", 0, 0, 10, "audio.mp3"),
+      sr("ch1", 1, 10, 20, "audio.mp3"),
+      sr("ch1", 2, 20, 30, "audio.mp3"),
     ])
   })
 
-  void it("fills a single missing leading sentence", () => {
+  it("fills a single missing leading sentence", () => {
     const input = [sr("ch1", 1, 15, 30)]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 2 },
-      { "audio.mp3": 40 },
-    )
+    const result = run(input, { ch1: 2 }, { "audio.mp3": 40 })
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, audiofile: "audio.mp3", start: 0, end: 15 },
-      { chapterId: "ch1", id: 1, start: 15, end: 30, audiofile: "audio.mp3" },
+      sr("ch1", 0, 0, 15, "audio.mp3"),
+      sr("ch1", 1, 15, 30, "audio.mp3"),
     ])
   })
 })
 
 // ─── trailing-gap cases ─────────────────────────────────────────────────────
 
-void describe("trailing gap (chapter ends before total count)", () => {
-  void it("fills missing sentences after the last known sentence", () => {
+describe("trailing gap (chapter ends before total count)", () => {
+  it("fills missing sentences after the last known sentence", () => {
     // Last known is #0 ending at t=10; chapter has 3 sentences; file runs to t=40
     const input = [sr("ch1", 0, 0, 10)]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 3 },
-      { "audio.mp3": 40 },
-    )
+    const result = run(input, { ch1: 3 }, { "audio.mp3": 40 })
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 10, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 10, end: 25 },
-      { chapterId: "ch1", id: 2, audiofile: "audio.mp3", start: 25, end: 40 },
+      sr("ch1", 0, 0, 10, "audio.mp3"),
+      sr("ch1", 1, 10, 25, "audio.mp3"),
+      sr("ch1", 2, 25, 40, "audio.mp3"),
     ])
   })
 
-  void it("fills a single missing trailing sentence", () => {
+  it("fills a single missing trailing sentence", () => {
     const input = [sr("ch1", 0, 0, 20)]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 2 },
-      { "audio.mp3": 40 },
-    )
+    const result = run(input, { ch1: 2 }, { "audio.mp3": 40 })
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 20, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 20, end: 40 },
+      sr("ch1", 0, 0, 20, "audio.mp3"),
+      sr("ch1", 1, 20, 40, "audio.mp3"),
     ])
   })
 })
 
 // ─── chapter-boundary gaps ──────────────────────────────────────────────────
 
-void describe("gap spanning a chapter boundary (same audiofile)", () => {
-  void it("fills trailing gap of ch1 and leading gap of ch2", () => {
+describe("gap spanning a chapter boundary (same audiofile)", () => {
+  it("fills trailing gap of ch1 and leading gap of ch2", () => {
     // ch1: only sentence #0 known; needs #1, #2
     // ch2: only sentence #2 known; needs #0, #1
     // Both in the same file; ch1#0 ends at t=10, ch2#2 starts at t=50
     const input = [sr("ch1", 0, 0, 10), sr("ch2", 2, 50, 60)]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 3, ch2: 3 },
-      { "audio.mp3": 70 },
-    )
+    const result = run(input, { ch1: 3, ch2: 3 }, { "audio.mp3": 70 })
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 10, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 10, end: 20 },
-      { chapterId: "ch1", id: 2, audiofile: "audio.mp3", start: 20, end: 30 },
-      { chapterId: "ch2", id: 0, audiofile: "audio.mp3", start: 30, end: 40 },
-      { chapterId: "ch2", id: 1, audiofile: "audio.mp3", start: 40, end: 50 },
-      { chapterId: "ch2", id: 2, start: 50, end: 60, audiofile: "audio.mp3" },
+      sr("ch1", 0, 0, 10, "audio.mp3"),
+      sr("ch1", 1, 10, 20, "audio.mp3"),
+      sr("ch1", 2, 20, 30, "audio.mp3"),
+      sr("ch2", 0, 30, 40, "audio.mp3"),
+      sr("ch2", 1, 40, 50, "audio.mp3"),
+      sr("ch2", 2, 50, 60, "audio.mp3"),
     ])
   })
 
-  void it("handles no trailing gap in ch1 but a leading gap in ch2", () => {
+  it("handles no trailing gap in ch1 but a leading gap in ch2", () => {
     const input = [
       sr("ch1", 0, 0, 10),
       sr("ch1", 1, 10, 20),
       sr("ch2", 2, 40, 50),
     ]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 2, ch2: 3 },
-      { "audio.mp3": 60 },
-    )
+    const result = run(input, { ch1: 2, ch2: 3 }, { "audio.mp3": 60 })
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 10, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, start: 10, end: 20, audiofile: "audio.mp3" },
-      { chapterId: "ch2", id: 0, audiofile: "audio.mp3", start: 20, end: 30 },
-      { chapterId: "ch2", id: 1, audiofile: "audio.mp3", start: 30, end: 40 },
-      { chapterId: "ch2", id: 2, start: 40, end: 50, audiofile: "audio.mp3" },
+      sr("ch1", 0, 0, 10, "audio.mp3"),
+      sr("ch1", 1, 10, 20, "audio.mp3"),
+      sr("ch2", 0, 20, 30, "audio.mp3"),
+      sr("ch2", 1, 30, 40, "audio.mp3"),
+      sr("ch2", 2, 40, 50, "audio.mp3"),
     ])
   })
 
-  void it("handles a trailing gap in ch1 but no leading gap in ch2", () => {
+  it("handles a trailing gap in ch1 but no leading gap in ch2", () => {
     const input = [sr("ch1", 0, 0, 10), sr("ch2", 0, 30, 40)]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 3, ch2: 1 },
-      { "audio.mp3": 50 },
-    )
+    const result = run(input, { ch1: 3, ch2: 1 }, { "audio.mp3": 50 })
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 10, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 10, end: 20 },
-      { chapterId: "ch1", id: 2, audiofile: "audio.mp3", start: 20, end: 30 },
-      { chapterId: "ch2", id: 0, start: 30, end: 40, audiofile: "audio.mp3" },
+      sr("ch1", 0, 0, 10, "audio.mp3"),
+      sr("ch1", 1, 10, 20, "audio.mp3"),
+      sr("ch1", 2, 20, 30, "audio.mp3"),
+      sr("ch2", 0, 30, 40, "audio.mp3"),
     ])
   })
 })
 
 // ─── cross-file gaps ────────────────────────────────────────────────────────
 
-void describe("gap spanning an audiofile boundary", () => {
-  void it("splits interpolated sentences proportionally across two files", () => {
+describe("gap spanning an audiofile boundary", () => {
+  it("splits interpolated sentences proportionally across two files", () => {
     // file-a.mp3 runs 0–100s; known sentence ends at t=80 (20s remaining)
     // file-b.mp3 runs 0–100s; next known sentence starts at t=20 (20s available)
     // 4 missing sentences → should split 2 in file-a, 2 in file-b (equal proportion)
@@ -274,156 +235,144 @@ void describe("gap spanning an audiofile boundary", () => {
       sr("ch1", 0, 70, 80, "file-a.mp3"),
       sr("ch1", 5, 20, 30, "file-b.mp3"),
     ]
-    const result = interpolateSentenceRanges(
+    const result = run(
       input,
       { ch1: 6 },
       { "file-a.mp3": 100, "file-b.mp3": 100 },
     )
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 70, end: 80, audiofile: "file-a.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "file-a.mp3", start: 80, end: 90 },
-      { chapterId: "ch1", id: 2, audiofile: "file-a.mp3", start: 90, end: 100 },
-      { chapterId: "ch1", id: 3, audiofile: "file-b.mp3", start: 0, end: 10 },
-      { chapterId: "ch1", id: 4, audiofile: "file-b.mp3", start: 10, end: 20 },
-      { chapterId: "ch1", id: 5, start: 20, end: 30, audiofile: "file-b.mp3" },
+      sr("ch1", 0, 70, 80, "file-a.mp3"),
+      sr("ch1", 1, 80, 90, "file-a.mp3"),
+      sr("ch1", 2, 90, 100, "file-a.mp3"),
+      sr("ch1", 3, 0, 10, "file-b.mp3"),
+      sr("ch1", 4, 10, 20, "file-b.mp3"),
+      sr("ch1", 5, 20, 30, "file-b.mp3"),
     ])
   })
 
-  void it("assigns all sentences to the latter file when prior file has no remaining time", () => {
+  it("assigns all sentences to the latter file when prior file has no remaining time", () => {
     // Sentence ends exactly at the end of file-a; all gap goes to file-b
     const input = [
       sr("ch1", 0, 90, 100, "file-a.mp3"),
       sr("ch1", 3, 30, 40, "file-b.mp3"),
     ]
-    const result = interpolateSentenceRanges(
+    const result = run(
       input,
       { ch1: 4 },
       { "file-a.mp3": 100, "file-b.mp3": 50 },
     )
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 90, end: 100, audiofile: "file-a.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "file-b.mp3", start: 0, end: 15 },
-      { chapterId: "ch1", id: 2, audiofile: "file-b.mp3", start: 15, end: 30 },
-      { chapterId: "ch1", id: 3, start: 30, end: 40, audiofile: "file-b.mp3" },
+      sr("ch1", 0, 90, 100, "file-a.mp3"),
+      sr("ch1", 1, 0, 15, "file-b.mp3"),
+      sr("ch1", 2, 15, 30, "file-b.mp3"),
+      sr("ch1", 3, 30, 40, "file-b.mp3"),
     ])
   })
 
-  void it("assigns all sentences to the prior file when the latter file starts at 0", () => {
+  it("assigns all sentences to the prior file when the latter file starts at 0", () => {
     // Next known sentence starts at t=0 in file-b (no available time in file-b before it)
     const input = [
       sr("ch1", 0, 50, 60, "file-a.mp3"),
       sr("ch1", 3, 0, 10, "file-b.mp3"),
     ]
-    const result = interpolateSentenceRanges(
+    const result = run(
       input,
       { ch1: 4 },
       { "file-a.mp3": 100, "file-b.mp3": 50 },
     )
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 50, end: 60, audiofile: "file-a.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "file-a.mp3", start: 60, end: 80 },
-      { chapterId: "ch1", id: 2, audiofile: "file-a.mp3", start: 80, end: 100 },
-      { chapterId: "ch1", id: 3, start: 0, end: 10, audiofile: "file-b.mp3" },
+      sr("ch1", 0, 50, 60, "file-a.mp3"),
+      sr("ch1", 1, 60, 80, "file-a.mp3"),
+      sr("ch1", 2, 80, 100, "file-a.mp3"),
+      sr("ch1", 3, 0, 10, "file-b.mp3"),
     ])
   })
 
-  void it("handles a cross-file leading gap (first sentence is in a later file)", () => {
+  it("handles a cross-file leading gap (first sentence is in a later file)", () => {
     // First known sentence is #2 in file-b; #0 and #1 must be in file-b as well
     const input = [sr("ch1", 2, 20, 30, "file-b.mp3")]
-    const result = interpolateSentenceRanges(
+    const result = run(
       input,
       { ch1: 3 },
       { "file-a.mp3": 100, "file-b.mp3": 50 },
     )
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, audiofile: "file-b.mp3", start: 0, end: 10 },
-      { chapterId: "ch1", id: 1, audiofile: "file-b.mp3", start: 10, end: 20 },
-      { chapterId: "ch1", id: 2, start: 20, end: 30, audiofile: "file-b.mp3" },
+      sr("ch1", 0, 0, 10, "file-b.mp3"),
+      sr("ch1", 1, 10, 20, "file-b.mp3"),
+      sr("ch1", 2, 20, 30, "file-b.mp3"),
     ])
   })
 
-  void it("handles a cross-file trailing gap (last sentence is in an earlier file)", () => {
+  it("handles a cross-file trailing gap (last sentence is in an earlier file)", () => {
     // Last known sentence in ch1 is #0 in file-a; trailing sentences must be in file-a
     const input = [sr("ch1", 0, 10, 20, "file-a.mp3")]
-    const result = interpolateSentenceRanges(
+    const result = run(
       input,
       { ch1: 3 },
       { "file-a.mp3": 50, "file-b.mp3": 100 },
     )
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 10, end: 20, audiofile: "file-a.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "file-a.mp3", start: 20, end: 35 },
-      { chapterId: "ch1", id: 2, audiofile: "file-a.mp3", start: 35, end: 50 },
+      sr("ch1", 0, 10, 20, "file-a.mp3"),
+      sr("ch1", 1, 20, 35, "file-a.mp3"),
+      sr("ch1", 2, 35, 50, "file-a.mp3"),
     ])
   })
 })
 
 // ─── ordering guarantees ────────────────────────────────────────────────────
 
-void describe("output ordering", () => {
-  void it("preserves overall playback order through multiple chapters", () => {
+describe("output ordering", () => {
+  it("preserves overall playback order through multiple chapters", () => {
     const input = [
       sr("ch1", 0, 0, 5),
       sr("ch1", 2, 15, 20),
       sr("ch2", 0, 25, 30),
     ]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 3, ch2: 1 },
-      { "audio.mp3": 40 },
-    )
+    const result = run(input, { ch1: 3, ch2: 1 }, { "audio.mp3": 40 })
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 5, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 5, end: 15 },
-      { chapterId: "ch1", id: 2, start: 15, end: 20, audiofile: "audio.mp3" },
-      { chapterId: "ch2", id: 0, start: 25, end: 30, audiofile: "audio.mp3" },
+      sr("ch1", 0, 0, 5, "audio.mp3"),
+      sr("ch1", 1, 5, 15, "audio.mp3"),
+      sr("ch1", 2, 15, 20, "audio.mp3"),
+      sr("ch2", 0, 25, 30, "audio.mp3"),
     ])
   })
 
-  void it("known sentences retain their original start/end/audiofile values", () => {
+  it("known sentences retain their original start/end/audiofile values", () => {
     const input = [sr("ch1", 0, 1.5, 3.7), sr("ch1", 2, 7.1, 9.9)]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 3 },
-      { "audio.mp3": 15 },
-    )
+    const result = run(input, { ch1: 3 }, { "audio.mp3": 15 })
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 1.5, end: 3.7, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 3.7, end: 7.1 },
-      { chapterId: "ch1", id: 2, start: 7.1, end: 9.9, audiofile: "audio.mp3" },
+      sr("ch1", 0, 1.5, 3.7, "audio.mp3"),
+      sr("ch1", 1, 3.7, 7.1, "audio.mp3"),
+      sr("ch1", 2, 7.1, 9.9, "audio.mp3"),
     ])
   })
 })
 
 // ─── combined / realistic cases ─────────────────────────────────────────────
 
-void describe("combined scenarios", () => {
-  void it("handles both a leading and a trailing gap in the same chapter", () => {
+describe("combined scenarios", () => {
+  it("handles both a leading and a trailing gap in the same chapter", () => {
     // Only sentence #2 is known in a 5-sentence chapter
     const input = [sr("ch1", 2, 40, 60)]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 5 },
-      { "audio.mp3": 100 },
-    )
+    const result = run(input, { ch1: 5 }, { "audio.mp3": 100 })
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, audiofile: "audio.mp3", start: 0, end: 20 },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 20, end: 40 },
-      { chapterId: "ch1", id: 2, start: 40, end: 60, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 3, audiofile: "audio.mp3", start: 60, end: 80 },
-      { chapterId: "ch1", id: 4, audiofile: "audio.mp3", start: 80, end: 100 },
+      sr("ch1", 0, 0, 20, "audio.mp3"),
+      sr("ch1", 1, 20, 40, "audio.mp3"),
+      sr("ch1", 2, 40, 60, "audio.mp3"),
+      sr("ch1", 3, 60, 80, "audio.mp3"),
+      sr("ch1", 4, 80, 100, "audio.mp3"),
     ])
   })
 
-  void it("handles three chapters with various gap types", () => {
+  it("handles three chapters with various gap types", () => {
     // ch1: has #0 and #2 (3 total) – gap between them
     // ch2: has #1 only (3 total) – leading + trailing gap
     // ch3: has #0 (2 total) – trailing gap
@@ -433,25 +382,21 @@ void describe("combined scenarios", () => {
       sr("ch2", 1, 40, 50),
       sr("ch3", 0, 70, 80),
     ]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 3, ch2: 3, ch3: 2 },
-      { "audio.mp3": 100 },
-    )
+    const result = run(input, { ch1: 3, ch2: 3, ch3: 2 }, { "audio.mp3": 100 })
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 10, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 10, end: 20 },
-      { chapterId: "ch1", id: 2, start: 20, end: 30, audiofile: "audio.mp3" },
-      { chapterId: "ch2", id: 0, audiofile: "audio.mp3", start: 30, end: 40 },
-      { chapterId: "ch2", id: 1, start: 40, end: 50, audiofile: "audio.mp3" },
-      { chapterId: "ch2", id: 2, audiofile: "audio.mp3", start: 50, end: 70 },
-      { chapterId: "ch3", id: 0, start: 70, end: 80, audiofile: "audio.mp3" },
-      { chapterId: "ch3", id: 1, audiofile: "audio.mp3", start: 80, end: 100 },
+      sr("ch1", 0, 0, 10, "audio.mp3"),
+      sr("ch1", 1, 10, 20, "audio.mp3"),
+      sr("ch1", 2, 20, 30, "audio.mp3"),
+      sr("ch2", 0, 30, 40, "audio.mp3"),
+      sr("ch2", 1, 40, 50, "audio.mp3"),
+      sr("ch2", 2, 50, 70, "audio.mp3"),
+      sr("ch3", 0, 70, 80, "audio.mp3"),
+      sr("ch3", 1, 80, 100, "audio.mp3"),
     ])
   })
 
-  void it("handles three chapters with separate audio files", () => {
+  it("handles three chapters with separate audio files", () => {
     // ch1: has #0 and #2 (3 total) – gap between them
     // ch2: has #1 only (3 total) – leading + trailing gap
     // ch3: has #0 (2 total) – trailing gap
@@ -461,51 +406,47 @@ void describe("combined scenarios", () => {
       sr("ch2", 1, 40, 50, "2.mp3"),
       sr("ch3", 0, 0, 80, "3.mp3"),
     ]
-    const result = interpolateSentenceRanges(
+    const result = run(
       input,
       { ch1: 3, ch2: 3, ch3: 2 },
       { "1.mp3": 30, "2.mp3": 60, "3.mp3": 100 },
     )
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 10, audiofile: "1.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "1.mp3", start: 10, end: 20 },
-      { chapterId: "ch1", id: 2, start: 20, end: 30, audiofile: "1.mp3" },
-      { chapterId: "ch2", id: 0, audiofile: "2.mp3", start: 0, end: 40 },
-      { chapterId: "ch2", id: 1, start: 40, end: 50, audiofile: "2.mp3" },
-      { chapterId: "ch2", id: 2, audiofile: "2.mp3", start: 50, end: 60 },
-      { chapterId: "ch3", id: 0, start: 0, end: 80, audiofile: "3.mp3" },
-      { chapterId: "ch3", id: 1, audiofile: "3.mp3", start: 80, end: 100 },
+      sr("ch1", 0, 0, 10, "1.mp3"),
+      sr("ch1", 1, 10, 20, "1.mp3"),
+      sr("ch1", 2, 20, 30, "1.mp3"),
+      sr("ch2", 0, 0, 40, "2.mp3"),
+      sr("ch2", 1, 40, 50, "2.mp3"),
+      sr("ch2", 2, 50, 60, "2.mp3"),
+      sr("ch3", 0, 0, 80, "3.mp3"),
+      sr("ch3", 1, 80, 100, "3.mp3"),
     ])
   })
 })
 
 // ─── sentence-length weighting ──────────────────────────────────────────────
 
-void describe("sentence-length weighting", () => {
-  void it("falls back to even division when no lengths are provided", () => {
+describe("sentence-length weighting", () => {
+  it("falls back to even division when no lengths are provided", () => {
     const input = [sr("ch1", 0, 0, 10), sr("ch1", 3, 40, 50)]
-    const result = interpolateSentenceRanges(
-      input,
-      { ch1: 4 },
-      { "audio.mp3": 60 },
-    )
+    const result = run(input, { ch1: 4 }, { "audio.mp3": 60 })
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 10, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 10, end: 25 },
-      { chapterId: "ch1", id: 2, audiofile: "audio.mp3", start: 25, end: 40 },
-      { chapterId: "ch1", id: 3, start: 40, end: 50, audiofile: "audio.mp3" },
+      sr("ch1", 0, 0, 10, "audio.mp3"),
+      sr("ch1", 1, 10, 25, "audio.mp3"),
+      sr("ch1", 2, 25, 40, "audio.mp3"),
+      sr("ch1", 3, 40, 50, "audio.mp3"),
     ])
   })
 
-  void it("splits a gap proportionally to sentence length instead of evenly", () => {
+  it("splits a gap proportionally to sentence length instead of evenly", () => {
     // Known: #0 ends at t=10, #3 starts at t=40 → 30s to split across #1, #2.
     // #1 is a short sentence (10 chars), #2 is three times as long (30 chars),
     // so #2 should get three times as much of the 30s as #1 (7.5s vs 22.5s),
     // not an even 15s/15s split.
     const input = [sr("ch1", 0, 0, 10), sr("ch1", 3, 40, 50)]
-    const result = interpolateSentenceRanges(
+    const result = run(
       input,
       { ch1: 4 },
       { "audio.mp3": 60 },
@@ -516,16 +457,16 @@ void describe("sentence-length weighting", () => {
     )
 
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 10, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 10, end: 17.5 },
-      { chapterId: "ch1", id: 2, audiofile: "audio.mp3", start: 17.5, end: 40 },
-      { chapterId: "ch1", id: 3, start: 40, end: 50, audiofile: "audio.mp3" },
+      sr("ch1", 0, 0, 10, "audio.mp3"),
+      sr("ch1", 1, 10, 17.5, "audio.mp3"),
+      sr("ch1", 2, 17.5, 40, "audio.mp3"),
+      sr("ch1", 3, 40, 50, "audio.mp3"),
     ])
   })
 
-  void it("treats a missing or non-positive length as weight 1", () => {
+  it("treats a missing or non-positive length as weight 1", () => {
     const input = [sr("ch1", 0, 0, 10), sr("ch1", 3, 40, 50)]
-    const result = interpolateSentenceRanges(
+    const result = run(
       input,
       { ch1: 4 },
       { "audio.mp3": 60 },
@@ -537,10 +478,134 @@ void describe("sentence-length weighting", () => {
 
     // Both weights fall back to 1, so this should match the even-division case.
     assert.deepStrictEqual(result, [
-      { chapterId: "ch1", id: 0, start: 0, end: 10, audiofile: "audio.mp3" },
-      { chapterId: "ch1", id: 1, audiofile: "audio.mp3", start: 10, end: 25 },
-      { chapterId: "ch1", id: 2, audiofile: "audio.mp3", start: 25, end: 40 },
-      { chapterId: "ch1", id: 3, start: 40, end: 50, audiofile: "audio.mp3" },
+      sr("ch1", 0, 0, 10, "audio.mp3"),
+      sr("ch1", 1, 10, 25, "audio.mp3"),
+      sr("ch1", 2, 25, 40, "audio.mp3"),
+      sr("ch1", 3, 40, 50, "audio.mp3"),
     ])
+  })
+})
+
+// ─── multi-clip sentences and chapter boundaries across files ───────────────
+
+describe("sentences spanning two audio files", () => {
+  it("anchors following gaps on the last clip and preceding gaps on the first", () => {
+    // ch1#0 is cut across file-a/file-b; the gap after it must start in file-b
+    // where the sentence actually ended, not at the end of its first clip.
+    const straddler = new SentenceRange(0, "ch1", [
+      { start: 90, end: 100, audiofile: "file-a.mp3" },
+      { start: 0, end: 2, audiofile: "file-b.mp3" },
+    ])
+    const result = run(
+      [straddler, sr("ch1", 3, 12, 20, "file-b.mp3")],
+      { ch1: 4 },
+      { "file-a.mp3": 100, "file-b.mp3": 100 },
+    )
+
+    assert.deepStrictEqual(result, [
+      straddler,
+      sr("ch1", 1, 2, 7, "file-b.mp3"),
+      sr("ch1", 2, 7, 12, "file-b.mp3"),
+      sr("ch1", 3, 12, 20, "file-b.mp3"),
+    ])
+  })
+})
+
+describe("gap spanning a chapter boundary and an audiofile boundary", () => {
+  it("keeps each chapter's missing sentences in that chapter's file", () => {
+    // ch1's last known sentence ends 40s before file-a ends; ch2's first known
+    // sentence starts 10s into file-b. Proportional splitting would put ch2's
+    // heading and title in file-a's tail; they belong in file-b's head.
+    const result = run(
+      [sr("ch1", 0, 50, 60, "file-a.mp3"), sr("ch2", 2, 10, 20, "file-b.mp3")],
+      { ch1: 2, ch2: 3 },
+      { "file-a.mp3": 100, "file-b.mp3": 100 },
+    )
+
+    assert.deepStrictEqual(result, [
+      sr("ch1", 0, 50, 60, "file-a.mp3"),
+      sr("ch1", 1, 60, 100, "file-a.mp3"),
+      sr("ch2", 0, 0, 5, "file-b.mp3"),
+      sr("ch2", 1, 5, 10, "file-b.mp3"),
+      sr("ch2", 2, 10, 20, "file-b.mp3"),
+    ])
+  })
+
+  it("falls back to the file with room when the other has none", () => {
+    // ch2's first known sentence starts at 0 in file-b, so its leading
+    // sentences can only go in file-a's tail.
+    const result = run(
+      [sr("ch1", 0, 50, 60, "file-a.mp3"), sr("ch2", 1, 0, 10, "file-b.mp3")],
+      { ch1: 1, ch2: 2 },
+      { "file-a.mp3": 100, "file-b.mp3": 100 },
+    )
+
+    assert.deepStrictEqual(result, [
+      sr("ch1", 0, 50, 60, "file-a.mp3"),
+      sr("ch2", 0, 60, 100, "file-a.mp3"),
+      sr("ch2", 1, 0, 10, "file-b.mp3"),
+    ])
+  })
+})
+
+describe("range states", () => {
+  it("interpolates between matches and extrapolates at the edges", () => {
+    const result = interpolateSentenceRanges(
+      [sr("ch1", 1, 5, 10), sr("ch1", 3, 20, 25)],
+      { ch1: 5 },
+      { "audio.mp3": 40 },
+    )
+    assert.deepStrictEqual(
+      result.map((range) => [range.id, range.state]),
+      [
+        [0, "unmatched"],
+        [1, "matched"],
+        [2, "interpolated"],
+        [3, "matched"],
+        [4, "unmatched"],
+      ],
+    )
+  })
+
+  it("treats a chapter boundary as an edge", () => {
+    const result = interpolateSentenceRanges(
+      [sr("ch1", 0, 0, 10), sr("ch2", 1, 30, 40)],
+      { ch1: 2, ch2: 2 },
+      { "audio.mp3": 50 },
+    )
+    assert.deepStrictEqual(
+      result.map((range) => [range.chapterId, range.id, range.state]),
+      [
+        ["ch1", 0, "matched"],
+        ["ch1", 1, "unmatched"],
+        ["ch2", 0, "unmatched"],
+        ["ch2", 1, "matched"],
+      ],
+    )
+  })
+
+  it("marks dropped slots wherever they fall", () => {
+    const result = interpolateSentenceRanges(
+      [sr("ch1", 1, 5, 10), sr("ch1", 3, 20, 25)],
+      { ch1: 5 },
+      { "audio.mp3": 40 },
+      {},
+      {
+        droppedSlots: new Set([
+          slotKey({ chapterId: "ch1", id: 0 }),
+          slotKey({ chapterId: "ch1", id: 2 }),
+        ]),
+      },
+    )
+    assert.deepStrictEqual(
+      result.map((range) => [range.id, range.state]),
+      [
+        [0, "dropped"],
+        [1, "matched"],
+        [2, "dropped"],
+        [3, "matched"],
+        [4, "unmatched"],
+      ],
+    )
   })
 })

@@ -1,15 +1,16 @@
 import assert from "node:assert"
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import { describe, it } from "node:test"
 
-import { isAudioFile } from "@storyteller-platform/audiobook"
-import { Epub } from "@storyteller-platform/epub"
-import { type RecognitionResult } from "@storyteller-platform/ghost-story"
+import { describe, it, type TestContext } from "vitest"
+
+import { Epub } from "@storyteller/epub"
+import { MediaType } from "@storyteller/media-types"
 
 import { createLogger } from "../../common/logging.ts"
-import { createAlignmentSnapshot } from "../../snapshot/snapshot.ts"
-import { Aligner } from "../align.ts"
+import { EmissionsReader } from "../../emit/fs.ts"
+import { createAlignmentSnapshot } from "../../snapshot/ctc/snapshot.ts"
+import { Aligner } from "../ctc/Aligner.ts"
 
 const itLocally = process.env["TEST_LOCAL_ONLY"] ? it : it.skip
 
@@ -46,14 +47,14 @@ function getSafeFilepathSegment(name: string, suffix: string = "") {
 }
 
 async function assertAlignSnapshot(
-  context: it.TestContext,
+  context: TestContext,
   epub: Epub,
-  transcriptionFilepaths: string[],
+  emissionFilepaths: string[],
   textRef: "id-fragment" | "text-fragment",
   transliterate?: boolean,
 ) {
   const snapshotFilename = getSafeFilepathSegment(
-    `${context.fullName} ${textRef === "id-fragment" ? "[id-fragment]" : "[text-fragment]"}`,
+    `${context.task.fullTestName} ${textRef === "id-fragment" ? "[id-fragment]" : "[text-fragment]"}`,
     ".snapshot",
   )
   const snapshotFilepath = join(
@@ -65,7 +66,7 @@ async function assertAlignSnapshot(
 
   const newSnapshot = await createAlignmentSnapshot(
     epub,
-    transcriptionFilepaths,
+    emissionFilepaths,
     textRef,
     transliterate,
   )
@@ -106,31 +107,30 @@ async function assertAlignSnapshot(
 }
 
 async function testAlignBook(
-  context: it.TestContext,
+  context: TestContext,
   granularity: "sentence" | "word",
   epubPath: string,
   audiobookPath: string,
-  transcriptionsPath: string,
+  emissionsPath: string,
   transliterate?: boolean,
 ) {
   using epub = await Epub.from(epubPath)
 
+  // Emissions and audio files pair up by index, so both must sort identically
   const audiobookFiles = await readdir(audiobookPath).then((filenames) =>
-    filenames.filter((f) => isAudioFile(f)).map((f) => join(audiobookPath, f)),
+    filenames
+      .filter((f) => MediaType.fromPath(f)?.kind === "audio")
+      .toSorted()
+      .map((f) => join(audiobookPath, f)),
   )
-  const transcriptionFilepaths = await readdir(transcriptionsPath).then(
-    (filenames) =>
-      filenames
-        .filter((f) => f.endsWith(".json"))
-        .map((f) => join(transcriptionsPath, f)),
-  )
-  const transcriptions = await Promise.all(
-    transcriptionFilepaths.map(async (p) => readFile(p, { encoding: "utf-8" })),
-  ).then((contents) =>
-    contents.map(
-      (c) =>
-        JSON.parse(c) as Pick<RecognitionResult, "transcript" | "timeline">,
-    ),
+
+  const emissionsReader = await EmissionsReader.from(emissionsPath)
+
+  const emissionFilepaths = await readdir(emissionsPath).then((filenames) =>
+    filenames
+      .filter((f) => f.endsWith(".json") || f.endsWith(".emissions"))
+      .toSorted()
+      .map((f) => join(emissionsPath, f)),
   )
 
   const textFragmentEpub = await epub.copy()
@@ -138,7 +138,7 @@ async function testAlignBook(
   const aligner = new Aligner(
     epub,
     audiobookFiles,
-    transcriptions,
+    emissionsReader,
     granularity,
     "id-fragment",
     undefined,
@@ -152,7 +152,7 @@ async function testAlignBook(
   await assertAlignSnapshot(
     context,
     epub,
-    transcriptionFilepaths,
+    emissionFilepaths,
     "id-fragment",
     transliterate,
   )
@@ -170,14 +170,14 @@ async function testAlignBook(
   await assertAlignSnapshot(
     context,
     textFragmentEpub,
-    transcriptionFilepaths,
+    emissionFilepaths,
     "text-fragment",
     transliterate,
   )
 }
 
-void describe("align", () => {
-  void it("should align Peter and Wendy", async (context) => {
+describe("align", () => {
+  it("should align Peter and Wendy", async (context) => {
     await testAlignBook(
       context,
       "sentence",
@@ -190,11 +190,11 @@ void describe("align", () => {
         "Peter and Wendy.epub",
       ),
       join("src", "align", "__fixtures__", "peter-and-wendy", "audio"),
-      join("src", "align", "__fixtures__", "peter-and-wendy", "transcriptions"),
+      join("src", "align", "__fixtures__", "peter-and-wendy", "emissions"),
     )
   })
 
-  void it.skip("should align Peter and Wendy (word-level)", async (context) => {
+  it.skip("should align Peter and Wendy (word-level)", async (context) => {
     await testAlignBook(
       context,
       "word",
@@ -207,13 +207,13 @@ void describe("align", () => {
         "Peter and Wendy.epub",
       ),
       join("src", "align", "__fixtures__", "peter-and-wendy", "audio"),
-      join("src", "align", "__fixtures__", "peter-and-wendy", "transcriptions"),
+      join("src", "align", "__fixtures__", "peter-and-wendy", "emissions"),
     )
   })
 
   // These books are not public commons, so Shane runs these tests locally but the
   // books and snapshots aren't checked in
-  void itLocally("should align The Way of Kings", async (context) => {
+  itLocally("should align The Way of Kings", async (context) => {
     await testAlignBook(
       context,
       "sentence",
@@ -226,11 +226,11 @@ void describe("align", () => {
         "The Way of Kings.epub",
       ),
       join("src", "align", "__fixtures__", "way-of-kings", "audio"),
-      join("src", "align", "__fixtures__", "way-of-kings", "transcriptions"),
+      join("src", "align", "__fixtures__", "way-of-kings", "emissions"),
     )
   })
 
-  void itLocally("should align The Recitatif", async (context) => {
+  itLocally("should align The Recitatif", async (context) => {
     await testAlignBook(
       context,
       "sentence",
@@ -243,11 +243,11 @@ void describe("align", () => {
         "Recitatif.epub",
       ),
       join("src", "align", "__fixtures__", "recitatif", "audio"),
-      join("src", "align", "__fixtures__", "recitatif", "transcriptions"),
+      join("src", "align", "__fixtures__", "recitatif", "emissions"),
     )
   })
 
-  void itLocally("should align The Raven Scholar", async (context) => {
+  itLocally("should align The Raven Scholar", async (context) => {
     await testAlignBook(
       context,
       "sentence",
@@ -260,21 +260,21 @@ void describe("align", () => {
         "The Raven Scholar.epub",
       ),
       join("src", "align", "__fixtures__", "raven-scholar", "audio"),
-      join("src", "align", "__fixtures__", "raven-scholar", "transcriptions"),
+      join("src", "align", "__fixtures__", "raven-scholar", "emissions"),
     )
   })
 
-  void itLocally("should align Night", async (context) => {
+  itLocally("should align Night", async (context) => {
     await testAlignBook(
       context,
       "sentence",
       join("src", "align", "__fixtures__", "night", "text", "Night.epub"),
       join("src", "align", "__fixtures__", "night", "audio"),
-      join("src", "align", "__fixtures__", "night", "transcriptions"),
+      join("src", "align", "__fixtures__", "night", "emissions"),
     )
   })
 
-  void itLocally("should align An Immense World", async (context) => {
+  itLocally("should align An Immense World", async (context) => {
     await testAlignBook(
       context,
       "sentence",
@@ -287,11 +287,93 @@ void describe("align", () => {
         "An Immense World.epub",
       ),
       join("src", "align", "__fixtures__", "immense-world", "audio"),
-      join("src", "align", "__fixtures__", "immense-world", "transcriptions"),
+      join("src", "align", "__fixtures__", "immense-world", "emissions"),
     )
   })
 
-  void it("should align Why I Cant Sleep (mandarin)", async (context) => {
+  // One chapter of a Traditional Chinese LibriVox reading against a zh-TW
+  // Gutenberg epub, emissions from quartznet15x5_zh, whose vocabulary is
+  // Simplified. Generate emissions with scripts/prepare-fixture.ts.
+  it("should align 朝花夕拾 chapter 1 (traditional chinese)", async (context) => {
+    await testAlignBook(
+      context,
+      "sentence",
+      join(
+        "src",
+        "align",
+        "__fixtures__",
+        "chaohuasishe",
+        "text",
+        "朝花夕拾.epub",
+      ),
+      join("src", "align", "__fixtures__", "chaohuasishe", "audio"),
+      join("src", "align", "__fixtures__", "chaohuasishe", "emissions"),
+      true,
+    )
+  })
+
+  // First LibriVox section of Masamune Hakucho's 何処へ against the Gutenberg
+  // epub, which keeps the pre-war orthography (入つて, 來, 步). Emissions from
+  // quartznet15x5_ja, converted from kinouchi/japanese-quartznet-large.
+  it("should align 何処へ section 1 (japanese)", async (context) => {
+    await testAlignBook(
+      context,
+      "sentence",
+      join("src", "align", "__fixtures__", "dokoe", "text", "何処へ.epub"),
+      join("src", "align", "__fixtures__", "dokoe", "audio"),
+      join("src", "align", "__fixtures__", "dokoe", "emissions"),
+      true,
+    )
+  })
+
+  // LibriVox chapter 1 of Fouqué's Undine against the Projekt Gutenberg text,
+  // emissions from quartznet15x5_de
+  it("should align Undine chapter 1 (german)", async (context) => {
+    await testAlignBook(
+      context,
+      "sentence",
+      join("src", "align", "__fixtures__", "undine", "text", "Undine.epub"),
+      join("src", "align", "__fixtures__", "undine", "audio"),
+      join("src", "align", "__fixtures__", "undine", "emissions"),
+    )
+  })
+
+  // LibriVox chapter 1 of Tolstoy's Детство against the Wikisource text,
+  // emissions from quartznet15x5_ru
+  it("should align Детство chapter 1 (russian)", async (context) => {
+    await testAlignBook(
+      context,
+      "sentence",
+      join("src", "align", "__fixtures__", "detstvo", "text", "Детство.epub"),
+      join("src", "align", "__fixtures__", "detstvo", "audio"),
+      join("src", "align", "__fixtures__", "detstvo", "emissions"),
+      true,
+    )
+  })
+
+  // LibriVox preface (مقدمة) of al-Kawakibi's طبائع الاستبداد against the
+  // Wikisource text, which carries diacritics, emissions from quartznet15x5_ar
+  it("should align طبائع الاستبداد preface (arabic)", async (context) => {
+    await testAlignBook(
+      context,
+      "sentence",
+      join(
+        "src",
+        "align",
+        "__fixtures__",
+        "tabai-al-istibdad",
+        "text",
+        "طبائع الاستبداد.epub",
+      ),
+      join("src", "align", "__fixtures__", "tabai-al-istibdad", "audio"),
+      join("src", "align", "__fixtures__", "tabai-al-istibdad", "emissions"),
+      true,
+    )
+  })
+
+  // This fixture doesn't have CTC emissions yet; restore to a plain `it` once
+  // they're generated and checked in
+  itLocally("should align Why I Cant Sleep (mandarin)", async (context) => {
     await testAlignBook(
       context,
       "sentence",
@@ -304,18 +386,12 @@ void describe("align", () => {
         "why_i_cant_sleep_hanzi_only.epub",
       ),
       join("src", "align", "__fixtures__", "why-i-cant-sleep", "audio"),
-      join(
-        "src",
-        "align",
-        "__fixtures__",
-        "why-i-cant-sleep",
-        "transcriptions",
-      ),
+      join("src", "align", "__fixtures__", "why-i-cant-sleep", "emissions"),
       true,
     )
   })
 
-  void itLocally("should align jp", async (context) => {
+  itLocally("should align jp", async (context) => {
     await testAlignBook(
       context,
       "sentence",
@@ -339,7 +415,7 @@ void describe("align", () => {
         "align",
         "__fixtures__",
         "青春ブタ野郎はバニーガール先輩の夢を見ない",
-        "transcriptions",
+        "emissions",
       ),
       true,
     )

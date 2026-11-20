@@ -1,0 +1,35 @@
+{
+  // Builds the published package: the same program as tsconfig.json, but emitting
+  // JavaScript next to the declarations. The build script runs `tsc -b`, which also
+  // builds referenced projects, so this works from a fresh checkout.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "emitDeclarationOnly": false,
+    "declaration": true,
+    // .ts specifiers are rewritten to .js on emit; allowImportingTsExtensions is
+    // only legal when emitting declarations alone.
+    "allowImportingTsExtensions": false,
+    // Pinned so a file added to the program later cannot move the published layout.
+    // Set to ./src so the published layout stays dist/index.js, dist/files.node.js,
+    // dist/adapters/tmpfs.js rather than gaining a src/ level.
+    "rootDir": "./src",
+    "tsBuildInfoFile": ".tsbuild/tsconfig.build.tsbuildinfo",
+    "outDir": "dist"
+  },
+  // scripts/install-epubcheck.ts downloads the vendored epubcheck; it never ships.
+  // src/__test__ holds the test helpers (epubcheck.ts, spec-support.ts), which are
+  // not *.test.* and so need excluding by name to stay out of dist.
+  "exclude": [
+    "dist",
+    "scripts",
+    "src/__test__",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "vitest.config.ts"
+  ],
+  "references": [
+    { "path": "../fs" },
+    { "path": "../path" },
+    { "path": "../media-types" }
+  ]
+}

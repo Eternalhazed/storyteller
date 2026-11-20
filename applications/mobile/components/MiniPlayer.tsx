@@ -99,7 +99,7 @@ export function MiniPlayer({ book, format, hidden, floatingToolbar }: Props) {
         ) ??
         0
 
-      return position === -1 ? positions?.length ?? 1 : position + 1
+      return position === -1 ? (positions?.length ?? 1) : position + 1
     }
     const chapterPosition =
       chapterPositions.findIndex(
@@ -109,7 +109,7 @@ export function MiniPlayer({ book, format, hidden, floatingToolbar }: Props) {
       ) ?? 0
 
     return chapterPosition === -1
-      ? chapterPositions.length ?? 1
+      ? (chapterPositions.length ?? 1)
       : chapterPosition + 1
   }, [
     positions,
@@ -194,7 +194,7 @@ export function MiniPlayer({ book, format, hidden, floatingToolbar }: Props) {
         <HideableView
           hidden={hidden}
           className={cn(
-            "ios:pb-[max(calc(env(safe-area-inset-bottom)_-_--spacing(4)),--spacing(2))] android:pb-2 z-3 px-3",
+            "ios:pb-[max(calc(env(safe-area-inset-bottom)_-_--spacing(4)),--spacing(2))] android:pb-2 z-3 px-safe-or-3",
             {
               "bg-background border-t-foreground ios:bottom-0 android:bottom-safe absolute right-0 left-0 border-t":
                 floatingToolbar,
@@ -260,7 +260,7 @@ export function MiniPlayer({ book, format, hidden, floatingToolbar }: Props) {
             )}
           </View>
 
-          <View className="flex-row items-center justify-between gap-3 pr-6 pl-3">
+          <View className="pr-safe-or-6 pl-safe-or-3 flex-row items-center justify-between gap-3">
             <TouchableOpacity
               accessibilityLabel={`Open details for ${title}`}
               accessibilityRole="button"

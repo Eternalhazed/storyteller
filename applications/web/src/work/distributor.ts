@@ -6,14 +6,13 @@ import { MessageChannel } from "node:worker_threads"
 import { AsyncMutex } from "@esfx/async-mutex"
 import Piscina from "piscina"
 
-import type { CallModel } from "@storyteller-platform/xray"
+import type { CallModel } from "@storyteller/xray"
 
+import { filepathFolder, pathBelongsTo } from "@/assets/library/paths"
 import { setEbookImportHandler } from "@/assets/library/scanner/ebook-import"
-import { pathBelongsTo } from "@/assets/library/scanner/folder"
-import { filepathFolder, scan } from "@/assets/library/scanner/scan"
 import {
+  releasePrefixAfterSettle,
   suppressPrefix,
-  unsuppressPrefix,
 } from "@/assets/library/scanner/write-intent"
 import { getReadaloudFilepath, getXrayFilepath } from "@/assets/paths"
 import {
@@ -26,6 +25,7 @@ import {
   updateBook,
 } from "@/database/books"
 import {
+  type DisplayJob,
   type Job,
   type JobType,
   createJob,
@@ -34,11 +34,13 @@ import {
   getJobs,
   getNextJobPosition,
   nowTimestamp,
-  reorderQueuedJobs,
+  reorderActiveJobs,
   updateJob,
 } from "@/database/jobs"
 import { getSettings } from "@/database/settings"
 import { env } from "@/env"
+import { queueJobNext } from "@/jobList"
+import { ACTIVE_JOB_STATUSES } from "@/jobStatuses"
 import { logger } from "@/logging"
 import type { UUID } from "@/uuid"
 
@@ -48,9 +50,26 @@ import { STAGE_ORDER } from "./stages"
 import type processBook from "./worker"
 import { type XraySourceReader, runXrayJob } from "./xray"
 
-export type RestartMode = false | "full" | "transcription" | "sync"
+export type RestartMode =
+  | false
+  | "full"
+  | "transcode"
+  | "transcription"
+  | "sync"
 
 const MAX_CONCURRENT = 1
+const WORKER_STOP_GRACE_MS = 30_000
+
+export type ControlMessage = { type: "abort" }
+
+type AbortIntent = "cancel" | "pause" | "requeue"
+
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require("onnxruntime-node")
+} catch (err) {
+  logger.error({ msg: "Failed to import onnx-runtime", err })
+}
 
 /**
  * Next.js app directory seems to have a bug where, in production,
@@ -65,7 +84,7 @@ declare global {
   // variables declared with const/let cannot be added to the global scope
   /* eslint-disable no-var */
   var jobControllers: Map<UUID, AbortController> | undefined
-  var jobAbortIntents: Map<UUID, "cancel" | "pause"> | undefined
+  var jobAbortIntents: Map<UUID, AbortIntent> | undefined
   var alignmentPiscina: Piscina | undefined
   var xrayJobControllers: Map<UUID, AbortController> | undefined
   var jobPumpMutex: AsyncMutex | undefined
@@ -81,7 +100,7 @@ if (globalThis.jobControllers) {
   globalThis.jobControllers = controllers
 }
 
-let abortIntents: Map<UUID, "cancel" | "pause">
+let abortIntents: Map<UUID, AbortIntent>
 if (globalThis.jobAbortIntents) {
   abortIntents = globalThis.jobAbortIntents
 } else {
@@ -102,12 +121,12 @@ if (globalThis.alignmentPiscina) {
     idleTimeout: 30_000,
     // In dev, we don't bundle packages in the worker.
     // These flags allow us to import directly from the
-    // source typescript files for our own packages (e.g. @storyteller-platform/epub)
+    // source typescript files for our own packages (e.g. @storyteller/epub)
     ...(env.NODE_ENV === "development" && {
       env: {
         ...process.env,
         NODE_OPTIONS:
-          "--conditions=@storyteller-node --disable-warning=ExperimentalWarning --experimental-transform-types",
+          "--disable-warning=ExperimentalWarning --experimental-transform-types",
       },
     }),
   })
@@ -130,7 +149,7 @@ export async function enqueueBookAlign(
   bookUuid: UUID,
   restart: RestartMode,
   overrides?: Partial<RunConfig>,
-): Promise<Job> {
+): Promise<DisplayJob> {
   const existing = await getActiveJobForBook(bookUuid, "book_align")
   if (existing) {
     return existing
@@ -167,8 +186,8 @@ export async function enqueueBookAlign(
   return job
 }
 
-export async function enqueueBookXray(bookUuid: UUID): Promise<Job> {
-  let job: Job
+export async function enqueueBookXray(bookUuid: UUID): Promise<DisplayJob> {
+  let job: DisplayJob
   await pumpMutex.lock()
   try {
     const existing = await getActiveJobForBook(bookUuid, "book_xray")
@@ -216,7 +235,9 @@ export async function maybeEnqueueBookXray(bookUuid: UUID): Promise<void> {
 
 setEbookImportHandler(maybeEnqueueBookXray)
 
-async function claimNextJob(type: JobType): Promise<Job | undefined> {
+async function claimNextJob(
+  type: JobType,
+): Promise<{ job: Job; resumed: boolean } | undefined> {
   await pumpMutex.lock()
   try {
     const lane = type === "book_xray" ? xrayControllers : controllers
@@ -233,7 +254,7 @@ async function claimNextJob(type: JobType): Promise<Job | undefined> {
     const abortController = new AbortController()
     lane.set(next.uuid, abortController)
     try {
-      return await updateJob(next.uuid, {
+      const job = await updateJob(next.uuid, {
         status: "RUNNING",
         startedAt:
           type === "book_xray"
@@ -241,6 +262,7 @@ async function claimNextJob(type: JobType): Promise<Job | undefined> {
             : nowTimestamp(),
         error: null,
       })
+      return { job, resumed: next.startedAt !== null }
     } catch (error) {
       lane.delete(next.uuid)
       throw error
@@ -253,12 +275,13 @@ async function claimNextJob(type: JobType): Promise<Job | undefined> {
 export async function pump(
   callModel?: CallModel,
   readSource?: XraySourceReader,
+  lanes: readonly JobType[] = ["book_align", "book_xray"],
 ): Promise<void> {
   const running: Promise<void>[] = []
-  for (const type of ["book_align", "book_xray"] as const) {
-    let job: Job | undefined
+  for (const type of lanes) {
+    let claimed: { job: Job; resumed: boolean } | undefined
     try {
-      job = await claimNextJob(type)
+      claimed = await claimNextJob(type)
     } catch (error) {
       logger.error({
         msg: "Failed to claim a queued job",
@@ -267,37 +290,42 @@ export async function pump(
       })
       continue
     }
-    if (!job) continue
-    const claimed = job
+    if (!claimed) continue
+    const { job, resumed } = claimed
     const lane = type === "book_xray" ? xrayControllers : controllers
     running.push(
-      runJob(claimed, callModel, readSource)
+      runJob(job, resumed, callModel, readSource)
         .catch(async (error: unknown) => {
           const message = error instanceof Error ? error.message : String(error)
           logger.error({
             msg: "Job runner failed",
-            jobUuid: claimed.uuid,
+            jobUuid: job.uuid,
             type,
             error: message,
           })
-          const intent = abortIntents.get(claimed.uuid)
+          const intent = abortIntents.get(job.uuid)
           try {
-            await updateJob(claimed.uuid, {
+            await updateJob(job.uuid, {
               status:
                 intent === "pause"
                   ? "PAUSED"
                   : intent === "cancel"
                     ? "CANCELED"
-                    : "ERROR",
-              finishedAt: intent === "pause" ? null : nowTimestamp(),
+                    : intent === "requeue"
+                      ? "QUEUED"
+                      : "ERROR",
+              finishedAt:
+                intent === "pause" || intent === "requeue"
+                  ? null
+                  : nowTimestamp(),
               error: intent ? null : message,
             })
           } catch (writeError) {
             // Do not immediately reclaim a RUNNING row whose final write failed.
-            finalizationFailures.add(claimed.uuid)
+            finalizationFailures.add(job.uuid)
             logger.error({
               msg: "Failed to record the job runner failure",
-              jobUuid: claimed.uuid,
+              jobUuid: job.uuid,
               error:
                 writeError instanceof Error
                   ? writeError.message
@@ -306,9 +334,9 @@ export async function pump(
           }
         })
         .finally(() => {
-          lane.delete(claimed.uuid)
-          abortIntents.delete(claimed.uuid)
-          void pump(callModel, readSource)
+          lane.delete(job.uuid)
+          abortIntents.delete(job.uuid)
+          void pump(callModel, readSource, lanes)
         }),
     )
   }
@@ -317,6 +345,7 @@ export async function pump(
 
 async function runJob(
   job: Job,
+  resumed: boolean,
   callModel?: CallModel,
   readSource?: XraySourceReader,
 ): Promise<void> {
@@ -327,7 +356,8 @@ async function runJob(
       callModel,
       readSource,
       signal: controller.signal,
-      getAbortIntent: () => abortIntents.get(job.uuid) ?? "cancel",
+      getAbortIntent: () =>
+        abortIntents.get(job.uuid) === "pause" ? "pause" : "cancel",
     })
     return
   }
@@ -376,6 +406,22 @@ async function runJob(
 
   const { port1, port2 } = new MessageChannel()
 
+  const terminate = new AbortController()
+  let terminateTimer: NodeJS.Timeout | undefined
+  abortController.signal.addEventListener(
+    "abort",
+    () => {
+      port2.postMessage({ type: "abort" } satisfies ControlMessage)
+      terminateTimer = setTimeout(() => {
+        logger.warn(
+          `Worker for job ${job.uuid} did not stop within ${WORKER_STOP_GRACE_MS}ms, terminating it`,
+        )
+        terminate.abort()
+      }, WORKER_STOP_GRACE_MS)
+    },
+    { once: true },
+  )
+
   port2.on(
     "message",
     async (message: {
@@ -414,11 +460,11 @@ async function runJob(
       {
         jobUuid: job.uuid,
         bookUuid,
-        restart: job.restart ?? false,
+        restart: resumed ? false : (job.restart ?? false),
         config: job.config,
         port: port1,
       } satisfies Parameters<typeof processBook>[0],
-      { transferList: [port1], signal: abortController.signal },
+      { transferList: [port1] as never, signal: terminate.signal },
     )) as JobStats | undefined
 
     const finished = await getBookOrThrow(bookUuid)
@@ -441,6 +487,7 @@ async function runJob(
       )
     }
 
+    const { scan } = await import("@/assets/library/scanner/scan")
     await scan({
       source: "readaloud-creation",
       request: {
@@ -466,26 +513,34 @@ async function runJob(
     })
     await maybeEnqueueBookXray(bookUuid)
   } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") {
+    if (
+      abortController.signal.aborted ||
+      (err instanceof Error && err.name === "AbortError")
+    ) {
       const intent = abortIntents.get(job.uuid) ?? "cancel"
       const current = await getBookOrThrow(bookUuid)
       const stage = current.readaloud?.currentStage ?? "SPLIT_TRACKS"
+      const requeued = intent === "requeue"
+      const position = requeued
+        ? ((await getJob(job.uuid))?.position ?? job.position)
+        : null
 
       logger.info(`Processing for job ${job.uuid} ${intent}d by user`)
 
       await updateBook(bookUuid, null, {
         readaloud: {
-          status: "STOPPED",
+          status: requeued ? "QUEUED" : "STOPPED",
           currentStage: stage,
-          queuePosition: null,
+          queuePosition: position,
           restartPending: null,
         },
       })
 
       await updateJob(job.uuid, {
-        status: intent === "pause" ? "PAUSED" : "CANCELED",
+        status:
+          intent === "pause" ? "PAUSED" : requeued ? "QUEUED" : "CANCELED",
         stage,
-        finishedAt: intent === "pause" ? null : nowTimestamp(),
+        finishedAt: intent === "cancel" ? nowTimestamp() : null,
       })
       return
     }
@@ -509,7 +564,8 @@ async function runJob(
     logger.error(`Processing for job ${job.uuid} failed unexpectedly`)
     logger.error(err)
   } finally {
-    for (const fp of toSupress) unsuppressPrefix(fp)
+    clearTimeout(terminateTimer)
+    for (const fp of toSupress) releasePrefixAfterSettle(fp)
   }
 }
 
@@ -561,19 +617,20 @@ export async function resumeJob(jobUuid: UUID): Promise<void> {
   const job = await getJob(jobUuid)
   if (!job || job.status !== "PAUSED") return
 
-  const position = await getNextJobPosition()
-  await updateJob(jobUuid, {
-    status: "QUEUED",
-    position,
-    finishedAt: null,
-  })
+  await updateJob(jobUuid, { status: "QUEUED", finishedAt: null })
   finalizationFailures.delete(jobUuid)
+  const active = await getJobs({
+    statuses: ACTIVE_JOB_STATUSES,
+    type: job.type,
+  })
+  const order = queueJobNext(active, jobUuid)
+  await reorderActiveJobs(order)
   if (job.type === "book_align" && job.bookUuid) {
     await updateBook(job.bookUuid, null, {
       readaloud: {
         status: "QUEUED",
         currentStage: job.stage ?? "SPLIT_TRACKS",
-        queuePosition: position,
+        queuePosition: order.indexOf(jobUuid),
       },
     })
   }
@@ -581,7 +638,30 @@ export async function resumeJob(jobUuid: UUID): Promise<void> {
 }
 
 export async function reorderJobs(orderedUuids: UUID[]): Promise<void> {
-  await reorderQueuedJobs(orderedUuids)
+  const active = await getJobs({ statuses: ACTIVE_JOB_STATUSES })
+  await reorderActiveJobs(orderedUuids)
+
+  const running = active.find(
+    (job) => job.type === "book_align" && job.status === "RUNNING",
+  )
+  if (!running) {
+    void pump()
+    return
+  }
+
+  const queued = new Set(
+    active
+      .filter((job) => job.type === "book_align" && job.status === "QUEUED")
+      .map((job) => job.uuid),
+  )
+  const ahead = orderedUuids.slice(0, orderedUuids.indexOf(running.uuid))
+  if (!ahead.some((uuid) => queued.has(uuid))) return
+
+  const controller = controllers.get(running.uuid)
+  if (!controller) return
+
+  abortIntents.set(running.uuid, "requeue")
+  controller.abort()
 }
 
 export async function cancelProcessing(bookUuid: UUID): Promise<void> {
@@ -600,7 +680,8 @@ function clampRestart(
   restart: RestartMode,
   book: BookWithRelations,
 ): RestartMode {
-  if (restart === false || restart === "full") return restart
+  if (restart === false || restart === "full" || restart === "transcode")
+    return restart
 
   const bookStage = book.readaloud?.currentStage ?? "SPLIT_TRACKS"
   const targetStage: Readaloud["currentStage"] =
@@ -615,7 +696,7 @@ function getStartStage(
   restart: RestartMode,
   book: BookWithRelations,
 ): Readaloud["currentStage"] {
-  if (restart === "full") return "SPLIT_TRACKS"
+  if (restart === "full" || restart === "transcode") return "SPLIT_TRACKS"
   if (restart === "transcription") return "TRANSCRIBE_CHAPTERS"
   if (restart === "sync") return "SYNC_CHAPTERS"
   return book.readaloud?.currentStage ?? "SPLIT_TRACKS"

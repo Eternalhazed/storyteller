@@ -1,0 +1,14 @@
+releases:
+  "@storyteller/opds": minor
+
+declined:
+  - "@storyteller/mobile"
+  - "@storyteller/tauri"
+  - "@storyteller/web"
+  - "@storyteller/fs"
+  - "@storyteller/mapping"
+  - "@storyteller/media-types"
+  - "@storyteller/nodekit"
+  - "@storyteller/okmain"
+  - "@storyteller/path"
+  - "@storyteller/uri-fragment"

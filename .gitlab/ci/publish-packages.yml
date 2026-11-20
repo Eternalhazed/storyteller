@@ -1,5 +1,6 @@
 publish-fs:
-  image: node:24
+  extends: .yarn_cache
+  image: node:26.12.1
   stage: publish
   rules:
     - if:
@@ -24,30 +25,17 @@ publish-fs:
         *) TAG="latest" ;;
       esac
     - npm i -g corepack
-    - yarn workspaces focus @storyteller-platform/fs
-    - yarn workspace @storyteller-platform/fs npm publish --tag="$TAG"
+    - yarn workspaces focus @storyteller/fs
+    - yarn workspace @storyteller/fs npm publish --tag="$TAG"
 
 prerelease-fs:
-  stage: prerelease
-  image: alpine:latest
+  extends: .prerelease-base
+  variables:
+    PACKAGE: fs
   rules:
     - if:
         '$CI_COMMIT_TAG =~
         /^fs-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
-  script:
-    - apk add curl jq
-    - version=$(echo $CI_COMMIT_TAG | sed -r 's/fs-//')
-    - package=$(echo $CI_COMMIT_TAG | sed -r 's/-v\d+\.\d+\.\d+.*$//')
-    - 'from_sha=$(curl -H "PRIVATE-TOKEN: $CI_API_TOKEN"
-      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases" | jq -r "first(.[] |
-      select(.tag_name | startswith(\"$package\")) | .commit.short_id)")'
-    - to_sha=$CI_COMMIT_SHORT_SHA
-    - 'curl -H "PRIVATE-TOKEN: $CI_API_TOKEN"
-      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/changelog?version=${version}&from=${from_sha}&to=${to_sha}&trailer=Changelog-fs"
-      | jq -r .notes > release_notes.md'
-  artifacts:
-    paths:
-      - release_notes.md
 
 release-fs:
   stage: release
@@ -68,11 +56,12 @@ release-fs:
     ref: "$CI_COMMIT_SHA"
     assets:
       links:
-        - name: "NPM package for @storyteller-platform/fs"
-          url: "https://npmjs.com/package/@storyteller-platform/fs"
+        - name: "NPM package for @storyteller/fs"
+          url: "https://npmjs.com/package/@storyteller/fs"
 
 publish-epub:
-  image: node:24
+  extends: .yarn_cache
+  image: node:26.12.1
   stage: publish
   rules:
     - if:
@@ -97,30 +86,17 @@ publish-epub:
         *) TAG="latest" ;;
       esac
     - npm i -g corepack
-    - yarn workspaces focus @storyteller-platform/epub
-    - yarn workspace @storyteller-platform/epub npm publish --tag="$TAG"
+    - yarn workspaces focus @storyteller/epub
+    - yarn workspace @storyteller/epub npm publish --tag="$TAG"
 
 prerelease-epub:
-  stage: prerelease
-  image: alpine:latest
+  extends: .prerelease-base
+  variables:
+    PACKAGE: epub
   rules:
     - if:
         '$CI_COMMIT_TAG =~
         /^epub-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
-  script:
-    - apk add curl jq
-    - version=$(echo $CI_COMMIT_TAG | sed -r 's/epub-//')
-    - package=$(echo $CI_COMMIT_TAG | sed -r 's/-v\d+\.\d+\.\d+.*$//')
-    - 'from_sha=$(curl -H "PRIVATE-TOKEN: $CI_API_TOKEN"
-      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases" | jq -r "first(.[] |
-      select(.tag_name | startswith(\"$package\")) | .commit.short_id)")'
-    - to_sha=$CI_COMMIT_SHORT_SHA
-    - 'curl -H "PRIVATE-TOKEN: $CI_API_TOKEN"
-      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/changelog?version=${version}&from=${from_sha}&to=${to_sha}&trailer=Changelog-epub"
-      | jq -r .notes > release_notes.md'
-  artifacts:
-    paths:
-      - release_notes.md
 
 release-epub:
   stage: release
@@ -141,16 +117,17 @@ release-epub:
     ref: "$CI_COMMIT_SHA"
     assets:
       links:
-        - name: "NPM package for @storyteller-platform/epub"
-          url: "https://npmjs.com/package/@storyteller-platform/epub"
+        - name: "NPM package for @storyteller/epub"
+          url: "https://npmjs.com/package/@storyteller/epub"
 
-publish-audiobook:
-  image: node:24
+publish-audiobooks:
+  extends: .yarn_cache
+  image: node:26.12.1
   stage: publish
   rules:
     - if:
         '$CI_COMMIT_TAG =~
-        /^audiobook-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
+        /^audiobooks-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
   id_tokens:
     NPM_ID_TOKEN:
       aud: "npm:registry.npmjs.org"
@@ -170,41 +147,28 @@ publish-audiobook:
         *) TAG="latest" ;;
       esac
     - npm i -g corepack
-    - yarn workspaces focus @storyteller-platform/audiobook
-    - yarn workspace @storyteller-platform/audiobook npm publish --tag="$TAG"
+    - yarn workspaces focus @storyteller/audiobooks
+    - yarn workspace @storyteller/audiobooks npm publish --tag="$TAG"
 
-prerelease-audiobook:
-  stage: prerelease
-  image: alpine:latest
+prerelease-audiobooks:
+  extends: .prerelease-base
+  variables:
+    PACKAGE: audiobooks
   rules:
     - if:
         '$CI_COMMIT_TAG =~
-        /^audiobook-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
-  script:
-    - apk add curl jq
-    - version=$(echo $CI_COMMIT_TAG | sed -r 's/audiobook-//')
-    - package=$(echo $CI_COMMIT_TAG | sed -r 's/-v\d+\.\d+\.\d+.*$//')
-    - 'from_sha=$(curl -H "PRIVATE-TOKEN: $CI_API_TOKEN"
-      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases" | jq -r "first(.[] |
-      select(.tag_name | startswith(\"$package\")) | .commit.short_id)")'
-    - to_sha=$CI_COMMIT_SHORT_SHA
-    - 'curl -H "PRIVATE-TOKEN: $CI_API_TOKEN"
-      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/changelog?version=${version}&from=${from_sha}&to=${to_sha}&trailer=Changelog-audiobook"
-      | jq -r .notes > release_notes.md'
-  artifacts:
-    paths:
-      - release_notes.md
+        /^audiobooks-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
 
-release-audiobook:
+release-audiobooks:
   stage: release
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   needs:
-    - job: prerelease-audiobook
+    - job: prerelease-audiobooks
       artifacts: true
   rules:
     - if:
         '$CI_COMMIT_TAG =~
-        /^audiobook-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
+        /^audiobooks-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
   script:
     - echo "Creating release for $CI_COMMIT_TAG"
   release:
@@ -214,11 +178,12 @@ release-audiobook:
     ref: "$CI_COMMIT_SHA"
     assets:
       links:
-        - name: "NPM package for @storyteller-platform/audiobook"
-          url: "https://npmjs.com/package/@storyteller-platform/audiobook"
+        - name: "NPM package for @storyteller/audiobooks"
+          url: "https://npmjs.com/package/@storyteller/audiobooks"
 
 publish-path:
-  image: node:24
+  extends: .yarn_cache
+  image: node:26.12.1
   stage: publish
   rules:
     - if:
@@ -243,30 +208,17 @@ publish-path:
         *) TAG="latest" ;;
       esac
     - npm i -g corepack
-    - yarn workspaces focus @storyteller-platform/path
-    - yarn workspace @storyteller-platform/path npm publish --tag="$TAG"
+    - yarn workspaces focus @storyteller/path
+    - yarn workspace @storyteller/path npm publish --tag="$TAG"
 
 prerelease-path:
-  stage: prerelease
-  image: alpine:latest
+  extends: .prerelease-base
+  variables:
+    PACKAGE: path
   rules:
     - if:
         '$CI_COMMIT_TAG =~
         /^path-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
-  script:
-    - apk add curl jq
-    - version=$(echo $CI_COMMIT_TAG | sed -r 's/path-//')
-    - package=$(echo $CI_COMMIT_TAG | sed -r 's/-v\d+\.\d+\.\d+.*$//')
-    - 'from_sha=$(curl -H "PRIVATE-TOKEN: $CI_API_TOKEN"
-      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases" | jq -r "first(.[] |
-      select(.tag_name | startswith(\"$package\")) | .commit.short_id)")'
-    - to_sha=$CI_COMMIT_SHORT_SHA
-    - 'curl -H "PRIVATE-TOKEN: $CI_API_TOKEN"
-      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/changelog?version=${version}&from=${from_sha}&to=${to_sha}&trailer=Changelog-path"
-      | jq -r .notes > release_notes.md'
-  artifacts:
-    paths:
-      - release_notes.md
 
 release-path:
   stage: release
@@ -287,11 +239,256 @@ release-path:
     ref: "$CI_COMMIT_SHA"
     assets:
       links:
-        - name: "NPM package for @storyteller-platform/path"
-          url: "https://npmjs.com/package/@storyteller-platform/path"
+        - name: "NPM package for @storyteller/path"
+          url: "https://npmjs.com/package/@storyteller/path"
+
+publish-media-types:
+  extends: .yarn_cache
+  image: node:26.12.1
+  stage: publish
+  rules:
+    - if:
+        '$CI_COMMIT_TAG =~
+        /^media-types-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
+  id_tokens:
+    NPM_ID_TOKEN:
+      aud: "npm:registry.npmjs.org"
+  variables:
+    GITLAB: "true"
+  script:
+    - TAG=${CI_COMMIT_TAG##*-}
+    - |
+      case "$TAG" in
+        alpha*) TAG="alpha" ;;
+        beta*) TAG="beta" ;;
+        rc*) TAG="rc" ;;
+        experimental*) TAG="experimental" ;;
+        dev*) TAG="dev" ;;
+        test*) TAG="test" ;;
+        preview*) TAG="preview" ;;
+        *) TAG="latest" ;;
+      esac
+    - npm i -g corepack
+    - yarn workspaces focus @storyteller/media-types
+    - yarn workspace @storyteller/media-types npm publish --tag="$TAG"
+
+prerelease-media-types:
+  extends: .prerelease-base
+  variables:
+    PACKAGE: media-types
+  rules:
+    - if:
+        '$CI_COMMIT_TAG =~
+        /^media-types-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
+
+release-media-types:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: prerelease-media-types
+      artifacts: true
+  rules:
+    - if:
+        '$CI_COMMIT_TAG =~
+        /^media-types-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
+  script:
+    - echo "Creating release for $CI_COMMIT_TAG"
+  release:
+    name: "Release $CI_COMMIT_TAG"
+    description: release_notes.md
+    tag_name: "$CI_COMMIT_TAG"
+    ref: "$CI_COMMIT_SHA"
+    assets:
+      links:
+        - name: "NPM package for @storyteller/media-types"
+          url: "https://npmjs.com/package/@storyteller/media-types"
+
+publish-uri-fragment:
+  extends: .yarn_cache
+  image: node:26.12.1
+  stage: publish
+  rules:
+    - if:
+        '$CI_COMMIT_TAG =~
+        /^uri-fragment-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
+  id_tokens:
+    NPM_ID_TOKEN:
+      aud: "npm:registry.npmjs.org"
+  variables:
+    GITLAB: "true"
+  script:
+    - TAG=${CI_COMMIT_TAG##*-}
+    - |
+      case "$TAG" in
+        alpha*) TAG="alpha" ;;
+        beta*) TAG="beta" ;;
+        rc*) TAG="rc" ;;
+        experimental*) TAG="experimental" ;;
+        dev*) TAG="dev" ;;
+        test*) TAG="test" ;;
+        preview*) TAG="preview" ;;
+        *) TAG="latest" ;;
+      esac
+    - npm i -g corepack
+    - yarn workspaces focus @storyteller/uri-fragment
+    - yarn workspace @storyteller/uri-fragment npm publish --tag="$TAG"
+
+prerelease-uri-fragment:
+  extends: .prerelease-base
+  variables:
+    PACKAGE: uri-fragment
+  rules:
+    - if:
+        '$CI_COMMIT_TAG =~
+        /^uri-fragment-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
+
+release-uri-fragment:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: prerelease-uri-fragment
+      artifacts: true
+  rules:
+    - if:
+        '$CI_COMMIT_TAG =~
+        /^uri-fragment-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
+  script:
+    - echo "Creating release for $CI_COMMIT_TAG"
+  release:
+    name: "Release $CI_COMMIT_TAG"
+    description: release_notes.md
+    tag_name: "$CI_COMMIT_TAG"
+    ref: "$CI_COMMIT_SHA"
+    assets:
+      links:
+        - name: "NPM package for @storyteller/uri-fragment"
+          url: "https://npmjs.com/package/@storyteller/uri-fragment"
+
+publish-mapping:
+  extends: .yarn_cache
+  image: node:26.12.1
+  stage: publish
+  rules:
+    - if:
+        '$CI_COMMIT_TAG =~
+        /^mapping-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
+  id_tokens:
+    NPM_ID_TOKEN:
+      aud: "npm:registry.npmjs.org"
+  variables:
+    GITLAB: "true"
+  script:
+    - TAG=${CI_COMMIT_TAG##*-}
+    - |
+      case "$TAG" in
+        alpha*) TAG="alpha" ;;
+        beta*) TAG="beta" ;;
+        rc*) TAG="rc" ;;
+        experimental*) TAG="experimental" ;;
+        dev*) TAG="dev" ;;
+        test*) TAG="test" ;;
+        preview*) TAG="preview" ;;
+        *) TAG="latest" ;;
+      esac
+    - npm i -g corepack
+    - yarn workspaces focus @storyteller/mapping
+    - yarn workspace @storyteller/mapping npm publish --tag="$TAG"
+
+prerelease-mapping:
+  extends: .prerelease-base
+  variables:
+    PACKAGE: mapping
+  rules:
+    - if:
+        '$CI_COMMIT_TAG =~
+        /^mapping-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
+
+release-mapping:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: prerelease-mapping
+      artifacts: true
+  rules:
+    - if:
+        '$CI_COMMIT_TAG =~
+        /^mapping-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
+  script:
+    - echo "Creating release for $CI_COMMIT_TAG"
+  release:
+    name: "Release $CI_COMMIT_TAG"
+    description: release_notes.md
+    tag_name: "$CI_COMMIT_TAG"
+    ref: "$CI_COMMIT_SHA"
+    assets:
+      links:
+        - name: "NPM package for @storyteller/mapping"
+          url: "https://npmjs.com/package/@storyteller/mapping"
+
+publish-mlx-audio:
+  extends: .yarn_cache
+  image: node:26.12.1
+  stage: publish
+  rules:
+    - if:
+        '$CI_COMMIT_TAG =~
+        /^mlx-audio-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
+  id_tokens:
+    NPM_ID_TOKEN:
+      aud: "npm:registry.npmjs.org"
+  variables:
+    GITLAB: "true"
+  script:
+    - TAG=${CI_COMMIT_TAG##*-}
+    - |
+      case "$TAG" in
+        alpha*) TAG="alpha" ;;
+        beta*) TAG="beta" ;;
+        rc*) TAG="rc" ;;
+        experimental*) TAG="experimental" ;;
+        dev*) TAG="dev" ;;
+        test*) TAG="test" ;;
+        preview*) TAG="preview" ;;
+        *) TAG="latest" ;;
+      esac
+    - npm i -g corepack
+    - yarn workspaces focus @storyteller/mlx-audio
+    - yarn workspace @storyteller/mlx-audio npm publish --tag="$TAG"
+
+prerelease-mlx-audio:
+  extends: .prerelease-base
+  variables:
+    PACKAGE: mlx-audio
+  rules:
+    - if:
+        '$CI_COMMIT_TAG =~
+        /^mlx-audio-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
+
+release-mlx-audio:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: prerelease-mlx-audio
+      artifacts: true
+  rules:
+    - if:
+        '$CI_COMMIT_TAG =~
+        /^mlx-audio-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
+  script:
+    - echo "Creating release for $CI_COMMIT_TAG"
+  release:
+    name: "Release $CI_COMMIT_TAG"
+    description: release_notes.md
+    tag_name: "$CI_COMMIT_TAG"
+    ref: "$CI_COMMIT_SHA"
+    assets:
+      links:
+        - name: "NPM package for @storyteller/mlx-audio"
+          url: "https://npmjs.com/package/@storyteller/mlx-audio"
 
 publish-ghost-story:
-  image: node:24
+  extends: .yarn_cache
+  image: node:26.12.1
   stage: publish
   rules:
     - if:
@@ -316,30 +513,17 @@ publish-ghost-story:
         *) TAG="latest" ;;
       esac
     - npm i -g corepack
-    - yarn workspaces focus @storyteller-platform/ghost-story
-    - yarn workspace @storyteller-platform/ghost-story npm publish --tag="$TAG"
+    - yarn workspaces focus @storyteller/ghost-story
+    - yarn workspace @storyteller/ghost-story npm publish --tag="$TAG"
 
 prerelease-ghost-story:
-  stage: prerelease
-  image: alpine:latest
+  extends: .prerelease-base
+  variables:
+    PACKAGE: ghost-story
   rules:
     - if:
         '$CI_COMMIT_TAG =~
         /^ghost-story-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
-  script:
-    - apk add curl jq
-    - version=$(echo $CI_COMMIT_TAG | sed -r 's/ghost-story-//')
-    - package=$(echo $CI_COMMIT_TAG | sed -r 's/-v\d+\.\d+\.\d+.*$//')
-    - 'from_sha=$(curl -H "PRIVATE-TOKEN: $CI_API_TOKEN"
-      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases" | jq -r "first(.[] |
-      select(.tag_name | startswith(\"$package\")) | .commit.short_id)")'
-    - to_sha=$CI_COMMIT_SHORT_SHA
-    - 'curl -H "PRIVATE-TOKEN: $CI_API_TOKEN"
-      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/changelog?version=${version}&from=${from_sha}&to=${to_sha}&trailer=Changelog-ghost-story"
-      | jq -r .notes > release_notes.md'
-  artifacts:
-    paths:
-      - release_notes.md
 
 release-ghost-story:
   stage: release
@@ -360,10 +544,11 @@ release-ghost-story:
     ref: "$CI_COMMIT_SHA"
     assets:
       links:
-        - name: "NPM package for @storyteller-platform/ghost-story"
-          url: "https://npmjs.com/package/@storyteller-platform/ghost-story"
+        - name: "NPM package for @storyteller/ghost-story"
+          url: "https://npmjs.com/package/@storyteller/ghost-story"
 
 .publish-align-sea-base:
+  extends: .yarn_cache
   stage: publish
   rules:
     - if:
@@ -371,8 +556,8 @@ release-ghost-story:
         /^align-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
   script:
     - npm i -g --force corepack
-    - yarn workspaces focus @storyteller-platform/align
-    - yarn workspace @storyteller-platform/align compile
+    - yarn workspaces focus @storyteller/align
+    - yarn workspace @storyteller/align compile
     - |
       PACKAGE_ID=$(curl -s --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
         "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages?package_name=stalign&package_version=${CI_COMMIT_TAG}" \
@@ -393,6 +578,22 @@ release-ghost-story:
       libraries/align/entitlements.plist ./libraries/align/stalign; fi
     - if [ -n "${CODESIGNING}" ]; then codesign --verify --verbose
       ./libraries/align/stalign; fi
+    - |
+      if [ -n "${CODESIGNING}" ]; then
+        echo "Notarizing executable..."
+        rm -f stalign-notarize.zip notarization.json
+        ditto -c -k ./libraries/align/stalign stalign-notarize.zip
+        xcrun notarytool submit stalign-notarize.zip \
+          --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" \
+          --wait --timeout 30m --output-format json > notarization.json
+        cat notarization.json
+        if [ "$(jq -r .status notarization.json)" != "Accepted" ]; then
+          xcrun notarytool log "$(jq -r .id notarization.json)" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+          exit 1
+        fi
+        rm -f stalign-notarize.zip notarization.json
+      fi
     - if [ -n "${CODESIGNING}" ]; then spctl --assess --type execute --verbose
       ./libraries/align/stalign; fi
 
@@ -439,7 +640,7 @@ publish-align-sea-darwin-arm64:
     - rm -f certificate.p12
 
 publish-align-sea-linux-x64:
-  image: node:25
+  image: node:26.12.1
   extends: .publish-align-sea-base
   variables:
     VARIANT: "linux-x64"
@@ -447,8 +648,18 @@ publish-align-sea-linux-x64:
     - apt update
     - DEBIAN_FRONTEND=noninteractive apt install -y jq
 
+publish-align-sea-linux-x64-cuda:
+  image: node:26.12.1
+  extends: .publish-align-sea-base
+  variables:
+    VARIANT: "linux-x64-cuda"
+    STALIGN_CUDA: "true"
+  before_script:
+    - apt update
+    - DEBIAN_FRONTEND=noninteractive apt install -y jq
+
 publish-align-sea-linux-arm64:
-  image: node:25
+  image: node:26.12.1
   extends: .publish-align-sea-base
   tags: [saas-linux-small-arm64]
   variables:
@@ -458,6 +669,7 @@ publish-align-sea-linux-arm64:
     - DEBIAN_FRONTEND=noninteractive apt install -y jq
 
 publish-align-sea-windows-x64:
+  extends: .yarn_cache
   stage: publish
   rules:
     - if:
@@ -494,8 +706,8 @@ publish-align-sea-windows-x64:
       yarn --version
   script:
     - npm i -g corepack
-    - yarn workspaces focus @storyteller-platform/align
-    - yarn workspace @storyteller-platform/align compile
+    - yarn workspaces focus @storyteller/align
+    - yarn workspace @storyteller/align compile
     - |
       # Look up existing package
       $packagesResponse = Invoke-RestMethod `
@@ -534,7 +746,8 @@ publish-align-sea-windows-x64:
         -ContentType "application/octet-stream"
 
 publish-align:
-  image: node:25
+  extends: .yarn_cache
+  image: node:26.12.1
   stage: publish
   rules:
     - if:
@@ -559,30 +772,17 @@ publish-align:
         *) TAG="latest" ;;
       esac
     - npm i -g --force corepack
-    - yarn workspaces focus @storyteller-platform/align
-    - yarn workspace @storyteller-platform/align npm publish --tag="$TAG"
+    - yarn workspaces focus @storyteller/align
+    - yarn workspace @storyteller/align npm publish --tag="$TAG"
 
 prerelease-align:
-  stage: prerelease
-  image: alpine:latest
+  extends: .prerelease-base
+  variables:
+    PACKAGE: align
   rules:
     - if:
         '$CI_COMMIT_TAG =~
         /^align-v?\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|experimental|dev|test|preview)(?:\.\d+)?)?$/'
-  script:
-    - apk add curl jq
-    - version=$(echo $CI_COMMIT_TAG | sed -r 's/align-//')
-    - package=$(echo $CI_COMMIT_TAG | sed -r 's/-v\d+\.\d+\.\d+.*$//')
-    - 'from_sha=$(curl -H "PRIVATE-TOKEN: $CI_API_TOKEN"
-      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases" | jq -r "first(.[] |
-      select(.tag_name | startswith(\"$package\")) | .commit.short_id)")'
-    - to_sha=$CI_COMMIT_SHORT_SHA
-    - 'curl -H "PRIVATE-TOKEN: $CI_API_TOKEN"
-      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/changelog?version=${version}&from=${from_sha}&to=${to_sha}&trailer=Changelog-align"
-      | jq -r .notes > release_notes.md'
-  artifacts:
-    paths:
-      - release_notes.md
 
 release-align:
   stage: release
@@ -603,8 +803,8 @@ release-align:
     ref: "$CI_COMMIT_SHA"
     assets:
       links:
-        - name: "NPM package for @storyteller-platform/align"
-          url: "https://npmjs.com/package/@storyteller-platform/align"
+        - name: "NPM package for @storyteller/align"
+          url: "https://npmjs.com/package/@storyteller/align"
 
 .okmain-tag-rules:
   rules:
@@ -614,8 +814,8 @@ release-align:
 
 .okmain-build-linux-base:
   stage: build-base
-  image: node:24
-  extends: .okmain-tag-rules
+  image: node:26.12.1
+  extends: [.okmain-tag-rules, .yarn_cache]
   before_script:
     - apt update
     - DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends
@@ -628,11 +828,11 @@ release-align:
     - rm rustup.sh
     - export PATH="$HOME/.cargo/bin:$PATH"
     - rustc --version
-    - yarn workspaces focus @storyteller-platform/okmain
+    - yarn workspaces focus @storyteller/okmain
   script:
     - export PATH="$HOME/.cargo/bin:$PATH"
     - rustup target add "$TARGET"
-    - yarn workspace @storyteller-platform/okmain napi build --target "$TARGET"
+    - yarn workspace @storyteller/okmain napi build --target "$TARGET"
       --platform --release
   artifacts:
     paths:
@@ -640,8 +840,8 @@ release-align:
 
 .okmain-build-linux-musl-base:
   stage: build-base
-  image: node:24-alpine
-  extends: .okmain-tag-rules
+  image: node:26.12.1-alpine
+  extends: [.okmain-tag-rules, .yarn_cache]
   before_script:
     - apk add --no-cache build-base curl pkgconf
     - npm i -g corepack
@@ -652,12 +852,12 @@ release-align:
     - rm rustup.sh
     - export PATH="$HOME/.cargo/bin:$PATH"
     - rustc --version
-    - yarn workspaces focus @storyteller-platform/okmain
+    - yarn workspaces focus @storyteller/okmain
   script:
     - export PATH="$HOME/.cargo/bin:$PATH"
     - rustup target add "$TARGET"
     - export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=gcc
-    - yarn workspace @storyteller-platform/okmain napi build --target "$TARGET"
+    - yarn workspace @storyteller/okmain napi build --target "$TARGET"
       --platform --release
   artifacts:
     paths:
@@ -665,7 +865,7 @@ release-align:
 
 .okmain-build-macos-base:
   stage: build-base
-  extends: .okmain-tag-rules
+  extends: [.okmain-tag-rules, .yarn_cache]
   tags: [saas-macos-medium-m1]
   before_script:
     - brew install curl
@@ -682,11 +882,11 @@ release-align:
     - rm rustup.sh
     - source "$HOME/.cargo/env"
     - rustc --version
-    - yarn workspaces focus @storyteller-platform/okmain
+    - yarn workspaces focus @storyteller/okmain
   script:
     - source "$HOME/.cargo/env"
     - rustup target add "$TARGET"
-    - yarn workspace @storyteller-platform/okmain napi build --target "$TARGET"
+    - yarn workspace @storyteller/okmain napi build --target "$TARGET"
       --platform --release
   artifacts:
     paths:
@@ -694,7 +894,7 @@ release-align:
 
 .okmain-build-windows-base:
   stage: build-base
-  extends: .okmain-tag-rules
+  extends: [.okmain-tag-rules, .yarn_cache]
   tags: [saas-windows-medium-amd64]
   before_script:
     - |
@@ -718,7 +918,7 @@ release-align:
       $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
       rustup default stable-msvc
       rustc --version
-    - yarn workspaces focus @storyteller-platform/okmain
+    - yarn workspaces focus @storyteller/okmain
   script:
     - |
       $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
@@ -740,7 +940,7 @@ release-align:
           }
         }
       rustup target add $env:TARGET
-      yarn workspace @storyteller-platform/okmain napi build --target $env:TARGET --platform --release
+      yarn workspace @storyteller/okmain napi build --target $env:TARGET --platform --release
   artifacts:
     paths:
       - libraries/okmain/okmain.*.node
@@ -793,9 +993,9 @@ build-okmain-win32-x64-msvc:
 #     TARGET: aarch64-pc-windows-msvc
 
 publish-okmain:
-  image: node:24
+  image: node:26.12.1
   stage: publish
-  extends: .okmain-tag-rules
+  extends: [.okmain-tag-rules, .yarn_cache]
   # all artifacts should be downloaded to the woking dir
   needs:
     - job: build-okmain-linux-x64-gnu
@@ -842,35 +1042,23 @@ publish-okmain:
     - sh rustup.sh -y --profile minimal --default-toolchain stable
     - rm rustup.sh
     - export PATH="$HOME/.cargo/bin:$PATH"
-    - yarn workspaces focus @storyteller-platform/okmain
+    - yarn workspaces focus @storyteller/okmain
     - ls -lah libraries/okmain/*.node
     - mkdir -p libraries/okmain/artifacts
     - mv libraries/okmain/*.node libraries/okmain/artifacts/
-    - yarn workspace @storyteller-platform/okmain napi create-npm-dirs # creates the npm dirs
-    - yarn workspace @storyteller-platform/okmain napi artifacts # moves all the artifacts to the correct npm dir
+    - yarn workspace @storyteller/okmain napi create-npm-dirs # creates the npm dirs
+    - yarn workspace @storyteller/okmain napi artifacts # moves all the artifacts to the correct npm dir
     - ls -latR libraries/okmain/npm
     - export npm_config_tag="$TAG" # necessary because napi prepublish script reads the tag from this env var as the republish the subpackages w/ npm
-    - yarn workspace @storyteller-platform/okmain npm publish --tag="$TAG"
-      --access public
+    - yarn workspace @storyteller/okmain npm publish --tag="$TAG" --access
+      public
 
 prerelease-okmain:
-  stage: prerelease
-  image: alpine:latest
-  extends: .okmain-tag-rules
-  script:
-    - apk add curl jq
-    - version=$(echo $CI_COMMIT_TAG | sed -r 's/okmain-//')
-    - package=$(echo $CI_COMMIT_TAG | sed -r 's/-v\d+\.\d+\.\d+.*$//')
-    - 'from_sha=$(curl -H "PRIVATE-TOKEN: $CI_API_TOKEN"
-      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases" | jq -r "first(.[] |
-      select(.tag_name | startswith(\"$package\")) | .commit.short_id)")'
-    - to_sha=$CI_COMMIT_SHORT_SHA
-    - 'curl -H "PRIVATE-TOKEN: $CI_API_TOKEN"
-      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/changelog?version=${version}&from=${from_sha}&to=${to_sha}&trailer=Changelog-okmain"
-      | jq -r .notes > release_notes.md'
-  artifacts:
-    paths:
-      - release_notes.md
+  extends:
+    - .prerelease-base
+    - .okmain-tag-rules
+  variables:
+    PACKAGE: okmain
 
 release-okmain:
   stage: release
@@ -888,5 +1076,5 @@ release-okmain:
     ref: "$CI_COMMIT_SHA"
     assets:
       links:
-        - name: "NPM package for @storyteller-platform/okmain"
-          url: "https://npmjs.com/package/@storyteller-platform/okmain"
+        - name: "NPM package for @storyteller/okmain"
+          url: "https://npmjs.com/package/@storyteller/okmain"

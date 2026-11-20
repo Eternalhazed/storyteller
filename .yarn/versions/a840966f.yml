@@ -1,0 +1,4 @@
+declined:
+  - "@storyteller/web"
+  - "@storyteller/align"
+  - "@storyteller/epub"

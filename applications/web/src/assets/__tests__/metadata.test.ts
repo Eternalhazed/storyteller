@@ -1,5 +1,6 @@
 import assert from "node:assert"
-import { describe, it } from "node:test"
+
+import { describe, it } from "vitest"
 
 import { applyFieldOverrides } from "@/assets/metadata"
 import { type BookWithRelations } from "@/database/books"
@@ -14,6 +15,7 @@ type TagRow = BookWithRelations["tags"][number]
 
 function creator(name: string, fileAs?: string): CreatorRow {
   return {
+    // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
     uuid: "00000000-0000-0000-0000-000000000000" as CreatorRow["uuid"],
     id: 0,
     name,
@@ -25,6 +27,7 @@ function creator(name: string, fileAs?: string): CreatorRow {
 
 function seriesRow(name: string, position?: number): SeriesRow {
   return {
+    // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
     uuid: "00000000-0000-0000-0000-000000000000" as SeriesRow["uuid"],
     name,
     featured: false,
@@ -36,6 +39,7 @@ function seriesRow(name: string, position?: number): SeriesRow {
 
 function tagRow(name: string): TagRow {
   return {
+    // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
     uuid: "00000000-0000-0000-0000-000000000000" as TagRow["uuid"],
     name,
     icon: null,
@@ -70,9 +74,9 @@ function makeOverrides(
   return { ...defaultMetadataFieldOverrides("merge"), ...patch }
 }
 
-void describe("applyFieldOverrides", () => {
-  void describe("scalar fields", () => {
-    void it("merge keeps existing title when storyteller already has one", () => {
+describe("applyFieldOverrides", () => {
+  describe("scalar fields", () => {
+    it("merge keeps existing title when storyteller already has one", () => {
       const result = applyFieldOverrides(
         makeOverrides(),
         makeBook({ title: "Stored Title" }),
@@ -82,7 +86,7 @@ void describe("applyFieldOverrides", () => {
       assert.strictEqual(result.metadataUpdate, null)
     })
 
-    void it("merge fills empty subtitle from extracted value", () => {
+    it("merge fills empty subtitle from extracted value", () => {
       const result = applyFieldOverrides(
         makeOverrides(),
         makeBook({ title: "x", subtitle: null }),
@@ -92,7 +96,7 @@ void describe("applyFieldOverrides", () => {
       assert.deepStrictEqual(result.metadataUpdate, { subtitle: "From file" })
     })
 
-    void it("always overrides scalar value even when storyteller has one", () => {
+    it("always overrides scalar value even when storyteller has one", () => {
       const result = applyFieldOverrides(
         makeOverrides({ title: "always" }),
         makeBook({ title: "Stored Title" }),
@@ -104,7 +108,7 @@ void describe("applyFieldOverrides", () => {
       })
     })
 
-    void it("skip ignores extracted scalar even when storyteller is empty", () => {
+    it("skip ignores extracted scalar even when storyteller is empty", () => {
       const result = applyFieldOverrides(
         makeOverrides({ description: "skip" }),
         makeBook({ description: null }),
@@ -115,8 +119,8 @@ void describe("applyFieldOverrides", () => {
     })
   })
 
-  void describe("list fields with merge", () => {
-    void it("unions current tags with extracted tags", () => {
+  describe("list fields with merge", () => {
+    it("unions current tags with extracted tags", () => {
       const result = applyFieldOverrides(
         makeOverrides(),
         makeBook({ tags: [tagRow("lame")] }),
@@ -129,7 +133,7 @@ void describe("applyFieldOverrides", () => {
       ])
     })
 
-    void it("dedupes when extracted tag matches a current tag", () => {
+    it("dedupes when extracted tag matches a current tag", () => {
       const result = applyFieldOverrides(
         makeOverrides(),
         makeBook({ tags: [tagRow("interesting")] }),
@@ -142,7 +146,7 @@ void describe("applyFieldOverrides", () => {
       ])
     })
 
-    void it("treats a renamed tag as a new entry, keeping the original", () => {
+    it("treats a renamed tag as a new entry, keeping the original", () => {
       const result = applyFieldOverrides(
         makeOverrides(),
         makeBook({ tags: [tagRow("intresting")] }),
@@ -155,12 +159,12 @@ void describe("applyFieldOverrides", () => {
       ])
     })
 
-    void it("emits no tag patch when there is nothing on either side", () => {
+    it("emits no tag patch when there is nothing on either side", () => {
       const result = applyFieldOverrides(makeOverrides(), makeBook(), null, {})
       assert.strictEqual(result.relationUpdate.tags, undefined)
     })
 
-    void it("unions authors by name", () => {
+    it("unions authors by name", () => {
       const result = applyFieldOverrides(
         makeOverrides(),
         makeBook({ authors: [creator("Alice")] }),
@@ -176,7 +180,7 @@ void describe("applyFieldOverrides", () => {
       assert.deepStrictEqual(names, ["Alice", "Bob"])
     })
 
-    void it("unions series by name", () => {
+    it("unions series by name", () => {
       const result = applyFieldOverrides(
         makeOverrides(),
         makeBook({ series: [seriesRow("Foundation", 1)] }),
@@ -192,14 +196,14 @@ void describe("applyFieldOverrides", () => {
       assert.deepStrictEqual(names, ["Foundation", "Robots"])
     })
 
-    void it("does not keep authors when both current and extracted are empty", () => {
+    it("does not keep authors when both current and extracted are empty", () => {
       const result = applyFieldOverrides(makeOverrides(), makeBook(), null, {})
       assert.strictEqual(result.relationUpdate.creators, undefined)
     })
   })
 
-  void describe("list fields with always", () => {
-    void it("replaces tags with extracted set", () => {
+  describe("list fields with always", () => {
+    it("replaces tags with extracted set", () => {
       const result = applyFieldOverrides(
         makeOverrides({ tags: "always" }),
         makeBook({ tags: [tagRow("lame")] }),
@@ -210,8 +214,8 @@ void describe("applyFieldOverrides", () => {
     })
   })
 
-  void describe("list fields with skip", () => {
-    void it("emits no tag patch even when extracted has entries", () => {
+  describe("list fields with skip", () => {
+    it("emits no tag patch even when extracted has entries", () => {
       const result = applyFieldOverrides(
         makeOverrides({ tags: "skip" }),
         makeBook({ tags: [tagRow("lame")] }),
@@ -221,7 +225,7 @@ void describe("applyFieldOverrides", () => {
       assert.strictEqual(result.relationUpdate.tags, undefined)
     })
 
-    void it("uses existing creators when only authors mode is skip", () => {
+    it("uses existing creators when only authors mode is skip", () => {
       const result = applyFieldOverrides(
         makeOverrides({ authors: "skip" }),
         makeBook({

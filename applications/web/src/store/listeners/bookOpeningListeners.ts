@@ -6,6 +6,9 @@ import {
   Publication,
 } from "@readium/shared"
 
+import { MediaType } from "@storyteller/media-types"
+
+import type { BookWithRelations } from "@/database/books"
 import {
   type TocItem,
   getApiUrlFromResourceHref,
@@ -14,15 +17,16 @@ import {
   getTocItemsWithLocator,
   translateLocator,
   traverseToc,
-} from "@/components/reader/BookService"
-import type { BookWithRelations } from "@/database/books"
-import { AudioPlayer, type AudioTrack } from "@/services/AudioPlayerService"
+} from "@/reader/BookService"
+import { type AudioTrack, readerPlayer } from "@/services/AudioPlayerService"
 import { syncPosition } from "@/store/actions"
-import { api, getCoverUrl } from "@/store/api"
+import { api } from "@/store/api"
 import {
   type AudioTextMap,
   type TextAudioMap,
   clearRegistry,
+  getAudioToTextMap,
+  getTextToAudioMap,
   registerAudioToTextMap,
   registerGuide,
   registerPositions,
@@ -39,9 +43,11 @@ import {
   readingSessionSlice,
   selectReadingMode,
 } from "@/store/slices/readingSessionSlice"
+import { getCoverUrl } from "@/store/urls"
 import { createCacheBustingFetch } from "@/utils/cacheBustingFetch"
 import type { UUID } from "@/uuid"
 
+import { findNearestGuide, resolveHrefLocator } from "./helpers"
 import { startAppListening } from "./listenerMiddleware"
 
 async function registerMaps(
@@ -71,7 +77,7 @@ async function registerMaps(
             guide.children?.map((child) => {
               return {
                 ...child.clip,
-                type: item.type ?? "application/octet-stream",
+                type: item.type ?? MediaType.OCTET_STREAM.mime,
               }
             }),
           )
@@ -200,7 +206,7 @@ async function registerMaps(
 
     const type =
       textToAudioMap.get(segments[0]?.textHref ?? "")?.clips.get(audioHref)
-        ?.type ?? "application/octet-stream"
+        ?.type ?? MediaType.OCTET_STREAM.mime
 
     audioToTextMap.set(audioHref, {
       duration,
@@ -255,6 +261,7 @@ async function loadPublication(
       )
     }
     const response = await fetched.readAsJSON()
+    // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
     const manifest = Manifest.deserialize(response as string)
     if (!manifest) {
       throw new PublicationLoadError(
@@ -326,9 +333,11 @@ function generateTracksForAudiobook(
       ).toString(),
       album: bookTitle,
       duration: item.duration ?? 0,
-      type: item.type ?? "application/octet-stream",
-      start: item.properties?.otherProperties["start"] ?? 0,
-      end: item.properties?.otherProperties["end"] ?? item.duration ?? 0,
+      type: item.type ?? MediaType.OCTET_STREAM.mime,
+      start: Number(item.properties?.otherProperties["start"] ?? 0),
+      end: Number(
+        item.properties?.otherProperties["end"] ?? item.duration ?? 0,
+      ),
     } satisfies AudioTrack
   })
 }
@@ -340,7 +349,15 @@ async function generateTracksForReadaloud(
   authors: string,
   updatedAt: Date,
 ): Promise<AudioTrack[]> {
-  const { textToAudioMap, audioToTextMap } = await registerMaps(publication)
+  const registeredTextToAudioMap = getTextToAudioMap()
+  const registeredAudioToTextMap = getAudioToTextMap()
+  const { textToAudioMap, audioToTextMap } =
+    registeredTextToAudioMap && registeredAudioToTextMap
+      ? {
+          textToAudioMap: registeredTextToAudioMap,
+          audioToTextMap: registeredAudioToTextMap,
+        }
+      : await registerMaps(publication)
 
   const audioHrefToChapterTitle = new Map<
     string,
@@ -407,7 +424,7 @@ async function generateTracksForReadaloud(
         album: bookTitle,
         artwork: new URL(
           getCoverUrl(bookUuid, {
-            audio: true,
+            audio: false,
             height: 64,
             width: 64,
             updatedAt: updatedAt,
@@ -455,6 +472,26 @@ startAppListening({
       registerPublication(publication)
       registerPositions(positions)
       registerTocItems(tocItems)
+
+      if (action.payload.startHref && mode === "readaloud") {
+        await registerMaps(publication)
+      }
+      const startLocator = action.payload.startHref
+        ? await resolveHrefLocator(action.payload.startHref, mode, positions)
+        : null
+      listenerApi.dispatch(
+        readingSessionSlice.actions.setStartLocator(startLocator),
+      )
+      if (startLocator) {
+        listenerApi.dispatch(
+          syncPosition({
+            locator: startLocator,
+            timestamp: Date.now(),
+            bookUuid: book.uuid,
+          }),
+        )
+      }
+
       listenerApi.dispatch(
         readingSessionSlice.actions.setPublicationLoading(false),
       )
@@ -484,13 +521,15 @@ startAppListening({
           return
         }
 
-        const savedPosition = await listenerApi
-          .dispatch(api.endpoints.getPosition.initiate({ uuid: book.uuid }))
-          .unwrap()
-          .catch((error: unknown) => {
-            console.error("Failed to get saved position:", error)
-            return null
-          })
+        const savedPosition = startLocator
+          ? null
+          : await listenerApi
+              .dispatch(api.endpoints.getPosition.initiate({ uuid: book.uuid }))
+              .unwrap()
+              .catch((error: unknown) => {
+                console.error("Failed to get saved position:", error)
+                return null
+              })
 
         const playbackSpeed = selectPreference(
           listenerApi.getState(),
@@ -499,9 +538,9 @@ startAppListening({
         const volume = selectPreference(listenerApi.getState(), "volume")
 
         if (mode === "audiobook") {
-          const savedLocator = savedPosition
-            ? Locator.deserialize(savedPosition.locator)
-            : null
+          const savedLocator =
+            startLocator ??
+            (savedPosition ? Locator.deserialize(savedPosition.locator) : null)
           if (!savedLocator) {
             await initializeAudioPlayer({
               tracks,
@@ -540,9 +579,11 @@ startAppListening({
         }
         // readaloud or epub
         else {
-          const locator = savedPosition?.locator
-            ? Locator.deserialize(savedPosition.locator) || null
-            : null
+          const locator =
+            startLocator ??
+            (savedPosition?.locator
+              ? Locator.deserialize(savedPosition.locator) || null
+              : null)
 
           const translatedLocator = locator
             ? translateLocator(locator, mode)
@@ -569,7 +610,8 @@ startAppListening({
             return
           }
 
-          const guide = await publication.guideForLink(link)
+          const nearest = await findNearestGuide(publication, link)
+          const guide = nearest?.guide ?? null
 
           listenerApi.dispatch(
             syncPosition({
@@ -594,7 +636,12 @@ startAppListening({
 
           registerGuide(guide)
 
-          const clip = getClip(guide, correctLocator)
+          const clip =
+            nearest?.link.href === link.href
+              ? getClip(guide, correctLocator)
+              : (guide.guided
+                  ?.flatMap((item) => item.children ?? [])
+                  .find((child) => child.clip?.audioResource)?.clip ?? null)
 
           if (!clip) {
             console.error("No clip found, starting at beginning")
@@ -627,7 +674,7 @@ startAppListening({
           await initializeAudioPlayer({
             tracks,
             startTrackIndex: clipIndex,
-            startPosition: clip.start,
+            startPosition: clip.start ?? 0,
             playbackSpeed,
             volume,
           })
@@ -693,7 +740,7 @@ async function initializeAudioPlayer({
   playbackSpeed: number
   volume: number
 }) {
-  await AudioPlayer.replacePlaylist(tracks, startTrackIndex, startPosition)
-  AudioPlayer.setPlaybackRate(playbackSpeed)
-  AudioPlayer.setVolume(volume)
+  await readerPlayer().replacePlaylist(tracks, startTrackIndex, startPosition)
+  readerPlayer().setPlaybackRate(playbackSpeed)
+  readerPlayer().setVolume(volume)
 }

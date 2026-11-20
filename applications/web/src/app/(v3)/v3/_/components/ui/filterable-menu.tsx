@@ -23,10 +23,10 @@ import { cn } from "@v3/_/lib/utils"
 import * as icon from "@/icons"
 import { ChevronRight } from "@/icons"
 
-const ROW_HEIGHT = 32
+const ROW_HEIGHT = 28
 
 const listClassName =
-  "scroll-py-1 max-h-64 scroll-y overscroll-contain px-1 pb-1"
+  "scroll-py-1 max-h-64 scroll-y overscroll-contain px-0 pb-1"
 
 function LoadingRows() {
   return (
@@ -47,18 +47,18 @@ function LoadingRows() {
 // lets not be too cutesy, looks nicer if just instant
 const menuPopupClassName =
   // "data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2
-  "ring-foreground/10 bg-popover text-popover-foreground z-50 max-h-(--available-height) min-w-32 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-md p-1 shadow-md ring-1 duration-100 outline-none"
+  "ring-foreground/10 bg-popover text-popover-foreground z-50 max-h-(--available-height) min-w-32 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-md p-0 shadow-md ring-1 duration-100 outline-none [&>[role=menuitem]:first-child]:pt-1 [&>[role=menuitem]:last-child]:pb-1"
 
 const menuItemClassName =
-  "data-highlighted:bg-accent data-highlighted:text-accent-foreground data-[variant=destructive]:text-destructive data-[variant=destructive]:data-highlighted:bg-destructive/10 dark:data-[variant=destructive]:data-highlighted:bg-destructive/20 data-[variant=destructive]:data-highlighted:text-destructive data-[variant=destructive]:*:[svg]:text-destructive relative flex min-h-7 cursor-default items-center gap-2 rounded-md px-2 py-1 text-xs/relaxed outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5"
+  "data-highlighted:bg-accent data-highlighted:text-accent-foreground data-[variant=destructive]:text-destructive data-[variant=destructive]:data-highlighted:bg-destructive/10 dark:data-[variant=destructive]:data-highlighted:bg-destructive/20 data-[variant=destructive]:data-highlighted:text-destructive data-[variant=destructive]:*:[svg]:text-destructive relative flex min-h-7 cursor-default items-center gap-2 rounded-xs px-2 py-.5 text-xs/relaxed outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5 [&_svg:not([class*='ml-']):not(:first-child)]:ml-auto [&_svg:not([class*='stroke-'])]:stroke-[1.5]"
 
 const menuSubTriggerClassName =
-  "data-highlighted:bg-accent data-highlighted:text-accent-foreground data-open:bg-accent data-open:text-accent-foreground flex min-h-7 cursor-default items-center gap-2 rounded-md px-2 py-1 text-xs outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5"
+  "data-highlighted:bg-accent data-highlighted:text-accent-foreground data-open:bg-accent data-open:text-accent-foreground flex min-h-7 cursor-default items-center gap-2 rounded-xs px-2 py-.5 text-xs outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5"
 
 const menuLabelClassName = "text-muted-foreground px-2 py-1.5 text-xs"
 
 const searchBoxClassName =
-  "placeholder:text-muted-foreground h-7 w-full bg-transparent px-2 text-sm outline-none md:h-6 md:text-xs"
+  "placeholder:text-muted-foreground h-7 w-full bg-transparent px-1 text-sm outline-none md:h-6 md:text-xs"
 
 function itemMatches(query: string, text: string): boolean {
   const q = query.trim().toLowerCase()
@@ -169,7 +169,9 @@ function useFilterableMenuItem(
   const { register, unregister } = ctx
   useEffect(() => {
     const element = ref.current
-    if (!matches || !element) return
+    if (!matches || !element) {
+      return
+    }
     register(id, { element, metaRef })
     return () => {
       unregister(id)
@@ -242,7 +244,9 @@ export function useMenuSurface({
   }, [])
 
   useEffect(() => {
-    if (!searchable) return
+    if (!searchable) {
+      return
+    }
     userNavigatedRef.current = false
     setActiveId(orderedIds()[0] ?? null)
   }, [query, searchable, orderedIds])
@@ -251,11 +255,13 @@ export function useMenuSurface({
   // the first item is
   // follow it until the user picks a highlight themselves.
   useEffect(() => {
-    if (!searchable) return
+    if (!searchable) {
+      return
+    }
     setActiveId((prev) =>
       userNavigatedRef.current && prev !== null && registryRef.current.has(prev)
         ? prev
-        : orderedIds()[0] ?? null,
+        : (orderedIds()[0] ?? null),
     )
   }, [registryVersion, searchable, orderedIds])
 
@@ -294,8 +300,9 @@ export function useMenuSurface({
       event.key === "End"
     ) {
       userNavigatedRef.current = true
+      event.preventDefault()
+      event.stopPropagation()
       if (nav) {
-        event.preventDefault()
         nav.move(
           event.key === "Home"
             ? "home"
@@ -308,26 +315,34 @@ export function useMenuSurface({
         return
       }
       const ids = orderedIds()
-      if (ids.length === 0) return
-      event.preventDefault()
+      if (ids.length === 0) {
+        return
+      }
+
       const current = activeId ? ids.indexOf(activeId) : -1
       let next: number
-      if (event.key === "Home") next = 0
-      else if (event.key === "End") next = ids.length - 1
-      else if (event.key === "ArrowDown")
+      if (event.key === "Home") {
+        next = 0
+      } else if (event.key === "End") {
+        next = ids.length - 1
+      } else if (event.key === "ArrowDown") {
         next = current < ids.length - 1 ? current + 1 : 0
-      else next = current > 0 ? current - 1 : ids.length - 1
+      } else {
+        next = current > 0 ? current - 1 : ids.length - 1
+      }
       const nextId = ids[next] ?? null
       setActiveId(nextId)
       // keyboard should scroll, but hovering should not
-      if (nextId)
+      if (nextId) {
         registryRef.current
           .get(nextId)
           ?.element.scrollIntoView({ block: "nearest" })
+      }
       return
     }
 
     const rtl =
+      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
       getComputedStyle(event.currentTarget as HTMLElement).direction === "rtl"
     const inwardKey = rtl ? "ArrowLeft" : "ArrowRight"
     const outwardKey = rtl ? "ArrowRight" : "ArrowLeft"
@@ -335,9 +350,14 @@ export function useMenuSurface({
     const inInput = input !== null && event.target === input
 
     if (event.key === outwardKey && onExit) {
-      if (inInput && !(input.selectionStart === 0 && input.selectionEnd === 0))
+      if (
+        inInput &&
+        !(input.selectionStart === 0 && input.selectionEnd === 0)
+      ) {
         return
+      }
       event.preventDefault()
+      event.stopPropagation()
       onExit()
       return
     }
@@ -350,32 +370,48 @@ export function useMenuSurface({
       }
       if (nav) {
         event.preventDefault()
+        event.stopPropagation()
         nav.activate(modifiers)
         return
       }
-      if (!activeId) return
+      if (!activeId) {
+        return
+      }
       const entry = registryRef.current.get(activeId)
-      if (!entry) return
+      if (!entry) {
+        return
+      }
       event.preventDefault()
+      event.stopPropagation()
       entry.metaRef.current.onActivate(modifiers)
       return
     }
 
     if (event.key === inwardKey) {
-      if (nav) return
+      if (nav) {
+        return
+      }
       if (
         inInput &&
         !(
           input.selectionStart === input.value.length &&
           input.selectionEnd === input.value.length
         )
-      )
+      ) {
         return
-      if (!activeId) return
+      }
+      if (!activeId) {
+        return
+      }
       const entry = registryRef.current.get(activeId)
-      if (!entry) return
-      if (!entry.metaRef.current.isSubmenu) return
+      if (!entry) {
+        return
+      }
+      if (!entry.metaRef.current.isSubmenu) {
+        return
+      }
       event.preventDefault()
+      event.stopPropagation()
       entry.metaRef.current.onActivate({ shiftKey: event.shiftKey })
     }
   }
@@ -411,7 +447,7 @@ export function SearchBox({
   const placeholderDefault = c.plain("actions.search")
 
   return (
-    <div className={cn("mb-1 border-b p-1", wrapperClassName)}>
+    <div className={cn("border-b p-1", wrapperClassName)}>
       {before}
       <input
         ref={inputRef}
@@ -422,6 +458,7 @@ export function SearchBox({
           setQuery(event.target.value)
         }}
         className={cn(searchBoxClassName, className)}
+        data-slot="filterable-menu-search-box"
       />
     </div>
   )
@@ -447,7 +484,9 @@ export function FilterableMenu({
   const setOpen = useCallback(
     (next: boolean) => {
       onOpenChange?.(next)
-      if (!isControlled) setUncontrolledOpen(next)
+      if (!isControlled) {
+        setUncontrolledOpen(next)
+      }
     },
     [isControlled, onOpenChange],
   )
@@ -649,7 +688,7 @@ export function FilterableMenuLabel({
     <div
       className={cn(
         menuLabelClassName,
-        "flex items-center justify-between gap-2 py-0.5 pr-1",
+        "flex items-center justify-between gap-2 mt-1 py-0.5 pr-1",
         className,
       )}
     >
@@ -665,7 +704,7 @@ export function FilterableMenuSeparator({ className }: { className?: string }) {
   return (
     <div
       role="separator"
-      className={cn("bg-border/50 -mx-1 my-1 h-px", className)}
+      className={cn("bg-border/50 -mx-1 my-0 h-px", className)}
     />
   )
 }
@@ -720,12 +759,16 @@ export function FilterableMenuItem({
       isSubmenu: false,
       onActivate: (modifiers) => {
         onSelect?.(modifiers)
-        if (closeOnClick !== false) close()
+        if (closeOnClick !== false) {
+          close()
+        }
       },
     },
   )
 
-  if (!matches) return null
+  if (!matches) {
+    return null
+  }
 
   return (
     <div
@@ -804,7 +847,9 @@ export function FilterableMenuSubTrigger({
     },
   })
 
-  if (!matches) return null
+  if (!matches) {
+    return null
+  }
 
   return (
     <Popover.Trigger
@@ -824,7 +869,9 @@ export function FilterableMenuSubTrigger({
           title={title}
           className={cn(menuSubTriggerClassName, className)}
           onMouseMove={(event) => {
-            if (!disabled && pointerMoved(lastPointer, event)) setActive()
+            if (!disabled && pointerMoved(lastPointer, event)) {
+              setActive()
+            }
           }}
         >
           {icon}
@@ -983,7 +1030,9 @@ export function VirtualizedFilterableMenuItems<T>({
       create?.onCreate(trimmed)
     } else {
       const item = filtered[active]
-      if (!item) return
+      if (!item) {
+        return
+      }
       onSelect(item, modifiers)
     }
     if (closeOnSelect) close()
@@ -993,9 +1042,15 @@ export function VirtualizedFilterableMenuItems<T>({
   moveRef.current = (to) => {
     if (rowCount === 0) return
     setActive((prev) => {
-      if (to === "home") return 0
-      if (to === "end") return rowCount - 1
-      if (to === "down") return prev < rowCount - 1 ? prev + 1 : 0
+      if (to === "home") {
+        return 0
+      }
+      if (to === "end") {
+        return rowCount - 1
+      }
+      if (to === "down") {
+        return prev < rowCount - 1 ? prev + 1 : 0
+      }
       return prev > 0 ? prev - 1 : rowCount - 1
     })
   }
@@ -1020,7 +1075,9 @@ export function VirtualizedFilterableMenuItems<T>({
     }
   }, [active, filtered.length, virtualizer])
 
-  if (loading) return <LoadingRows />
+  if (loading) {
+    return <LoadingRows />
+  }
 
   if (rowCount === 0) {
     return (
@@ -1038,7 +1095,9 @@ export function VirtualizedFilterableMenuItems<T>({
         >
           {virtualizer.getVirtualItems().map((row) => {
             const item = filtered[row.index]
-            if (!item) return null
+            if (!item) {
+              return null
+            }
             return (
               <div
                 key={getKey(item)}
@@ -1085,7 +1144,9 @@ export function VirtualizedFilterableMenuItems<T>({
           }}
           onClick={() => {
             create.onCreate(trimmed)
-            if (closeOnSelect) close()
+            if (closeOnSelect) {
+              close()
+            }
           }}
         >
           <icon.Add />

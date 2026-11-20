@@ -1,0 +1,3822 @@
+/** @jsxImportSource @storyteller/epub */
+import { AsyncReaderWriterLock } from "@esfx/async-readerwriterlock"
+import type { Attr, Document, Element, Node } from "@xmldom/xmldom"
+import memoize from "mem"
+
+import { MediaType } from "@storyteller/media-types"
+
+import { copyFile } from "#files"
+import { TmpFsAdapter } from "#tmpfs"
+
+import type {
+  AdapterOptions,
+  ArchiveSource,
+  EpubStorageAdapter,
+  EpubStorageAdapterClass,
+  EpubStorageKind,
+} from "./adapters/interface.ts"
+import {
+  type EncryptionSummary,
+  summarizeEncryptionDocument,
+} from "./encryption.ts"
+import * as Upgrade from "./upgrade.tsx"
+import {
+  createDocument,
+  createDocumentType,
+  declareDefaultNamespace,
+  findXmlChildByName,
+  findXmlChildByNameNS,
+  findXmlDescendantByName,
+  getXhtmlBody,
+  insert,
+  isElement,
+  isText,
+  NS,
+  parse,
+  replace,
+  serialize,
+  text,
+  x,
+  xmlId,
+} from "./xml.ts"
+
+export { TmpFsAdapter } from "#tmpfs"
+export type {
+  AdapterOptions,
+  ArchiveSource,
+  EpubListEntry,
+  EpubStorageAdapter,
+  EpubStorageAdapterClass,
+  EpubStorageCapabilities,
+  EpubStorageKind,
+} from "./adapters/interface.ts"
+export { MemoryAdapter, type MemoryAdapterOptions } from "./adapters/memory.ts"
+
+/**
+ * The XML surface. Publication-level operations live on {@link Epub}; for
+ * building and inspecting XML trees directly, use these.
+ *
+ * The DOM node types are re-exported so that callers do not need to depend on
+ * `@xmldom/xmldom` themselves.
+ */
+export {
+  addLinkToXhtmlHead,
+  adoptNamespaces,
+  createDocument,
+  createDocumentType,
+  declareDefaultNamespace,
+  findXmlChildByName,
+  findXmlChildByNameNS,
+  findXmlDescendantByName,
+  findXmlDescendantByNameNS,
+  getXhtmlBody,
+  insert,
+  isCdata,
+  isComment,
+  isElement,
+  isText,
+  NS,
+  parse,
+  replace,
+  serialize,
+  text,
+  x,
+  xmlId,
+  XMLSerializer,
+} from "./xml.ts"
+export type { XmlDiagnostic } from "./xml.ts"
+export type { EncryptionSummary } from "./encryption.ts"
+export type {
+  Attr,
+  Document,
+  DocumentType,
+  Element,
+  Node,
+  Text,
+} from "@xmldom/xmldom"
+
+/*
+ * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/getTextInfo
+ * Node.js and Deno both have a non-standard implementation of
+ * the Intl.Locale spec's getTextInfo(), providing the textInfo
+ * accessor instead.
+ */
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Intl {
+    interface Locale {
+      textInfo?: { direction: "rtl" | "ltr" }
+    }
+  }
+}
+
+declare module "@esfx/async-readerwriterlock" {
+  interface AsyncReaderWriterLockReader {
+    [Symbol.dispose](): void
+  }
+  interface AsyncReaderWriterLockWriter {
+    [Symbol.dispose](): void
+  }
+  interface AsyncReaderWriterLockUpgradeableReader {
+    [Symbol.dispose](): void
+  }
+}
+
+export type ManifestItem = {
+  id: string
+  href: string
+  title?: string | undefined
+  mediaType?: string | undefined
+  fallback?: string | undefined
+  mediaOverlay?: string | undefined
+  properties?: string[] | undefined
+}
+
+export type MetadataEntry = {
+  id?: string | undefined
+  type: string
+  properties: Record<string, string>
+  value: string | undefined
+}
+
+export type EpubMetadata = MetadataEntry[]
+
+export interface DcSubject {
+  value: string
+  authority: string
+  term: string
+}
+
+export interface EpubIdentifier {
+  value: string
+  id?: string | undefined
+  /** the value of a refining `identifier-type` meta, if present */
+  identifierType?: string | undefined
+  /** the `scheme` of a refining `identifier-type` meta, or a legacy `opf:scheme` attribute */
+  scheme?: string | undefined
+}
+
+export interface EpubSource {
+  value: string
+  id?: string | undefined
+  /** the value of a refining `identifier-type` meta, if present */
+  identifierType?: string | undefined
+  /** the `scheme` of a refining `identifier-type` meta, or a legacy `opf:scheme` attribute */
+  scheme?: string | undefined
+  /**
+   * whether this source has a `source-of="pagination"` refinement
+   * or of a `<meta property="pageBreakSource">` element
+   *
+   * as of EPUB 3.4 `source-of` is advised-deprecated in favour of the
+   * publication-level `pageBreakSource` property. if you want to
+   * be sure to get the source of pagination, use {@link Epub.getPageBreakSource}
+   */
+  isPageBreakSource?: boolean | undefined
+}
+
+export interface AlternateScript {
+  name: string
+  locale: Intl.Locale
+}
+
+export interface DcCreator {
+  name: string
+  role?: string
+  roleScheme?: string
+  fileAs?: string
+  alternateScripts?: AlternateScript[]
+}
+
+export interface DublinCore {
+  title: string
+  language: Intl.Locale
+  identifier: string
+  date?: Date
+  subjects?: Array<string | DcSubject>
+  creators?: DcCreator[]
+  contributors?: DcCreator[]
+  type?: string
+}
+
+export interface Collection {
+  name: string
+  type?: string
+  position?: string
+}
+
+export interface NavigationItem {
+  title: string
+  href?: string
+  role?: string
+  children?: NavigationList
+}
+
+export type NavigationList = NavigationItem[]
+
+export interface Navigation {
+  title?: string
+  role: string
+  children: NavigationList
+}
+
+export interface GuideItem {
+  href: string
+  title: string
+  type: string
+}
+
+export interface FromOptions {
+  /**
+   * when true, mutation methods throw {@link EpubReadOnlyError} at runtime
+   * @default false
+   */
+  readonly?: boolean
+}
+
+/**
+ * Read-only view of an EPUB
+ * Returned by Epub.using(MemoryAdapter).from(...) and by Epub.from(path, { readonly: true })
+ */
+export type EpubReader = Pick<
+  Epub,
+  | "storage"
+  | "findMetadataItem"
+  | "findAllMetadataItems"
+  | "resolveHref"
+  | "readFileContents"
+  | "readItemContents"
+  | "readXhtmlItemContents"
+  | "discardAndClose"
+  | Extract<keyof Epub, `get${string}`>
+> &
+  Disposable
+
+/**
+ * Readonly Epub-instance backed by an in-memory zip handle
+ * Returned by `Epub.using(MemoryAdapter).from(...)`
+ */
+export type InMemoryEpubReader = EpubReader & { readonly storage: "in-memory" }
+
+export class EpubVersionError extends Error {}
+export class EpubReadOnlyError extends Error {}
+
+/**
+ * makes it easy to distinguish normal hrefs from external/invalid ones
+ */
+const ENTRY_ORIGIN = "epub:///"
+
+function ensureEncodedPath(href: string): string {
+  let decoded = href
+  try {
+    decoded = decodeURIComponent(href)
+  } catch {
+    // href may be un-encoded but contain a raw % symbol
+  }
+
+  return entryToUrlPath(decoded)
+}
+
+/**
+ * Needs to be convoluted like this, bc
+ * - `encodeURIComponent` escapes `/` and `\`
+ * - `encodeURI` does not escape `#` and `?`
+ */
+function entryToUrlPath(entry: string) {
+  return entry.split("/").map(encodeURIComponent).join("/")
+}
+
+function resolveEntryUrl(from: string, href: string): URL | null {
+  const base = new URL(entryToUrlPath(from), ENTRY_ORIGIN)
+
+  if (!URL.canParse(href, base.toString())) return null
+
+  const url = new URL(href, base)
+
+  return url.href.startsWith(ENTRY_ORIGIN) ? url : null
+}
+
+function ensureOpfNamespace(doc: Document) {
+  const { documentElement } = doc
+  if (!documentElement) return
+  if (!documentElement.hasAttribute("xmlns")) {
+    declareDefaultNamespace(documentElement, NS.opf)
+  }
+}
+
+/**
+ * Names within a directory must stay distinct after Unicode normalization and
+ * full case folding, since names that collapse onto one another overwrite each
+ * other on any filesystem that normalizes.
+ *
+ * @link https://www.w3.org/TR/epub-33/#sec-names-paths
+ */
+function foldPathName(path: string): string {
+  return path.normalize("NFKC").toLowerCase()
+}
+
+/** The media types that make a manifest item an EPUB content document. */
+const CONTENT_DOCUMENT_MEDIA_TYPES = new Set<string>([
+  MediaType.XHTML.mime,
+  MediaType.SVG.mime,
+])
+
+/**
+ * Whether a manifest item may be referenced from the spine: it must be an EPUB
+ * content document, or a foreign content document whose manifest fallback chain
+ * reaches one.
+ *
+ * @link https://www.w3.org/TR/epub-33/#sec-item-elem
+ */
+function spineReferenceable(
+  manifest: Record<string, ManifestItem>,
+  item: ManifestItem,
+): boolean {
+  const visited = new Set<string>()
+
+  let current: ManifestItem | undefined = item
+
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id)
+
+    if (
+      current.mediaType &&
+      CONTENT_DOCUMENT_MEDIA_TYPES.has(current.mediaType)
+    ) {
+      return true
+    }
+
+    current = current.fallback ? manifest[current.fallback] : undefined
+  }
+
+  return false
+}
+
+/**
+ * A single EPUB instance.
+ *
+ * The entire EPUB contents will be read into memory.
+ *
+ * Example usage:
+ *
+ * ```ts
+ * import { Epub, getBody, findByName, textContent } from '@storyteller/epub';
+ *
+ * using epub = await Epub.from('./path/to/book.epub');
+ * const title = await epub.getTitle();
+ * const spineItems = await epub.getSpineItems();
+ * const chptOne = spineItems[0];
+ * const chptOneXml = await epub.readXhtmlItemContents(chptOne.id);
+ *
+ * const body = getBody(chptOneXml);
+ * const h1 = findXmlChildByName('h1', body);
+ * const headingText = textContent(h1);
+ *
+ * await epub.setTitle(headingText);
+ * await epub.saveAndClose();
+ * ```
+ *
+ * @link https://www.w3.org/TR/epub-33/
+ */
+export class Epub {
+  /**
+   * Format a duration, provided as a number of seconds, as
+   * a SMIL clock value, to be used for Media Overlays.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-duration
+   */
+  static formatSmilDuration(duration: number) {
+    const hours = Math.floor(duration / 3600)
+    const minutes = Math.floor(duration / 60 - hours * 60)
+    const secondsAndMillis = duration - minutes * 60 - hours * 3600
+    const [seconds, millis] = secondsAndMillis.toFixed(2).split(".")
+    // It's not actually possible for .split() to return fewer than one
+    // item, so it's safe to assert that seconds is a defined string
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds!.padStart(2, "0")}.${millis ?? "0"}`
+  }
+
+  private rootfile: string | null = null
+
+  private manifest: Record<string, ManifestItem> | null = null
+
+  private spine:
+    | { itemRef: string; linear: boolean; properties: string[] }[]
+    | null = null
+
+  private packageLock = new AsyncReaderWriterLock()
+
+  /**
+   * Storage backend kind in use for this instance
+   *
+   * Public so callers can declare type-level requirements via {@link InMemoryEpubReader}
+   * Orthogonal to the read-only / writable axis (controlled by `readonlyOverride`
+   * and the adapter's capability bag)
+   */
+  readonly storage: EpubStorageKind
+
+  /**
+   * Prefer the static factories ({@link Epub.using}, {@link Epub.from},
+   * {@link Epub.create}, {@link Epub.upgrade}) over calling this constructor
+   * directly. It's public so {@link EpubFactory} can construct instances; nothing
+   * else should need to.
+   */
+  constructor(
+    protected adapterClass: EpubStorageAdapterClass,
+    protected adapter: EpubStorageAdapter,
+    protected inputPath: string | undefined,
+    protected readonlyOverride: boolean = false,
+  ) {
+    this.storage = adapterClass.kind
+    this.readXhtmlItemContents = memoize(
+      this.readXhtmlItemContents.bind(this),
+      // This isn't unnecessary, the generic here just isn't handling the
+      // overloaded method type correctly
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      { cacheKey: ([id, as]) => `${id}:${as ?? "xhtml"}` },
+    )
+  }
+
+  /**
+   * Runtime guard for mutation methods
+   */
+  private assertWritable(): void {
+    if (!this.adapterClass.capabilities.writable || this.readonlyOverride) {
+      throw new EpubReadOnlyError(
+        "cannot mutate a read-only Epub. open via Epub.using(TmpFsAdapter).from(path) (without { readonly: true }) to modify.",
+      )
+    }
+  }
+
+  /**
+   * Construct a new EPUB on a writable backend, optionally seeded
+   * with the provided metadata. Equivalent to
+   * `Epub.using(TmpFsAdapter).create(...)`.
+   *
+   * @param dublinCore Core metadata terms
+   * @param additionalMetadata An array of additional metadata entries
+   */
+  static async create(
+    path: string,
+    dublinCore: DublinCore,
+    additionalMetadata: EpubMetadata = [],
+  ): Promise<Epub> {
+    return Epub.using(TmpFsAdapter).create(path, dublinCore, additionalMetadata)
+  }
+
+  /**
+   * Specify the storage backend to use for the EPUB
+   *
+   * The returned factory exposes `from`, `create`, and `upgrade`,
+   * which route through the supplied adapter.
+   *
+   * @example
+   * ```ts
+   * using epub = await Epub.using(TmpFsAdapter).from(path)
+   * using reader = await Epub.using(MemoryAdapter).from(buffer, { cache: false })
+   * ```
+   */
+  static using<A extends EpubStorageAdapterClass>(
+    adapterClass: A,
+  ): EpubFactory<A> {
+    return new EpubFactory(adapterClass)
+  }
+
+  /**
+   * Open an existing EPUB publication, extracting it to a temp directory
+   * so writes can mutate the unpacked tree and rezip with `saveAndClose`.
+   *
+   * Pass `{ readonly: true }` to gate mutations at runtime.
+   *
+   * prefer `Epub.using(TmpFsAdapter).from(path)` (or
+   *   `Epub.using(MemoryAdapter).from(path)` for read-only, in-memory access)
+   * @throws {EpubVersionError} when the archive is not a valid EPUB 3
+   */
+  static async from(pathOrData: ArchiveSource): Promise<Epub>
+  static async from(
+    pathOrData: ArchiveSource,
+    options: FromOptions & { readonly: true },
+  ): Promise<EpubReader>
+  static async from(
+    pathOrData: ArchiveSource,
+    options?: FromOptions,
+  ): Promise<Epub | EpubReader>
+  static async from(
+    pathOrData: ArchiveSource,
+    options: FromOptions = {},
+  ): Promise<Epub | EpubReader> {
+    return Epub.using(TmpFsAdapter).from(pathOrData, options)
+  }
+
+  static async assertEpub3(epub: Epub): Promise<void> {
+    const version = await epub.getVersion()
+    if (!version.startsWith("3.")) {
+      epub.discardAndClose()
+      throw new EpubVersionError(
+        "This is not a valid EPUB 3 publication. This library only supports EPUB 3, not EPUB 2. Use Epub.upgrade(path) to convert.",
+      )
+    }
+  }
+
+  get adapterRootPath() {
+    return this.adapter.rootPath
+  }
+
+  async copy(path?: string): Promise<Epub> {
+    if (!this.adapter.duplicate) {
+      throw new Error(
+        `cannot copy an Epub backed by ${this.adapterClass.kind}: adapter does not implement duplicate()`,
+      )
+    }
+    const newAdapter = await this.adapter.duplicate()
+    return new Epub(this.adapterClass, newAdapter, path)
+  }
+
+  private async removeEntry(href: string) {
+    this.assertWritable()
+    if (!this.adapter.remove) {
+      throw new EpubReadOnlyError(
+        `adapter ${this.adapterClass.kind} does not support entry removal`,
+      )
+    }
+    const rootfile = await this.getRootfile()
+    await this.adapter.remove(await this.resolveEntry(rootfile, href))
+  }
+
+  /**
+   * Length of the underlying archive entry for a manifest item, in bytes
+   * Necessary to compute the readium page count which is for COMPRESSED content
+   * @see {@link https://github.com/readium/architecture/issues/123}
+   */
+  async getItemArchiveLength(id: string): Promise<number> {
+    const rootfile = await this.getRootfile()
+    const manifest = await this.getManifest()
+    const manifestItem = manifest[id]
+    if (!manifestItem)
+      throw new Error(`Could not find item with id "${id}" in manifest`)
+    return this.adapter.archiveLength(
+      await this.resolveEntry(rootfile, manifestItem.href),
+    )
+  }
+
+  /**
+   * The XML Document for this EPUB's META-INF/encryption.xml.
+   * Null if no encryption document exists.
+   *
+   * @see {@link https://www.w3.org/TR/epub/#sec-container-metainf-encryption.xml}
+   */
+  async getEncryptionDocument(): Promise<Document | null> {
+    if (!(await this.adapter.exists("META-INF/encryption.xml"))) {
+      return null
+    }
+
+    const encryptionString = await this.adapter.read(
+      "META-INF/encryption.xml",
+      "utf-8",
+    )
+
+    return parse(encryptionString, "text/xml")
+  }
+
+  /**
+   * A summary of the encryption information specified in this
+   * publication's META-INF/encryption.xml document.
+   *
+   * @see {@link https://www.w3.org/TR/epub/#sec-container-metainf-encryption.xml}
+   */
+  async getEncryptionSummary(): Promise<EncryptionSummary | null> {
+    const encryptionDoc = await this.getEncryptionDocument()
+
+    if (!encryptionDoc) return null
+
+    return summarizeEncryptionDocument(encryptionDoc)
+  }
+
+  async getRootfile() {
+    if (this.rootfile !== null) return this.rootfile
+
+    const containerString = await this.adapter.read(
+      "META-INF/container.xml",
+      "utf-8",
+    )
+
+    if (!containerString)
+      throw new Error("Failed to parse EPUB: Missing META-INF/container.xml")
+
+    const containerDocument = parse(containerString, "text/xml")
+    const container = containerDocument.documentElement
+
+    if (!container)
+      throw new Error(
+        "Failed to parse EPUB container.xml: Found no container element",
+      )
+
+    const rootfiles = findXmlChildByName("rootfiles", container)
+
+    if (!rootfiles)
+      throw new Error(
+        "Failed to parse EPUB container.xml: Found no rootfiles element",
+      )
+
+    const rootfile = findXmlChildByName(
+      "rootfile",
+      rootfiles,
+      (element) => element.getAttribute("media-type") === MediaType.OPF.mime,
+    )
+
+    const fullPath = rootfile?.getAttribute("full-path")
+    if (!fullPath)
+      throw new Error(
+        "Failed to parse EPUB container.xml: Found no rootfile element",
+      )
+
+    this.rootfile = await this.resolveEntry("", fullPath)
+
+    return this.rootfile
+  }
+
+  async getPackageDocumentSource(): Promise<string> {
+    const rootfile = await this.getRootfile()
+    const packageDocumentString = await this.adapter.read(rootfile, "utf-8")
+
+    if (!packageDocumentString)
+      throw new Error(
+        `Failed to parse EPUB: could not find package document at ${rootfile}`,
+      )
+
+    return packageDocumentString
+  }
+
+  async getPackageDocument() {
+    const packageDocument = parse(
+      await this.getPackageDocumentSource(),
+      "text/xml",
+    )
+
+    ensureOpfNamespace(packageDocument)
+
+    return packageDocument
+  }
+
+  async getPackageElement(lock = true) {
+    using stack = new DisposableStack()
+
+    if (!lock) {
+      stack.adopt(await this.packageLock.read(), (lock) => {
+        lock.unlock()
+      })
+    }
+
+    const packageDocument = await this.getPackageDocument()
+
+    stack.dispose()
+
+    const packageElement =
+      packageDocument.documentElement?.localName === "package"
+        ? packageDocument.documentElement
+        : null
+
+    if (!packageElement) {
+      throw new Error(
+        "Failed to parse EPUB: Found no package element in package document",
+      )
+    }
+
+    return packageElement
+  }
+
+  /**
+   * Safely modify the package document, without race conditions.
+   *
+   * Since the reading the package document is an async process,
+   * multiple simultaneously dispatched function calls that all
+   * attempt to modify it can clobber each other's changes. This
+   * method uses a read/write lock to ensure that each update runs
+   * exclusively.
+   *
+   * @param producer The function to update the package document. If
+   *    it returns a new package document, that will be persisted, otherwise
+   *    it will be assumed that the package document was modified in place.
+   */
+  async withPackage(
+    producer:
+      | ((packageElement: Element) => void)
+      | ((packageElement: Element) => Element)
+      | ((packageElement: Element) => Promise<Element>)
+      | ((packageElement: Element) => Promise<void>),
+  ) {
+    this.assertWritable()
+
+    using _ = await this.packageLock.write()
+
+    const packageDocument = await this.getPackageDocument()
+
+    const packageElement =
+      packageDocument.documentElement?.localName === "package"
+        ? packageDocument.documentElement
+        : null
+
+    if (!packageElement) {
+      throw new Error(
+        "Failed to parse EPUB: Found no package element in package document",
+      )
+    }
+
+    const produced = await producer(packageElement)
+
+    const updatedPackageDocument = serialize(produced ?? packageDocument)
+
+    const rootfile = await this.getRootfile()
+
+    await this.writeEntryContents(rootfile, updatedPackageDocument, "utf-8")
+  }
+
+  /**
+   * Retrieve the manifest for the Epub.
+   *
+   * This is represented as a map from each manifest items'
+   * id to the rest of its properties. Manifest hrefs are
+   * always URI-encoded (e.g. `chapter one.xhtml` -> `chapter%20one.xhtml`),
+   * even if the raw XML is (incorrectly) not URI-encoded.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-pkg-manifest
+   */
+  async getManifest() {
+    if (this.manifest !== null) return this.manifest
+
+    using _ = await this.packageLock.read()
+
+    const packageElement = await this.getPackageElement(false)
+
+    const manifest = findXmlChildByNameNS(NS.opf, "manifest", packageElement)
+
+    if (!manifest) {
+      throw new Error(
+        "Failed to parse EPUB: Found no manifest element in package document",
+      )
+    }
+
+    const manifestRecord: Record<string, ManifestItem> = {}
+
+    for (const item of Array.from(manifest.children)) {
+      const id = item.getAttribute("id")
+      const hrefAttr = item.getAttribute("href")
+      if (!hrefAttr) continue
+
+      const href = ensureEncodedPath(hrefAttr)
+
+      if (!id || !href) {
+        continue
+      }
+
+      manifestRecord[id] = {
+        id,
+        href,
+        mediaType: item.getAttribute("media-type") ?? undefined,
+        mediaOverlay: item.getAttribute("media-overlay") ?? undefined,
+        fallback: item.getAttribute("fallback") ?? undefined,
+        properties: item.getAttribute("properties")?.split(" ") ?? undefined,
+      }
+    }
+
+    this.manifest = manifestRecord
+
+    return this.manifest
+  }
+
+  /**
+   * Returns the first index in the metadata element's children array
+   * that matches the provided predicate.
+   *
+   * Note: This may technically be different than the index in the
+   * getMetadata() array, as it includes non-metadata nodes, like
+   * text nodes. These are technically not allowed, but may exist,
+   * nonetheless. As consumers only ever see the getMetadata()
+   * array, this method is only meant to be used internally.
+   */
+  private findMetadataIndex(
+    packageElement: Element,
+    predicate: (entry: MetadataEntry) => boolean,
+  ) {
+    const metadataElement = findXmlChildByNameNS(
+      NS.opf,
+      "metadata",
+      packageElement,
+    )
+
+    if (!metadataElement)
+      throw new Error(
+        "Failed to parse EPUB: Found no metadata element in package document",
+      )
+
+    return Array.from(metadataElement.children).findIndex((node) => {
+      const item = Epub.parseMetadataItem(node)
+      return predicate(item)
+    })
+  }
+
+  /**
+   * Returns the item in the metadata element's children array
+   * that matches the provided predicate.
+   */
+  public async findMetadataItem(predicate: (entry: MetadataEntry) => boolean) {
+    const [first] = await this.findAllMetadataItems(predicate)
+    return first ?? null
+  }
+
+  /**
+   * Returns the item in the metadata element's children array
+   * that matches the provided predicate.
+   */
+  public async findAllMetadataItems(
+    predicate: (entry: MetadataEntry) => boolean,
+  ) {
+    const packageElement = await this.getPackageElement()
+
+    const metadataElement = findXmlChildByNameNS(
+      NS.opf,
+      "metadata",
+      packageElement,
+    )
+
+    if (!metadataElement)
+      throw new Error(
+        "Failed to parse EPUB: Found no metadata element in package document",
+      )
+
+    const elements = metadataElement.children.filter((node) => {
+      const item = Epub.parseMetadataItem(node)
+      return predicate(item)
+    })
+
+    return elements.map((element) => Epub.parseMetadataItem(element))
+  }
+
+  private static parseMetadataItem(element: Element): MetadataEntry {
+    const elementName = element.nodeName
+    const textNode = element.firstChild
+
+    // https://www.w3.org/TR/epub-33/#sec-metadata-values
+    // Whitespace within these element values is not significant.
+    // Sequences of one or more whitespace characters are collapsed
+    // to a single space [infra] during processing .
+    const value =
+      !textNode || !isText(textNode)
+        ? undefined
+        : textNode.data.replaceAll(/\s+/g, " ").trim()
+
+    const { id, ...properties } = Object.fromEntries(
+      Array.from(element.attributes).map((attr) => [attr.name, attr.value]),
+    )
+
+    return {
+      id,
+      type: elementName,
+      properties,
+      value,
+    }
+  }
+
+  /**
+   * Retrieve the metadata entries for the Epub.
+   *
+   * This is represented as an array of metadata entries,
+   * in the order that they're presented in the Epub package document.
+   *
+   * For more useful semantic representations of metadata, use
+   * specific methods such as `getTitle()` and `getAuthors()`.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-pkg-metadata
+   */
+  async getMetadata() {
+    const packageElement = await this.getPackageElement()
+
+    const metadataElement = findXmlChildByNameNS(
+      NS.opf,
+      "metadata",
+      packageElement,
+    )
+
+    if (!metadataElement)
+      throw new Error(
+        "Failed to parse EPUB: Found no metadata element in package document",
+      )
+
+    const metadata: EpubMetadata = Array.from(metadataElement.children).map(
+      (node) => Epub.parseMetadataItem(node),
+    )
+
+    return metadata
+  }
+
+  /**
+   * Retrieve the first identifier from the dc:identifier element
+   * in the EPUB metadata.
+   *
+   * If there is no dc:identifier element, returns null.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dcidentifier
+   *
+   * @deprecated Use {@link getUniqueIdentifier} instead to get the unique identifier,
+   * or {@link getIdentifiers} to get all identifiers.
+   */
+  async getIdentifier() {
+    const metadata = await this.getMetadata()
+    const entry = metadata.find(({ type }) => type === "dc:identifier")
+    return entry?.value ?? null
+  }
+
+  /**
+   * Set the dc:identifier metadata element with the provided string.
+   *
+   * Updates the existing dc:identifier element if one exists.
+   * Otherwise creates a new element
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dcidentifier
+   *
+   * @deprecated Use {@link setUniqueIdentifier} instead.
+   */
+  async setIdentifier(identifier: string) {
+    await this.replaceMetadata(({ type }) => type === "dc:identifier", {
+      type: "dc:identifier",
+      properties: {},
+      value: identifier,
+    })
+  }
+
+  /**
+   * Retrieve the identifier with the unique identifier id
+   * in the EPUB metadata.
+   *
+   * If there is no unique identifier id, returns the first dc:identifier element.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dcidentifier
+   */
+  async getUniqueIdentifier() {
+    const metadata = await this.getMetadata()
+
+    const uniqueId = await this.getUniqueIdentifierId()
+
+    if (!uniqueId) {
+      return null
+    }
+
+    const entry = metadata.find(
+      ({ type, id }) => type === "dc:identifier" && id === uniqueId,
+    )
+    return entry?.value ?? null
+  }
+
+  /**
+   * Set the unique identifier id for the EPUB.
+   *
+   * Updates the existing dc:identifier element referenced by the unique identifier id if one exists.
+   * Otherwise creates a new element with the provided identifier, and sets the unique identifier id to the new element's id.
+   *
+   * Note: you likely shouldn't change the unique identifier id unless you are producing a new EPUB.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dcidentifier
+   */
+  async setUniqueIdentifier(identifier: string) {
+    await this.withPackage((packageElement) => {
+      const metadata = findXmlChildByNameNS(NS.opf, "metadata", packageElement)
+      if (!metadata) {
+        throw new Error(
+          "Failed to parse EPUB: found no metadata element in package document",
+        )
+      }
+
+      let uniqueId = packageElement.getAttribute("unique-identifier") ?? null
+
+      if (!uniqueId) {
+        // Create a new unique identifier id
+        const newUniqueId = xmlId()
+        packageElement.setAttribute("unique-identifier", newUniqueId)
+        uniqueId = newUniqueId
+      }
+
+      const entry = findXmlChildByNameNS(
+        NS.dc,
+        "identifier",
+        metadata,
+        (node) => node.getAttribute("id") === uniqueId,
+      )
+
+      if (entry) {
+        replace(
+          metadata,
+          <dc:identifier id={uniqueId}>{identifier}</dc:identifier>,
+          entry,
+        )
+        return
+      }
+
+      insert(
+        metadata,
+        <dc:identifier id={uniqueId}>{identifier}</dc:identifier>,
+      )
+    })
+  }
+
+  /**
+   * Retrieve the id of the publication's unique identifier, as declared by the
+   * package element's `unique-identifier` attribute.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dcidentifier
+   */
+  async getUniqueIdentifierId(): Promise<string | null> {
+    const packageElement = await this.getPackageElement()
+    return packageElement.getAttribute("unique-identifier") ?? null
+  }
+
+  /**
+   * Collect `dc:identifier` or `dc:source` entries, attaching the value and
+   * scheme of any refining `identifier-type` meta (spec D.3.8) and a legacy
+   * `opf:scheme` attribute. Values are not interpreted.
+   *
+   * `onRefinement` is invoked for every other meta refining a collected entry,
+   * so callers can surface element-specific refinements (e.g. `source-of` on a
+   * `dc:source`).
+   */
+  private static collectDcEntries<E extends EpubIdentifier>(
+    metadata: EpubMetadata,
+    type: "dc:identifier" | "dc:source",
+    onRefinement?: (entry: E, property: string, value: string) => void,
+  ): E[] {
+    const entries = metadata
+      .filter((entry) => entry.type === type && entry.value !== undefined)
+      .map((entry) => ({
+        // filtered above, so value is defined
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        value: entry.value!,
+        ...(entry.id && { id: entry.id }),
+        ...(entry.properties["opf:scheme"] && {
+          scheme: entry.properties["opf:scheme"],
+        }),
+      })) as E[]
+
+    for (const meta of metadata) {
+      if (meta.type !== "meta" || meta.value === undefined) continue
+      const property = meta.properties["property"]
+      const refines = meta.properties["refines"]
+      if (!property || !refines) continue
+
+      // drop the leading # from the refines target
+      const target = entries.find((t) => t.id === refines.slice(1))
+      if (!target) continue
+
+      if (property === "identifier-type") {
+        target.identifierType = meta.value
+        if (meta.properties["scheme"]) target.scheme = meta.properties["scheme"]
+      } else {
+        onRefinement?.(target, property, meta.value)
+      }
+    }
+
+    return entries
+  }
+
+  /**
+   * Retrieve every `dc:identifier` entry, returned as found.
+   *
+   * Values are not interpreted. Any refining `identifier-type` meta (spec
+   * D.3.8) or legacy `opf:scheme` attribute is surfaced on the entry, but no
+   * parsing of the value itself is attempted. To read `dc:source` entries, use
+   * {@link getSources}.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dcidentifier
+   */
+  async getIdentifiers(): Promise<EpubIdentifier[]> {
+    const metadata = await this.getMetadata()
+    return Epub.collectDcEntries(metadata, "dc:identifier")
+  }
+
+  /**
+   * Retrieve every `dc:source` entry, returned as found.
+   *
+   * Like {@link getIdentifiers}, values are not interpreted. In addition to a
+   * refining `identifier-type`, a refining `source-of` meta (spec D.3.11) is
+   * surfaced as `sourceOf`.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dcsource
+   */
+  async getSources(): Promise<EpubSource[]> {
+    const metadata = await this.getMetadata()
+    return Epub.collectDcEntries<EpubSource>(
+      metadata,
+      "dc:source",
+      (source, property) => {
+        if (property === "source-of") {
+          source.isPageBreakSource = true
+        }
+      },
+    )
+  }
+
+  /**
+   * Retrieve the `pageBreakSource` property (EPUB 3.4, spec D.2.9), the
+   * publication-level source for the source of its page break markers.
+   *
+   * This property replaces the refining `source-of="pagination"` meta (spec
+   * D.3.11), see {@link EpubSource.sourceOf}. If no `pageBreakSource` property is found,
+   * we fall back to finding a `dc:source` with a `source-of="pagination"` refinement.
+   *
+   * @link https://www.w3.org/TR/epub/#pageBreakSource
+   */
+  async getPageBreakSource(): Promise<EpubSource | null> {
+    const entry = await this.findMetadataItem(
+      (item) =>
+        item.type === "meta" &&
+        item.properties["property"] === "pageBreakSource" &&
+        !!item.value,
+    )
+
+    if (entry) {
+      return {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        value: entry.value!,
+        id: entry.id,
+        identifierType: undefined,
+        scheme: undefined,
+        isPageBreakSource: true,
+      }
+    }
+
+    const sources = await this.getSources()
+    const source = sources.find((source) => source.isPageBreakSource)
+    if (source) {
+      return source
+    }
+
+    return null
+  }
+
+  /**
+   * Set the `pageBreakSource` property (EPUB 3.4, spec D.2.9), or remove it when
+   * passed null. Replaces an existing `pageBreakSource` meta if present.
+   *
+   * Pass `none` to indicate the pagination is unique to this publication.
+   *
+   * @link https://www.w3.org/TR/epub/#pageBreakSource
+   */
+  async setPageBreakSource(value: string | null): Promise<void> {
+    if (value === null) {
+      await this.removeMetadata(
+        (item) => item.properties["property"] === "pageBreakSource",
+      )
+      return
+    }
+    await this.replaceMetadata(
+      (item) => item.properties["property"] === "pageBreakSource",
+      { type: "meta", properties: { property: "pageBreakSource" }, value },
+    )
+  }
+
+  /**
+   * Replace the publication's `dc:identifier` entries.
+   *
+   * This replaces ALL existing `dc:identifier` elements except the publication's
+   * unique identifier (the one referenced by the package element's
+   * `unique-identifier` attribute), which is always preserved and must not be
+   * included in the provided list. If included anyway, it is ignored. See
+   * {@link setUniqueIdentifier} to change it.
+   *
+   * Identifiers are placed in the order they are provided.
+   *
+   * `dc:source` entries are not touched, use {@link setSources} for those.
+   *
+   * When an entry has an `identifierType`, it is written in the refining form
+   * (a `meta` with `property="identifier-type"`, carrying the `scheme`
+   * attribute when provided). An entry with only a `scheme` is written using
+   * the legacy `opf:scheme` attribute.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dcidentifier
+   */
+  async setIdentifiers(identifiers: EpubIdentifier[]) {
+    const uniqueId = await this.getUniqueIdentifierId()
+
+    await this.withPackage((packageElement) => {
+      const metadata = findXmlChildByNameNS(NS.opf, "metadata", packageElement)
+      if (!metadata) {
+        throw new Error(
+          "Failed to parse EPUB: found no metadata element in package document",
+        )
+      }
+
+      const removedIds = new Set<string>()
+      for (const child of Array.from(metadata.children)) {
+        if (child.nodeName !== "dc:identifier") {
+          continue
+        }
+
+        const id = child.getAttribute("id")
+        if (id && id === uniqueId) {
+          continue
+        }
+
+        if (id) {
+          removedIds.add(id)
+        }
+        metadata.removeChild(child)
+      }
+
+      Epub.removeRefiningMetas(metadata, removedIds, ["identifier-type"])
+
+      for (const identifier of identifiers) {
+        // we don't allow you to set the unique identifier, you need to use setUniqueIdentifier
+        if (identifier.id && identifier.id === uniqueId) continue
+
+        const id =
+          identifier.id ??
+          (identifier.identifierType !== undefined ? xmlId() : undefined)
+
+        insert(
+          metadata,
+          <dc:identifier
+            {...(id && { id })}
+            {...(identifier.scheme &&
+              identifier.id === undefined && {
+                "opf:scheme": identifier.scheme,
+              })}
+          >
+            {identifier.value}
+          </dc:identifier>,
+        )
+
+        if (identifier.identifierType !== undefined && id) {
+          insert(
+            metadata,
+            <meta
+              refines={`#${id}`}
+              property="identifier-type"
+              {...(identifier.scheme && { scheme: identifier.scheme })}
+            >
+              {identifier.identifierType}
+            </meta>,
+          )
+        }
+      }
+    })
+  }
+
+  /**
+   * Remove `meta` refinements pointing at any of the given ids,
+   * restricted to the given `property` values as a cleanup step
+   * Mutates `metadata` in place.
+   */
+  private static removeRefiningMetas(
+    metadata: Element,
+    ids: ReadonlySet<string>,
+    properties?: string[],
+  ): void {
+    for (const child of Array.from(metadata.children)) {
+      if (child.nodeName !== "meta") {
+        continue
+      }
+      const property = child.getAttribute("property")
+      if (properties && (!property || !properties.includes(property))) continue
+
+      const refines = child.getAttribute("refines")?.slice(1)
+      if (refines && ids.has(refines)) {
+        metadata.removeChild(child)
+      }
+    }
+  }
+
+  /**
+   * Replace the publication's `dc:source` entries.
+   *
+   * This replaces ALL existing `dc:source` elements (and their refining
+   * `identifier-type` / `source-of` metas). `dc:identifier` entries are not
+   * touched; use {@link setIdentifiers} for those. Pass an empty array to
+   * remove all sources.
+   *
+   * When an entry has an `identifierType`, it is written in the refining form.
+   * A `sourceOf` value is written as a refining `source-of` meta (spec D.3.11).
+   * An entry with only a `scheme` uses the legacy `opf:scheme` attribute.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dcsource
+   */
+  async setSources(sources: EpubSource[]) {
+    await this.withPackage((packageElement) => {
+      const metadata = findXmlChildByNameNS(NS.opf, "metadata", packageElement)
+      if (!metadata) {
+        throw new Error(
+          "Failed to parse EPUB: found no metadata element in package document",
+        )
+      }
+
+      const removedIds = new Set<string>()
+      for (const child of Array.from(metadata.children)) {
+        if (child.nodeName !== "dc:source") {
+          continue
+        }
+
+        const id = child.getAttribute("id")
+        if (id) {
+          removedIds.add(id)
+        }
+        metadata.removeChild(child)
+      }
+
+      Epub.removeRefiningMetas(metadata, removedIds, [
+        "identifier-type",
+        "source-of",
+      ])
+
+      for (const source of sources) {
+        const needsId =
+          source.identifierType !== undefined || source.isPageBreakSource
+
+        const id = source.id ?? (needsId ? xmlId() : undefined)
+
+        insert(
+          metadata,
+          <dc:source
+            {...(id && { id })}
+            {...(source.scheme &&
+              source.identifierType === undefined && {
+                "opf:scheme": source.scheme,
+              })}
+          >
+            {source.value}
+          </dc:source>,
+        )
+
+        if (source.identifierType !== undefined && id) {
+          insert(
+            metadata,
+            <meta
+              refines={`#${id}`}
+              property="identifier-type"
+              {...(source.scheme && { scheme: source.scheme })}
+            >
+              {source.identifierType}
+            </meta>,
+          )
+        }
+
+        if (source.isPageBreakSource && id) {
+          insert(
+            metadata,
+            <meta refines={`#${id}`} property="source-of">
+              pagination
+            </meta>,
+          )
+        }
+      }
+    })
+  }
+
+  /**
+   * Even "EPUB 3" publications sometimes still only use the
+   * EPUB 2 specification for identifying the cover image.
+   * This is a private method that is used as a fallback if
+   * we fail to find the cover image according to the EPUB 3
+   * spec.
+   */
+  private async getEpub2CoverImage() {
+    const packageElement = await this.getPackageElement()
+
+    const metadataElement = findXmlChildByNameNS(
+      NS.opf,
+      "metadata",
+      packageElement,
+    )
+
+    if (!metadataElement)
+      throw new Error(
+        "Failed to parse EPUB: Found no metadata element in package document",
+      )
+
+    const coverImageElement = Array.from(metadataElement.children).find(
+      (element) => element.getAttribute("name") === "cover",
+    )
+
+    const manifestItemId = coverImageElement?.getAttribute("content")
+    if (!manifestItemId) return null
+
+    const manifest = await this.getManifest()
+    return (
+      Object.values(manifest).find((item) => item.id === manifestItemId) ?? null
+    )
+  }
+
+  /**
+   * Retrieve the cover image manifest item.
+   *
+   * This does not return the actual image data. To
+   * retrieve the image data, pass this item's id to
+   * epub.readItemContents, or use epub.getCoverImage()
+   * instead.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-cover-image
+   */
+  async getCoverImageItem() {
+    const manifest = await this.getManifest()
+    const coverImage = Object.values(manifest).find((item) =>
+      item.properties?.includes("cover-image"),
+    )
+    if (coverImage) return coverImage
+
+    return this.getEpub2CoverImage()
+  }
+
+  /**
+   * Retrieve the cover image data as a byte array.
+   *
+   * This does not include, for example, the cover image's
+   * filename or mime type. To retrieve the image manifest
+   * item, use epub.getCoverImageItem().
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-cover-image
+   */
+  async getCoverImage() {
+    const coverImageItem = await this.getCoverImageItem()
+    if (!coverImageItem) return coverImageItem
+
+    return this.readItemContents(coverImageItem.id)
+  }
+
+  /**
+   * Set the cover image for the EPUB.
+   *
+   * Adds a manifest item with the `cover-image` property, per
+   * the EPUB 3 spec, and then writes the provided image data to
+   * the provided href within the publication.
+   */
+  async setCoverImage(href: string, data: Uint8Array) {
+    const coverImageItem = await this.getCoverImageItem()
+    if (coverImageItem) {
+      await this.removeManifestItem(coverImageItem.id)
+    }
+    const mediaType = MediaType.fromPath(href)?.mime
+    if (!mediaType)
+      throw new Error(`Invalid file extension for cover image: ${href}`)
+
+    await this.addManifestItem(
+      { id: "cover-image", href, mediaType, properties: ["cover-image"] },
+      data,
+    )
+  }
+
+  /**
+   * Retrieve the publication date from the dc:date element
+   * in the EPUB metadata as a Date object.
+   *
+   * If there is no dc:date element, returns null.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dcdate
+   */
+  async getPublicationDate() {
+    const metadata = await this.getMetadata()
+    const entry = metadata.find(({ type }) => type === "dc:date")
+    if (!entry?.value) return null
+    return new Date(entry.value)
+  }
+
+  /**
+   * Set the dc:date metadata element with the provided date.
+   *
+   * Updates the existing dc:date element if one exists.
+   * Otherwise creates a new element
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dcdate
+   */
+  async setPublicationDate(date: Date) {
+    await this.replaceMetadata(({ type }) => type === "dc:date", {
+      type: "dc:date",
+      properties: {},
+      value: date.toISOString(),
+    })
+  }
+
+  /**
+   * Retrieve the modified date from the dcterms:modified metadata
+   * in the EPUB metadata as a Date object.
+   *
+   * If there is no meta element with dcterms:modified, returns null.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-metadata-last-modified
+   */
+  async getModifiedDate() {
+    const metadata = await this.getMetadata()
+    const entry = metadata.find(
+      ({ properties }) => properties["property"] === "dcterms:modified",
+    )
+    if (!entry?.value) return null
+    return new Date(entry.value)
+  }
+
+  /**
+   * Retrieve the layout from the rendition:layout meta element
+   * in the EPUB metadata.
+   *
+   * If there is no meta element, returns 'reflowable'.
+   *
+   * @link https://www.w3.org/TR/epub-33/#layout
+   */
+  async getLayout(): Promise<"reflowable" | "pre-paginated"> {
+    const metadata = await this.getMetadata()
+    const entry = metadata.find(
+      ({ properties }) => properties["property"] === "rendition:layout",
+    )
+    if (entry?.value !== "reflowable" && entry?.value !== "pre-paginated") {
+      return "reflowable"
+    }
+    return entry.value
+  }
+
+  /**
+   * Retrieve the base direction from the package element.
+   *
+   * If there is no `dir` attribute on the package element,
+   * returns 'auto'.
+   *
+   * @link https://www.w3.org/TR/epub-33/#attrdef-dir
+   */
+  async getBaseDirection(): Promise<"ltr" | "rtl" | "auto"> {
+    const packageEl = await this.getPackageElement()
+    const dir = packageEl.getAttribute("dir")
+    if (dir !== "ltr" && dir !== "rtl" && dir !== "auto") {
+      return "auto"
+    }
+    return dir
+  }
+
+  /**
+   * Set the dc:type metadata element.
+   *
+   * Updates the existing dc:type element if one exists.
+   * Otherwise creates a new element.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dctype
+   */
+  async setType(type: string) {
+    await this.replaceMetadata(({ type }) => type === "dc:type", {
+      type: "dc:type",
+      properties: {},
+      value: type,
+    })
+  }
+
+  /**
+   * Retrieve the publication type from the dc:type element
+   * in the EPUB metadata.
+   *
+   * If there is no dc:type element, returns null.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dctype
+   */
+  async getType() {
+    const metadata = await this.getMetadata()
+    return metadata.find(({ type }) => type === "dc:type") ?? null
+  }
+
+  /**
+   * Add a subject to the EPUB metadata.
+   *
+   * @param subject May be a string representing just a schema-less
+   *  subject name, or a DcSubject object
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dcsubject
+   */
+  async addSubject(subject: string | DcSubject) {
+    const subjectEntry =
+      typeof subject === "string"
+        ? {
+            value: subject,
+          }
+        : subject
+    const subjectId = xmlId()
+    await this.addMetadata({
+      id: subjectId,
+      type: "dc:subject",
+      properties: {},
+      value: subjectEntry.value,
+    })
+
+    if ("authority" in subjectEntry) {
+      await this.addMetadata({
+        type: "meta",
+        properties: { refines: `#${subjectId}`, property: "authority" },
+        value: subjectEntry.authority,
+      })
+      await this.addMetadata({
+        type: "meta",
+        properties: { refines: `#${subjectId}`, property: "term" },
+        value: subjectEntry.term,
+      })
+    }
+  }
+
+  /**
+   * Remove a subject from the EPUB metadata.
+   *
+   * Removes the subject at the provided index. This index
+   * refers to the array returned by `epub.getSubjects()`.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dccreator
+   */
+  async removeSubject(index: number) {
+    await this.withPackage((packageElement) => {
+      const metadata = findXmlChildByNameNS(NS.opf, "metadata", packageElement)
+      if (!metadata)
+        throw new Error(
+          "Failed to parse EPUB: found no metadata element in package document",
+        )
+
+      const subjects = metadata.children.filter(
+        (child) => child.nodeName === "dc:subject",
+      )
+      const subject = subjects[index]
+      if (!subject) return
+
+      metadata.removeChild(subject)
+    })
+  }
+
+  /**
+   * Retrieve the list of subjects for this EPUB.
+   *
+   * Subjects without associated authority and term metadata
+   * will be returned as strings. Otherwise, they will
+   * be represented as DcSubject objects, with a value,
+   * authority, and term.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dcsubject
+   */
+  async getSubjects() {
+    const metadata = await this.getMetadata()
+
+    const subjectEntries = metadata.filter(({ type }) => type === "dc:subject")
+    const subjects: Array<string | DcSubject> = subjectEntries
+      .map(({ value }) => value)
+      .filter((value): value is string => !!value)
+
+    metadata.forEach((entry) => {
+      if (
+        entry.type !== "meta" ||
+        (entry.properties["property"] !== "term" &&
+          entry.properties["property"] !== "authority")
+      ) {
+        return
+      }
+      const subjectIdref = entry.properties["refines"]
+      if (!subjectIdref) return
+
+      const subjectId = subjectIdref.slice(1)
+      const index = subjectEntries.findIndex((entry) => entry.id === subjectId)
+      if (index === -1) return
+
+      const subject =
+        typeof subjects[index] === "string"
+          ? { value: subjects[index], authority: undefined, term: undefined }
+          : // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            subjects[index]!
+
+      subject[entry.properties["property"]] = entry.value
+      subjects.splice(index, 1, subject as DcSubject)
+    })
+
+    return subjects
+  }
+
+  /**
+   * Retrieve the Epub's language as specified in its
+   * package document metadata.
+   *
+   * If no language metadata is specified, returns null.
+   * Returns the language as an Intl.Locale instance.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dclanguage
+   */
+  async getLanguage() {
+    const metadata = await this.getMetadata()
+    const languageEntries = metadata.filter(
+      (entry) => entry.type === "dc:language",
+    )
+    const primaryLanguage = languageEntries[0]
+    if (!primaryLanguage) return null
+
+    const locale = primaryLanguage.value
+    // Handle a weird edge case where Calibre's metadata
+    // GUI incorrectly sets the language code to 'und'/'UND'
+    // https://www.mobileread.com/forums/showthread.php?t=87928
+    if (!locale || locale.toLowerCase() === "und") return null
+
+    try {
+      return new Intl.Locale(locale)
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Update the Epub's language metadata entry.
+   *
+   * Updates the existing dc:language element if one exists.
+   * Otherwise creates a new element
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dclanguage
+   */
+  async setLanguage(locale: Intl.Locale) {
+    await this.replaceMetadata(({ type }) => type === "dc:language", {
+      type: "dc:language",
+      properties: {},
+      value: locale.toString(),
+    })
+  }
+
+  /**
+   * Retrieve the title of the Epub.
+   *
+   * @param main Optional - whether to return only the first title segment
+   *  if multiple are found. Otherwise, will follow the spec to combine title
+   *  segments
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dctitle
+   */
+  async getTitle(expanded = false) {
+    const entries = await this.getTitles()
+
+    if (!expanded) {
+      const mainEntry = entries.find((entry) => entry.type === "main")
+      if (mainEntry) return mainEntry.title
+
+      const shortEntry = entries.find((entry) => entry.type === "short")
+      if (shortEntry) return shortEntry.title
+
+      return entries[0]?.title ?? null
+    }
+
+    const expandedEntry = entries.find((entry) => entry.type === "expanded")
+    if (expandedEntry) return expandedEntry.title
+
+    return entries.map((entry) => entry.title).join(", ")
+  }
+
+  /**
+   * Retrieve the subtitle of the Epub, if it exists.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dctitle
+   */
+  async getSubtitle() {
+    const entries = await this.getTitles()
+
+    const subtitleEntry = entries.find((entry) => entry.type === "subtitle")
+    return subtitleEntry?.title ?? null
+  }
+
+  /**
+   * Retrieve all title entries of the Epub.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dctitle
+   */
+  async getTitles() {
+    const metadata = await this.getMetadata()
+    const titleEntries = metadata.filter((entry) => entry.type === "dc:title")
+
+    const titleRefinements = metadata.filter(
+      (entry) =>
+        entry.type === "meta" &&
+        entry.properties["refines"] &&
+        (entry.properties["property"] === "title-type" ||
+          entry.properties["property"] === "display-seq"),
+    )
+
+    const sortedTitleParts = titleEntries
+      .filter(
+        (titleEntry) =>
+          titleEntry.id &&
+          titleRefinements.some(
+            (entry) =>
+              entry.value &&
+              entry.properties["refines"]?.slice(1) === titleEntry.id &&
+              entry.properties["property"] === "display-seq" &&
+              !Number.isNaN(parseInt(entry.value, 10)),
+          ),
+      )
+      .sort((a, b) => {
+        /* eslint-disable @typescript-eslint/no-non-null-assertion */
+        const refinementA = titleRefinements.find(
+          (entry) =>
+            entry.properties["property"] === "display-seq" &&
+            entry.properties["refines"]!.slice(1) === a.id,
+        )!
+        const refinementB = titleRefinements.find(
+          (entry) =>
+            entry.properties["property"] === "display-seq" &&
+            entry.properties["refines"]!.slice(1) === b.id,
+        )!
+        const sortA = parseInt(refinementA.value!, 10)
+        const sortB = parseInt(refinementB.value!, 10)
+        /* eslint-enable @typescript-eslint/no-non-null-assertion */
+        return sortA - sortB
+      })
+
+    return (
+      sortedTitleParts.length === 0 ? titleEntries : sortedTitleParts
+    ).map((entry) => {
+      const titleType = titleRefinements.find(
+        (refinement) =>
+          refinement.properties["refines"]?.slice(1) === entry.id &&
+          refinement.properties["property"] === "title-type",
+      )
+      return {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        title: entry.value!,
+        type: titleType?.value ?? null,
+      }
+    })
+  }
+
+  /**
+   * Update the Epub's description metadata entry.
+   *
+   * Updates the existing dc:description element if one exists.
+   * Otherwise creates a new element. Any non-ASCII symbols,
+   * `&`, `<`, `>`, `"`, `'`, and `\``` will be encoded as HTML entities.
+   */
+  async setDescription(description: string) {
+    await this.replaceMetadata(({ type }) => type === "dc:description", {
+      type: "dc:description",
+      value: description,
+      properties: {},
+    })
+  }
+
+  /**
+   * Retrieve the Epub's description as specified in its
+   * package document metadata.
+   *
+   * If no description metadata is specified, returns null.
+   * Returns the description as a string. Descriptions may
+   * include HTML markup.
+   */
+  async getDescription() {
+    const metadata = await this.getMetadata()
+    const descriptionEntry = metadata.find(
+      (entry) => entry.type === "dc:description",
+    )
+    if (!descriptionEntry?.value) return null
+    return descriptionEntry.value
+  }
+
+  /**
+   * Return the set of custom vocabulary prefixes set on this publication's
+   * root package element.
+   *
+   * Returns a map from prefix to URI
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-prefix-attr
+   */
+  async getPackageVocabularyPrefixes() {
+    const packageElement = await this.getPackageElement()
+    const prefixValue = packageElement.getAttribute("prefix")
+    if (!prefixValue) return {}
+
+    const matches = prefixValue.matchAll(/(?:([a-z]+): +(\S+)\s*)/gs)
+    return Array.from(matches).reduce<Record<string, string>>(
+      (acc, match) =>
+        match[1] && match[2] ? { ...acc, [match[1]]: match[2] } : acc,
+      {},
+    )
+  }
+
+  /**
+   * Set a custom vocabulary prefix on the root package element.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-prefix-attr
+   */
+  async setPackageVocabularyPrefix(prefix: string, uri: string) {
+    await this.withPackage((packageElement) => {
+      const prefixValue = packageElement.getAttribute("prefix")
+
+      const matches = prefixValue?.matchAll(/(?:([a-z]+): +(\S+)\s*)/gs)
+      const prefixes = matches
+        ? Array.from(matches).reduce<Record<string, string>>(
+            (acc, match) =>
+              match[1] && match[2] ? { ...acc, [match[1]]: match[2] } : acc,
+            {},
+          )
+        : {}
+
+      prefixes[prefix] = uri
+
+      packageElement.setAttribute(
+        "prefix",
+        Object.entries(prefixes)
+          .map(([p, u]) => `${p}: ${u}`)
+          .join("\n    "),
+      )
+    })
+  }
+
+  /**
+   * Set the title of the Epub.
+   *
+   * This will replace all existing dc:title elements with
+   * this title. It will be given title-type "main".
+   *
+   * To set specific titles and their types, use epub.setTitles().
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dctitle
+   */
+  // TODO: This should allow users to optionally specify an array,
+  // rather than a single string, to support expanded titles.
+  async setTitle(title: string) {
+    await this.withPackage((packageElement) => {
+      const metadata = findXmlChildByNameNS(NS.opf, "metadata", packageElement)
+      if (!metadata) {
+        throw new Error(
+          "Failed to parse EPUB: found no metadata element in package document",
+        )
+      }
+
+      const titleElement = findXmlChildByNameNS(NS.dc, "title", metadata)
+
+      if (!titleElement) {
+        insert(metadata, <dc:title>{title}</dc:title>)
+      } else {
+        while (titleElement.firstChild) {
+          titleElement.removeChild(titleElement.firstChild)
+        }
+        insert(titleElement, text(title))
+      }
+    })
+  }
+
+  async setTitles(entries: { title: string; type: string | null }[]) {
+    await this.withPackage((packageElement) => {
+      const metadata = findXmlChildByNameNS(NS.opf, "metadata", packageElement)
+
+      if (!metadata) {
+        throw new Error(
+          "Failed to parse EPUB: found no metadata element in package document",
+        )
+      }
+
+      for (const meta of Array.from(metadata.children)) {
+        if (
+          meta.nodeName === "dc:title" ||
+          meta.getAttribute("property") === "title-type" ||
+          meta.getAttribute("property") === "display-seq"
+        ) {
+          metadata.removeChild(meta)
+        }
+      }
+
+      for (let i = 0; i < entries.length; i++) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const entry = entries[i]!
+        const id = xmlId()
+
+        insert(metadata, <dc:title id={id}>{entry.title}</dc:title>)
+
+        if (entry.type) {
+          insert(
+            metadata,
+            <meta refines={`#${id}`} property="title-type">
+              {entry.type}
+            </meta>,
+          )
+        }
+
+        insert(
+          metadata,
+          <meta refines={`#${id}`} property="display-seq">
+            {(i + 1).toString()}
+          </meta>,
+        )
+      }
+    })
+  }
+
+  /**
+   * Retrieve the list of collections.
+   */
+  async getCollections() {
+    const metadata = await this.getMetadata()
+
+    const collections: Collection[] = []
+
+    for (const entry of metadata) {
+      if (
+        entry.properties["property"] === "belongs-to-collection" &&
+        entry.value
+      ) {
+        const type = metadata.find(
+          (e) =>
+            e.properties["refines"] === `#${entry.id ?? ""}` &&
+            e.properties["property"] === "collection-type",
+        )?.value
+
+        const position = metadata.find(
+          (e) =>
+            e.properties["refines"] === `#${entry.id ?? ""}` &&
+            e.properties["property"] === "group-position",
+        )?.value
+
+        collections.push({
+          name: entry.value,
+          ...(type && { type }),
+          ...(position && { position }),
+        })
+      }
+    }
+
+    return collections
+  }
+
+  /**
+   * Add a collection to the EPUB metadata.
+   *
+   * If index is provided, the collection will be placed at
+   * that index in the list of collections. Otherwise, it
+   * will be added to the end of the list.
+   */
+  async addCollection(collection: Collection, index?: number) {
+    const collectionId = xmlId()
+
+    // Order matters for creators and contributors,
+    // so we can't just append these to the end of the
+    // metadata element's children using `addMetadata`.
+    // We have to manually find the correct insertion point
+    // based on the provided index
+    await this.withPackage((packageElement) => {
+      const metadata = findXmlChildByNameNS(NS.opf, "metadata", packageElement)
+      if (!metadata)
+        throw new Error(
+          "Failed to parse EPUB: found no metadata element in package document",
+        )
+
+      let collectionCount = 0
+      let metadataIndex = 0
+      for (const meta of metadata.childNodes) {
+        if (collectionCount === index) break
+        metadataIndex++
+        if (!isElement(meta)) continue
+        if (meta.nodeName !== "meta") continue
+        if (meta.getAttribute("property") !== "belongs-to-collection") continue
+        collectionCount++
+      }
+
+      insert(
+        metadata,
+        <meta id={collectionId} property="belongs-to-collection">
+          {collection.name}
+        </meta>,
+        metadata.childNodes.item(metadataIndex),
+      )
+    })
+
+    // These can all just go at the end; order is only
+    // important for the `dc:creator`/`dc:contributor`
+    // elements
+    if (collection.position) {
+      await this.addMetadata({
+        type: "meta",
+        properties: { refines: `#${collectionId}`, property: "group-position" },
+        value: collection.position,
+      })
+    }
+
+    if (collection.type) {
+      await this.addMetadata({
+        type: "meta",
+        properties: {
+          refines: `#${collectionId}`,
+          property: "collection-type",
+        },
+        value: collection.type,
+      })
+    }
+  }
+
+  /**
+   * Remove a collection from the EPUB metadata.
+   *
+   * Removes the collection at the provided index. This index
+   * refers to the array returned by `epub.getCollections()`.
+   */
+  async removeCollection(index: number) {
+    await this.withPackage((packageElement) => {
+      const metadata = findXmlChildByNameNS(NS.opf, "metadata", packageElement)
+      if (!metadata) {
+        throw new Error(
+          "Failed to parse EPUB: found no metadata element in package document",
+        )
+      }
+
+      // The index refers to what `getCollections()` returns, so filter the
+      // same way before indexing
+      const removed = Array.from(metadata.children).filter(
+        (child) =>
+          child.getAttribute("property") === "belongs-to-collection" &&
+          !!child.textContent?.trim(),
+      )[index]
+
+      if (!removed) return
+
+      const removedId = removed.getAttribute("id")
+      metadata.removeChild(removed)
+
+      if (removedId) {
+        Epub.removeRefiningMetas(metadata, new Set([removedId]))
+      }
+    })
+  }
+
+  /**
+   * Retrieve the list of creators.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dccreator
+   */
+  async getCreators(type: "creator" | "contributor" = "creator") {
+    const metadata = await this.getMetadata()
+
+    const creatorEntries = metadata.filter(
+      (entry) => entry.type === `dc:${type}`,
+    )
+
+    const creators: Array<DcCreator> = []
+    const creatorsById = new Map<string, DcCreator>()
+    for (const entry of creatorEntries) {
+      if (!entry.value) continue
+      const creator: DcCreator = { name: entry.value }
+      creators.push(creator)
+      if (entry.id) creatorsById.set(entry.id, creator)
+    }
+
+    metadata.forEach((entry) => {
+      if (
+        entry.type !== "meta" ||
+        (entry.properties["property"] !== "file-as" &&
+          entry.properties["property"] !== "role" &&
+          entry.properties["property"] !== "alternate-script") ||
+        !entry.value
+      ) {
+        return
+      }
+      const creatorIdref = entry.properties["refines"]
+      if (!creatorIdref) return
+
+      const creatorId = creatorIdref.slice(1)
+      const creator = creatorsById.get(creatorId)
+
+      if (!creator) return
+
+      if (entry.properties["alternate-script"]) {
+        if (!entry.properties["xml:lang"]) return
+        creator.alternateScripts ??= []
+        creator.alternateScripts.push({
+          name: entry.value,
+          locale: new Intl.Locale(entry.properties["xml:lang"]),
+        })
+        return
+      }
+
+      const prop =
+        entry.properties["property"] === "file-as" ? "fileAs" : "role"
+
+      creator[prop] = entry.value
+      if (prop === "role" && entry.properties["scheme"]) {
+        creator.roleScheme = entry.properties["scheme"]
+      }
+    })
+
+    return creators
+  }
+
+  /**
+   * Retrieve the list of contributors.
+   *
+   * This is a convenience method for
+   * `epub.getCreators('contributor')`.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dccontributor
+   */
+  getContributors() {
+    return this.getCreators("contributor")
+  }
+
+  /**
+   * Add a creator to the EPUB metadata.
+   *
+   * If index is provided, the creator will be placed at
+   * that index in the list of creators. Otherwise, it
+   * will be added to the end of the list.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dccreator
+   */
+  async addCreator(
+    creator: DcCreator,
+    index?: number,
+    type: "creator" | "contributor" = "creator",
+  ) {
+    const creatorId = xmlId()
+
+    // Order matters for creators and contributors,
+    // so we can't just append these to the end of the
+    // metadata element's children using `addMetadata`.
+    // We have to manually find the correct insertion point
+    // based on the provided index
+    await this.withPackage((packageElement) => {
+      const metadata = findXmlChildByNameNS(NS.opf, "metadata", packageElement)
+      if (!metadata)
+        throw new Error(
+          "Failed to parse EPUB: found no metadata element in package document",
+        )
+      let creatorCount = 0
+      let metadataIndex = 0
+      for (const meta of metadata.childNodes) {
+        if (creatorCount === index) break
+        metadataIndex++
+        if (!isElement(meta)) continue
+        if (meta.nodeName !== `dc:${type}`) continue
+        if (meta.getAttribute("property") !== "belongs-to-collection") continue
+        creatorCount++
+      }
+
+      insert(
+        metadata,
+        x(`dc:${type}`, { id: creatorId }, creator.name),
+        metadata.childNodes.item(metadataIndex),
+      )
+    })
+
+    // These can all just go at the end; order is only
+    // important for the `dc:creator`/`dc:contributor`
+    // elements
+    if (creator.role) {
+      await this.addMetadata({
+        type: "meta",
+        properties: {
+          refines: `#${creatorId}`,
+          property: "role",
+          ...(creator.roleScheme && { scheme: creator.roleScheme }),
+        },
+        value: creator.role,
+      })
+    }
+
+    if (creator.fileAs) {
+      await this.addMetadata({
+        type: "meta",
+        properties: { refines: `#${creatorId}`, property: "file-as" },
+        value: creator.fileAs,
+      })
+    }
+
+    if (creator.alternateScripts) {
+      for (const alternate of creator.alternateScripts) {
+        await this.addMetadata({
+          type: "meta",
+          properties: {
+            refines: `#${creatorId}`,
+            property: "alternate-script",
+            "xml:lang": alternate.locale.toString(),
+          },
+          value: alternate.name,
+        })
+      }
+    }
+  }
+
+  /**
+   * Remove a creator from the EPUB metadata.
+   *
+   * Removes the creator at the provided index. This index
+   * refers to the array returned by `epub.getCreators()`.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dccreator
+   */
+  async removeCreator(
+    index: number,
+    type: "creator" | "contributor" = "creator",
+  ) {
+    await this.withPackage((packageElement) => {
+      const metadata = findXmlChildByNameNS(NS.opf, "metadata", packageElement)
+      if (!metadata)
+        throw new Error(
+          "Failed to parse EPUB: found no metadata element in package document",
+        )
+
+      const toRemove = Array.from(metadata.children).filter(
+        (child) => child.nodeName === `dc:${type}`,
+      )[index]
+
+      if (!toRemove) return
+
+      const id = toRemove.getAttribute("id")
+      metadata.removeChild(toRemove)
+
+      if (id) {
+        Epub.removeRefiningMetas(metadata, new Set([id]))
+      }
+    })
+  }
+
+  /**
+   * Remove a contributor from the EPUB metadata.
+   *
+   * Removes the contributor at the provided index. This index
+   * refers to the array returned by `epub.getContributors()`.
+   *
+   * This is a convenience method for
+   * `epub.removeCreator(index, 'contributor')`.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dccreator
+   */
+  async removeContributor(index: number) {
+    return this.removeCreator(index, "contributor")
+  }
+
+  /**
+   * Add a contributor to the EPUB metadata.
+   *
+   * If index is provided, the creator will be placed at
+   * that index in the list of creators. Otherwise, it
+   * will be added to the end of the list.
+   *
+   * This is a convenience method for
+   * `epub.addCreator(contributor, index, 'contributor')`.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-opf-dccreator
+   */
+  addContributor(contributor: DcCreator, index?: number) {
+    return this.addCreator(contributor, index, "contributor")
+  }
+
+  private async getSpine() {
+    if (this.spine !== null) return this.spine
+
+    using _ = await this.packageLock.read()
+
+    const packageElement = await this.getPackageElement(false)
+
+    const spine = findXmlChildByNameNS(NS.opf, "spine", packageElement)
+
+    if (!spine)
+      throw new Error(
+        "Failed to parse EPUB: Found no spine element in package document",
+      )
+
+    this.spine = Array.from(spine.children)
+      .map((itemref) => {
+        return {
+          itemRef: itemref.getAttribute("idref"),
+          linear: itemref.getAttribute("linear") !== "no",
+          properties:
+            itemref
+              .getAttribute("properties")
+              ?.split(/\s+/)
+              .filter((property) => !!property) ?? [],
+        }
+      })
+      .filter(
+        (
+          itemref,
+        ): itemref is {
+          itemRef: string
+          properties: string[]
+          linear: boolean
+        } => !!itemref.itemRef,
+      )
+
+    return this.spine
+  }
+
+  /**
+   * Retrieve the manifest items that make up the Epub's spine.
+   *
+   * The spine specifies the order that the contents of the Epub
+   * should be displayed to users by default.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-spine-elem
+   */
+  async getSpineItems() {
+    const spine = await this.getSpine()
+    const manifest = await this.getManifest()
+
+    const spineItems: (ManifestItem & {
+      linear: boolean
+      spineProperties: string[]
+    })[] = []
+
+    for (const itemref of spine) {
+      const item = manifest[itemref.itemRef]
+      if (!item) continue
+      spineItems.push({
+        ...item,
+        linear: itemref.linear,
+        spineProperties: itemref.properties,
+      })
+    }
+
+    return spineItems
+  }
+
+  /**
+   * Get the publication-level page progression direction
+   *
+   * @link https://www.w3.org/TR/epub-33/#attrdef-spine-page-progression-direction
+   */
+  async getPageProgressionDirection() {
+    using _ = await this.packageLock.read()
+
+    const packageElement = await this.getPackageElement(false)
+
+    const spine = findXmlChildByNameNS(NS.opf, "spine", packageElement)
+
+    if (!spine) {
+      throw new Error(
+        "Failed to parse EPUB: Found no spine element in package document",
+      )
+    }
+
+    const dir = spine.getAttribute("page-progression-direction")
+    if (dir === "ltr" || dir === "rtl") return dir
+    return "default"
+  }
+
+  /**
+   * Set the publication-level page progression direction
+   *
+   * @link https://www.w3.org/TR/epub-33/#attrdef-spine-page-progression-direction
+   */
+  async setPageProgressionDirection(dir: "ltr" | "rtl" | "default") {
+    await this.withPackage((packageElement) => {
+      const spine = findXmlChildByNameNS(NS.opf, "spine", packageElement)
+
+      if (!spine) {
+        throw new Error(
+          "Failed to parse EPUB: Found no spine element in package document",
+        )
+      }
+
+      spine.setAttribute("page-progression-direction", dir)
+    })
+  }
+
+  /**
+   * Add an item to the spine of the EPUB.
+   *
+   * If `index` is undefined, the item will be added
+   * to the end of the spine. Otherwise it will be
+   * inserted at the specified index.
+   *
+   * If the manifestId does not correspond to an item
+   * in the manifest, this will throw an error.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-spine-elem
+   */
+  async addSpineItem(
+    manifestId: string,
+    index?: number,
+    options?: { linear?: boolean; spineProperties?: string[] },
+  ) {
+    const item = <itemref idref={manifestId} />
+    if (options?.linear !== undefined) {
+      item.setAttribute("linear", options.linear ? "yes" : "no")
+    }
+    if (options?.spineProperties?.length) {
+      item.setAttribute("properties", options.spineProperties.join(" "))
+    }
+
+    const manifest = await this.getManifest()
+    const manifestItem = manifest[manifestId]
+
+    if (!manifestItem)
+      throw new Error(`Manifest item not found with id "${manifestId}"`)
+
+    if ((await this.getSpine()).some(({ itemRef }) => itemRef === manifestId)) {
+      throw new Error(
+        `Manifest item "${manifestId}" is already referenced in the spine`,
+      )
+    }
+
+    if (!spineReferenceable(manifest, manifestItem)) {
+      throw new Error(
+        `Manifest item "${manifestId}" is not an EPUB content document, so it cannot be added to the spine`,
+      )
+    }
+    await this.withPackage((packageElement) => {
+      const spine = findXmlChildByNameNS(NS.opf, "spine", packageElement)
+
+      if (!spine)
+        throw new Error(
+          "Failed to parse EPUB: Found no spine element in package document",
+        )
+
+      insert(
+        spine,
+        item,
+        index === undefined
+          ? null
+          : (Array.from(spine.children)[index] ?? null),
+      )
+
+      // Reset the spine cache
+      this.spine = null
+    })
+  }
+
+  /**
+   * Remove the spine item at the specified index.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-spine-elem
+   */
+  async removeSpineItem(index: number) {
+    await this.withPackage((packageElement) => {
+      const spine = findXmlChildByNameNS(NS.opf, "spine", packageElement)
+
+      if (!spine)
+        throw new Error(
+          "Failed to parse EPUB: Found no spine element in package document",
+        )
+
+      const itemref = Array.from(spine.children)[index]
+      if (itemref) spine.removeChild(itemref)
+
+      // Reset the spine cache
+      this.spine = null
+    })
+  }
+
+  private async getNavigationChildren(
+    ol: Element,
+    navHref: string,
+    { resolveToRoot }: { resolveToRoot?: boolean | undefined } = {},
+  ): Promise<NavigationList> {
+    const children: NavigationList = []
+    const listItems = Array.from(ol.children).filter(
+      (element) => element.nodeName === "li",
+    )
+
+    for (const childEl of listItems) {
+      const [firstChild, secondChild] = Array.from(childEl.children).filter(
+        (element) => ["a", "span", "ol"].includes(element.nodeName),
+      )
+      if (!firstChild) continue
+
+      const name = firstChild.nodeName
+      if (name !== "a" && name !== "span") continue
+
+      if (name === "span" && (!secondChild || secondChild.nodeName !== "ol")) {
+        continue
+      }
+
+      const role = firstChild.getAttribute("epub:type")?.trim()
+      const href = firstChild.getAttribute("href")
+
+      children.push({
+        title: firstChild.textContent ?? "",
+        ...(name === "a" &&
+          href && {
+            href: await this.resolveHref(href, navHref, {
+              toRoot: resolveToRoot,
+            }),
+          }),
+        ...(role && { role }),
+        ...(secondChild &&
+          secondChild.nodeName === "ol" && {
+            children: await this.getNavigationChildren(secondChild, navHref, {
+              resolveToRoot,
+            }),
+          }),
+      })
+    }
+
+    return children
+  }
+
+  private async getNavigation(
+    role: "toc" | "landmarks" | "page-list",
+    { resolveToRoot }: { resolveToRoot?: boolean | undefined } = {},
+  ): Promise<Navigation | null> {
+    const manifest = await this.getManifest()
+    const navItem = Object.values(manifest).find((item) =>
+      item.properties?.includes("nav"),
+    )
+    if (!navItem) return null
+
+    const navContents = await this.readXhtmlItemContents(navItem.id)
+    const html = navContents.documentElement
+    if (!html) return null
+
+    const navEl = findXmlDescendantByName(
+      "nav",
+      html,
+      (node) => node.getAttribute("epub:type") === role,
+    )
+
+    if (!navEl) return null
+
+    const [firstChild, secondChild] = Array.from(navEl.children).filter(
+      (element) => /h[1-6]|ol/.test(element.nodeName),
+    )
+
+    if (!firstChild) return null
+
+    const title = /h[1-6]/.test(firstChild.nodeName)
+      ? (firstChild.textContent ?? "")
+      : null
+
+    const list: Element | null =
+      firstChild.nodeName === "ol"
+        ? firstChild
+        : secondChild && secondChild.nodeName === "ol"
+          ? secondChild
+          : null
+    if (!list) return null
+
+    const children = await this.getNavigationChildren(list, navItem.href, {
+      resolveToRoot,
+    })
+
+    return {
+      ...(title && { title }),
+      role,
+      children,
+    }
+  }
+
+  /**
+   * Returns the structured table of contents navigation document
+   * as a Navigation object.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-nav-toc
+   */
+  async getTableOfContents({
+    resolveToRoot,
+  }: { resolveToRoot?: boolean } = {}): Promise<Navigation | null> {
+    const navigationToc = await this.getNavigation("toc", { resolveToRoot })
+    if (navigationToc) return navigationToc
+    const ncxToc = await this.getNcxTableOfContents()
+    return {
+      role: "toc",
+      children: ncxToc,
+    }
+  }
+
+  /**
+   * Returns the structured landmarks navigation document
+   * as a Navigation object
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-nav-landmarks
+   */
+  async getLandmarks({
+    resolveToRoot,
+  }: { resolveToRoot?: boolean } = {}): Promise<Navigation | null> {
+    return this.getNavigation("landmarks", { resolveToRoot })
+  }
+
+  /**
+   * Returns the structured page list navigation document
+   * as a Navigation object
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-nav-landmarks
+   */
+  async getPageList({
+    resolveToRoot,
+  }: { resolveToRoot?: boolean } = {}): Promise<Navigation | null> {
+    return this.getNavigation("page-list", { resolveToRoot })
+  }
+
+  /**
+   * Name the entry a resolved URL addresses.
+   *
+   * A correctly authored publication percent-encodes its hrefs, so the
+   * decoded reading is the one the spec calls for and the one we prefer.
+   * Some publications instead write the entry name verbatim, so when the two
+   * readings differ we ask the archive which one it holds. A verbatim name
+   * carrying a bare `%`, as `100%.xhtml` does, is not a valid encoding at all
+   * and can only be its own answer.
+   */
+  private async entryForUrl(url: URL): Promise<string> {
+    const asWritten = url.pathname.slice(1)
+
+    let decoded: string
+    try {
+      decoded = decodeURIComponent(asWritten)
+    } catch {
+      return asWritten
+    }
+
+    if (decoded === asWritten) {
+      return decoded
+    }
+
+    if (await this.adapter.exists(decoded)) {
+      return decoded
+    }
+    return (await this.adapter.exists(asWritten)) ? asWritten : decoded
+  }
+
+  /**
+   * Resolve an href to the name of the archive entry it addresses.
+   *
+   * @param from The entry the href appears in; it resolves against that
+   *   entry's directory
+   * @throws when the href addresses something outside the publication
+   */
+  private async resolveEntry(from: string, href: string): Promise<string> {
+    const url = resolveEntryUrl(from, href)
+    if (!url) {
+      throw new Error(
+        `href does not address an entry in this publication: ${href}`,
+      )
+    }
+    return this.entryForUrl(url)
+  }
+
+  /**
+   * Returns a path-relative-scheme-less URL, relative to the
+   * container root.
+   *
+   * An href that points outside the publication, such as an external link in
+   * a navigation document, is handed back unchanged.
+   *
+   * @param href The href to resolve
+   * @param [relativeTo] Optional - The href to resolve this href relative to.
+       Use if resolving a relative href from a file other than the package document.
+   */
+  async resolveHref(
+    href: string,
+    relativeTo?: string,
+    { toRoot }: { toRoot?: boolean | undefined } = {},
+  ): Promise<string> {
+    const rootfile = await this.getRootfile()
+
+    const from = relativeTo
+      ? await this.resolveEntry(rootfile, relativeTo)
+      : rootfile
+
+    const url = resolveEntryUrl(from, href)
+    if (!url) return href
+
+    const entry = url.pathname.slice(1).split("/")
+
+    const base = toRoot ? [] : rootfile.split("/").slice(0, -1)
+    let shared = 0
+    while (shared < base.length && base[shared] === entry[shared]) {
+      shared++
+    }
+
+    const relative = [
+      ...Array<string>(base.length - shared).fill(".."),
+      ...entry.slice(shared),
+    ]
+    return ensureEncodedPath(relative.join("/")) + url.hash
+  }
+
+  /**
+   * Retrieve the contents of a file, given its href.
+   *
+   * Optionally takes the href that this href should be resolved relative to,
+   * and an encoding parameter.
+   *
+   * @param href The href of the file to retrieve
+   * @param [relitaveTo] Optional - The href to resolve this href relative to.
+   *   Use if resolving a relative href from a file other than the package document.
+   * @param [encoding] Optional - Must be the string "utf-8". If provided,
+   *   the function will encode the data into a unicode string.
+   *   Otherwise, the data will be returned as a byte array.
+   */
+  async readFileContents(href: string, relativeTo?: string): Promise<Uint8Array>
+  async readFileContents(
+    href: string,
+    relativeTo: string | undefined,
+    encoding: "utf-8",
+  ): Promise<string>
+  async readFileContents(
+    href: string,
+    relativeTo?: string,
+    encoding?: "utf-8",
+  ): Promise<string | Uint8Array> {
+    const rootfile = await this.getRootfile()
+    const from = relativeTo
+      ? await this.resolveEntry(rootfile, relativeTo)
+      : rootfile
+    const entry = await this.resolveEntry(from, href)
+
+    const itemEntry = encoding
+      ? await this.adapter.read(entry, encoding)
+      : await this.adapter.read(entry)
+    return itemEntry
+  }
+
+  /**
+   * Retrieve the contents of a manifest item, given its id.
+   *
+   * @param id The id of the manifest item to retrieve
+   * @param [encoding] Optional - must be the string "utf-8". If
+   *  provided, the function will encode the data into a unicode string.
+   *  Otherwise, the data will be returned as a byte array.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-contentdocs
+   */
+  async readItemContents(id: string): Promise<Uint8Array>
+  async readItemContents(id: string, encoding: "utf-8"): Promise<string>
+  async readItemContents(
+    id: string,
+    encoding?: "utf-8",
+  ): Promise<string | Uint8Array> {
+    const rootfile = await this.getRootfile()
+    const manifest = await this.getManifest()
+    const manifestItem = manifest[id]
+
+    if (!manifestItem)
+      throw new Error(`Could not find item with id "${id}" in manifest`)
+
+    const entry = await this.resolveEntry(rootfile, manifestItem.href)
+    const itemEntry = encoding
+      ? await this.adapter.read(entry, encoding)
+      : await this.adapter.read(entry)
+    return itemEntry
+  }
+
+  /**
+   * Create a new XML document with the given root node.
+   *
+   * @param root The XML node to use as the document element
+   * @param language Optional - defaults to the EPUB's language
+   */
+  createXmlDocument(root: Element) {
+    const document = createDocument(
+      root.namespaceURI ?? root.getAttribute("xmlns"),
+      root.nodeName,
+      null,
+    )
+    const docRoot = document.documentElement
+    if (!docRoot) throw new Error("Failed to create XML document")
+
+    for (const attr of root.attributes) {
+      docRoot.setAttributeNode(attr.cloneNode() as Attr)
+    }
+
+    for (const child of Array.from(root.childNodes)) {
+      insert(docRoot, child)
+    }
+
+    document.insertBefore(
+      document.createProcessingInstruction(
+        "xml",
+        'version="1.0" encoding="UTF-8"',
+      ),
+      docRoot,
+    )
+
+    return document
+  }
+
+  /**
+   * Create a new XHTML document with the given body
+   * and head.
+   *
+   * @param body The XML nodes to place in the body of the document
+   * @param head Optional - the XMl nodes to place in the head
+   * @param language Optional - defaults to the EPUB's language
+   */
+  async createXhtmlDocument(
+    body: Node[],
+    head?: Node[],
+    language?: Intl.Locale,
+  ): Promise<Document> {
+    const lang = language ?? (await this.getLanguage())
+
+    const document = createDocument(
+      NS.xhtml,
+      "html",
+      createDocumentType("html", "", ""),
+    )
+    const html = document.documentElement
+    if (!html) throw new Error("Failed to create XHTML document")
+
+    html.setAttributeNS(NS.xmlns, "xmlns:epub", NS.epub)
+
+    if (lang) {
+      html.setAttributeNS(NS.xml, "xml:lang", lang.toString())
+      html.setAttribute("lang", lang.toString())
+    }
+
+    const headElement = document.createElement("head")
+    for (const node of head ?? []) insert(headElement, node)
+    insert(html, headElement)
+
+    const bodyElement = document.createElement("body")
+    for (const node of body) insert(bodyElement, node)
+    insert(html, bodyElement)
+
+    document.insertBefore(
+      document.createProcessingInstruction(
+        "xml",
+        'version="1.0" encoding="UTF-8"',
+      ),
+      document.doctype,
+    )
+
+    return document
+  }
+
+  /**
+   * Retrieves the contents of an XHTML item, given its manifest id.
+   *
+   * @param id The id of the manifest item to retrieve
+   * @param [as] Optional - whether to return the parsed XML document tree,
+   *  or the concatenated text of the document. Defaults to the parsed XML tree.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-xhtml
+   */
+  async readXhtmlItemContents(id: string, as?: "xhtml"): Promise<Document>
+  async readXhtmlItemContents(id: string, as: "text"): Promise<string>
+  async readXhtmlItemContents(
+    id: string,
+    as: "xhtml" | "text" = "xhtml",
+  ): Promise<Document | string> {
+    const contents = await this.readItemContents(id, "utf-8")
+    const document = parse(contents, "application/xhtml+xml")
+    if (as === "xhtml") return document
+
+    return getXhtmlBody(document).textContent ?? ""
+  }
+
+  private async writeEntryContents(
+    path: string,
+    contents: Uint8Array,
+  ): Promise<void>
+  private async writeEntryContents(
+    path: string,
+    contents: string,
+    encoding: "utf-8",
+  ): Promise<void>
+  private async writeEntryContents(
+    path: string,
+    contents: Uint8Array | string,
+    encoding?: "utf-8",
+  ): Promise<void> {
+    this.assertWritable()
+    if (!this.adapter.write) {
+      throw new EpubReadOnlyError(
+        `adapter ${this.adapterClass.kind} does not support writes`,
+      )
+    }
+    if (encoding === "utf-8") {
+      await this.adapter.write(path, contents as string, encoding)
+    } else {
+      await this.adapter.write(path, contents as Uint8Array)
+    }
+  }
+
+  /**
+   * Write new contents for an existing manifest item,
+   * specified by its id.
+   *
+   * The id must reference an existing manifest item. If
+   * creating a new item, use `epub.addManifestItem()` instead.
+   *
+   * @param id The id of the manifest item to write new contents for
+   * @param contents The new contents. May be either a utf-8 encoded string
+   *  or a byte array, as determined by the encoding
+   * @param [encoding] Optional - must be the string "utf-8". If provided,
+   *  the contents will be interpreted as a unicode string. Otherwise, the
+   *  contents must be a byte array.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-contentdocs
+   */
+  async writeItemContents(id: string, contents: Uint8Array): Promise<void>
+  async writeItemContents(
+    id: string,
+    contents: string,
+    encoding: "utf-8",
+  ): Promise<void>
+  async writeItemContents(
+    id: string,
+    contents: Uint8Array | string,
+    encoding?: "utf-8",
+  ): Promise<void> {
+    const rootfile = await this.getRootfile()
+    const manifest = await this.getManifest()
+    const manifestItem = manifest[id]
+    if (!manifestItem)
+      throw new Error(`Could not find item with id "${id}" in manifest`)
+
+    // readXhtmlItemContents is already explicitly bound in the constructor
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    memoize.clear(this.readXhtmlItemContents)
+    const entry = await this.resolveEntry(rootfile, manifestItem.href)
+    if (encoding === "utf-8") {
+      await this.writeEntryContents(entry, contents as string, encoding)
+    } else {
+      await this.writeEntryContents(entry, contents as Uint8Array)
+    }
+  }
+
+  /**
+   * Write new contents for an existing XHTML item,
+   * specified by its id.
+   *
+   * The id must reference an existing manifest item. If
+   * creating a new item, use `epub.addManifestItem()` instead.
+   *
+   * @param id The id of the manifest item to write new contents for
+   * @param contents The new contents. Must be a parsed XML tree.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-xhtml
+   */
+  async writeXhtmlItemContents(id: string, contents: Document): Promise<void> {
+    await this.writeItemContents(id, serialize(contents), "utf-8")
+  }
+
+  async removeManifestItem(id: string) {
+    await this.withPackage(async (packageElement) => {
+      const manifest = findXmlChildByNameNS(NS.opf, "manifest", packageElement)
+
+      if (!manifest)
+        throw new Error(
+          "Failed to parse EPUB: Found no manifest element in package document",
+        )
+
+      const item = Array.from(manifest.children).find(
+        (element) => element.getAttribute("id") === id,
+      )
+
+      if (!item) return
+
+      const href = item.getAttribute("href")
+      manifest.removeChild(item)
+
+      const spine = findXmlChildByNameNS(NS.opf, "spine", packageElement)
+
+      if (spine) {
+        for (const itemref of Array.from(spine.children)) {
+          if (itemref.getAttribute("idref") === id) spine.removeChild(itemref)
+        }
+      }
+
+      if (!href) return
+
+      await this.removeEntry(href)
+      // Reset the cached manifest and spine, so that they will be read from
+      // the updated XML next time
+      this.manifest = null
+      this.spine = null
+    })
+  }
+
+  private assertEncodedHref(href: string) {
+    if (href !== ensureEncodedPath(href)) {
+      throw new Error(`Manifest hrefs must be URI encoded. Received ${href}`)
+    }
+  }
+
+  /**
+   * Create a new manifest item and write its contents to a
+   * new entry.
+   *
+   * @param id The id of the manifest item to write new contents for
+   * @param contents The new contents. May be either a parsed XML tree
+   *  or a unicode string, as determined by the `as` argument.
+   * @param encoding Optional - whether to interpret contents as a parsed
+   *  XML tree, a unicode string, or a byte array. Defaults to a byte array.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-pkg-manifest
+   * @link https://www.w3.org/TR/epub-33/#sec-contentdocs
+   */
+  async addManifestItem(
+    item: ManifestItem,
+    contents: Document,
+    encoding: "xml",
+  ): Promise<void>
+  async addManifestItem(
+    item: ManifestItem,
+    contents: string,
+    encoding: "utf-8",
+  ): Promise<void>
+  async addManifestItem(item: ManifestItem, contents: Uint8Array): Promise<void>
+  async addManifestItem(
+    item: ManifestItem,
+    contents: string | Uint8Array | Document,
+    encoding?: "utf-8" | "xml",
+  ): Promise<void> {
+    const existingItems = Object.values(await this.getManifest())
+
+    if (existingItems.some((existing) => existing.id === item.id)) {
+      throw new Error(
+        `Cannot add manifest item: an item with the id "${item.id}" already exists`,
+      )
+    }
+
+    this.assertEncodedHref(item.href)
+
+    // 4.2.1: hrefs that normalize and case-fold to the same path would
+    // overwrite each other on a normalizing filesystem.
+    const foldedHref = foldPathName(item.href)
+
+    for (const existing of existingItems) {
+      if (foldPathName(existing.href) === foldedHref) {
+        throw new Error(
+          `Cannot add manifest item: "${item.href}" collides with the existing item "${existing.href}"`,
+        )
+      }
+    }
+
+    await this.withPackage((packageElement) => {
+      const manifest = findXmlChildByNameNS(NS.opf, "manifest", packageElement)
+
+      if (!manifest)
+        throw new Error(
+          "Failed to parse EPUB: Found no manifest element in package document",
+        )
+
+      insert(
+        manifest,
+        <item
+          id={item.id}
+          href={item.href}
+          {...(item.mediaType && { "media-type": item.mediaType })}
+          {...(item.fallback && { fallback: item.fallback })}
+          {...(item.mediaOverlay && { "media-overlay": item.mediaOverlay })}
+          {...(item.properties && { properties: item.properties.join(" ") })}
+        />,
+      )
+      // Reset the cached manifest, so that it will be read from
+      // the updated XML next time
+      this.manifest = null
+    })
+
+    const rootfile = await this.getRootfile()
+
+    const filename = await this.resolveEntry(rootfile, item.href)
+
+    /* oxlint-disable typescript/no-unnecessary-type-assertion -- tsgolint treats these casts as unnecessary, but each one still narrows the value that is written out */
+    const data =
+      encoding === "utf-8" || encoding === "xml"
+        ? new TextEncoder().encode(
+            encoding === "utf-8"
+              ? (contents as string)
+              : serialize(contents as Document),
+          )
+        : (contents as Uint8Array)
+    /* oxlint-enable typescript/no-unnecessary-type-assertion */
+
+    await this.writeEntryContents(filename, data)
+  }
+
+  /**
+   * Update the manifest entry for an existing item.
+   *
+   * To update the contents of an entry, use `epub.writeItemContents()`
+   * or `epub.writeXhtmlItemContents()`
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-pkg-manifest
+   */
+  async updateManifestItem(id: string, newItem: Omit<ManifestItem, "id">) {
+    this.assertEncodedHref(newItem.href)
+
+    await this.withPackage((packageElement) => {
+      const manifest = findXmlChildByNameNS(NS.opf, "manifest", packageElement)
+
+      if (!manifest)
+        throw new Error(
+          "Failed to parse EPUB: Found no manifest element in package document",
+        )
+
+      const existing = Array.from(manifest.children).find(
+        (element) => element.getAttribute("id") === id,
+      )
+
+      if (!existing) return
+
+      replace(
+        manifest,
+        <item
+          id={id}
+          href={newItem.href}
+          {...(newItem.mediaType && { "media-type": newItem.mediaType })}
+          {...(newItem.fallback && { fallback: newItem.fallback })}
+          {...(newItem.mediaOverlay && {
+            "media-overlay": newItem.mediaOverlay,
+          })}
+          {...(newItem.properties && {
+            properties: newItem.properties.join(" "),
+          })}
+        />,
+        existing,
+      )
+      // Reset the cached manifest, so that it will be read from
+      // the updated XML next time
+      this.manifest = null
+    })
+  }
+
+  /**
+   * Add a new metadata entry to the Epub.
+   *
+   * This method, like `epub.getMetadata()`, operates on
+   * metadata entries. For more useful semantic representations
+   * of metadata, use specific methods such as `setTitle()` and
+   * `setLanguage()`.
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-pkg-metadata
+   */
+  async addMetadata(entry: MetadataEntry) {
+    await this.withPackage((packageElement) => {
+      const metadata = findXmlChildByNameNS(NS.opf, "metadata", packageElement)
+      if (!metadata)
+        throw new Error(
+          "Failed to parse EPUB: found no metadata element in package document",
+        )
+
+      insert(
+        metadata,
+        x(
+          entry.type,
+          {
+            ...(entry.id && { id: entry.id }),
+            ...entry.properties,
+          },
+          entry.value,
+        ),
+      )
+    })
+  }
+
+  /**
+   * Replace a metadata entry with a new one.
+   *
+   * The `predicate` argument will be used to determine which entry
+   * to replace. The first metadata entry that matches the
+   * predicate will be replaced.
+   *
+   * @param predicate Calls predicate once for each metadata entry,
+   *  until it finds one where predicate returns true
+   * @param entry The new entry to replace the found entry with
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-pkg-metadata
+   */
+  async replaceMetadata(
+    predicate: (entry: MetadataEntry) => boolean,
+    entry: MetadataEntry,
+  ) {
+    await this.withPackage((packageElement) => {
+      const metadataElement = findXmlChildByNameNS(
+        NS.opf,
+        "metadata",
+        packageElement,
+      )
+      if (!metadataElement)
+        throw new Error(
+          "Failed to parse EPUB: found no metadata element in package document",
+        )
+
+      const oldEntryIndex = this.findMetadataIndex(packageElement, predicate)
+
+      const newElement = x(
+        entry.type,
+        {
+          ...(entry.id && { id: entry.id }),
+          ...entry.properties,
+        },
+        entry.value,
+      )
+
+      const existing =
+        oldEntryIndex === -1
+          ? null
+          : (Array.from(metadataElement.children)[oldEntryIndex] ?? null)
+
+      if (existing) {
+        replace(metadataElement, newElement, existing)
+      } else {
+        insert(metadataElement, newElement)
+      }
+    })
+  }
+
+  /**
+   * Remove one or more metadata entries.
+   *
+   * The `predicate` argument will be used to determine which entries
+   * to remove. The all metadata entries that match the
+   * predicate will be removed.
+   *
+   * @param predicate Calls predicate once for each metadata entry,
+   *  removing any for which it returns true
+   *
+   * @link https://www.w3.org/TR/epub-33/#sec-pkg-metadata
+   */
+  async removeMetadata(predicate: (entry: MetadataEntry) => boolean) {
+    await this.withPackage((packageElement) => {
+      const metadataElement = findXmlChildByNameNS(
+        NS.opf,
+        "metadata",
+        packageElement,
+      )
+      if (!metadataElement) {
+        throw new Error(
+          "Failed to parse EPUB: found no metadata element in package document",
+        )
+      }
+
+      for (const meta of Array.from(metadataElement.children)) {
+        const item = Epub.parseMetadataItem(meta)
+        if (predicate(item)) {
+          metadataElement.removeChild(meta)
+        }
+      }
+    })
+  }
+
+  /**
+   * Returns the EPUB version declared on the package element.
+   */
+  async getVersion(): Promise<string> {
+    const packageElement = await this.getPackageElement()
+    return packageElement.getAttribute("version") ?? "2.0"
+  }
+
+  /**
+   * Parse the NCX table of contents, if one exists, and return
+   * a tree of TocEntry nodes.
+   *
+   * Useful for both EPUB 2 publications (where the NCX is the
+   * primary navigation) and EPUB 3 publications that retain an
+   * NCX for backwards compatibility.
+   */
+  async getNcxTableOfContents(): Promise<NavigationList> {
+    const [manifest, packageElement] = await Promise.all([
+      this.getManifest(),
+      this.getPackageElement(),
+    ])
+
+    const spine = findXmlChildByNameNS(NS.opf, "spine", packageElement)
+
+    const spineTocId = spine?.getAttribute("toc")
+
+    const ncxItem = spineTocId
+      ? manifest[spineTocId]
+      : Object.values(manifest).find(
+          (item) => MediaType.fromMime(item.mediaType ?? "") === MediaType.NCX,
+        )
+
+    if (!ncxItem) return []
+
+    const ncxContent = await this.readItemContents(ncxItem.id, "utf-8")
+    const ncxElement = parse(ncxContent, "text/xml").documentElement
+    if (!ncxElement || ncxElement.localName !== "ncx") return []
+
+    const navMap =
+      findXmlChildByName("navMap", ncxElement) ??
+      findXmlChildByName("navmap", ncxElement)
+
+    if (!navMap) return []
+
+    return this.parseNavPoints(navMap, ncxItem.href)
+  }
+
+  private async parseNavPoints(
+    parent: Element,
+    ncxHref: string,
+  ): Promise<NavigationList> {
+    const entries: NavigationList = []
+
+    for (const node of Array.from(parent.children)) {
+      if (node.nodeName !== "navPoint" && node.nodeName !== "navpoint") {
+        continue
+      }
+
+      const navLabel =
+        findXmlChildByName("navLabel", node) ??
+        findXmlChildByName("navlabel", node)
+
+      let title: string | null = null
+      if (navLabel) {
+        const textEl = findXmlChildByName("text", navLabel)
+        if (textEl) {
+          title = textEl.textContent?.trim() || null
+        }
+      }
+
+      const contentEl = findXmlChildByName("content", node)
+      const src = contentEl?.getAttribute("src")
+      const href = src ? await this.resolveHref(src, ncxHref) : null
+
+      const childEntries = await this.parseNavPoints(node, ncxHref)
+
+      entries.push({
+        title: title ?? `${entries.length}`,
+        ...(href && { href }),
+        children: childEntries,
+      })
+    }
+
+    return entries
+  }
+
+  /**
+   * Retrieve the guide entries from the package document.
+   *
+   * The guide element is deprecated in EPUB 3 in favor of
+   * the landmarks nav, but many publications still include it.
+   */
+  async getGuideEntries(): Promise<GuideItem[]> {
+    const packageElement = await this.getPackageElement()
+
+    const guide = findXmlChildByNameNS(NS.opf, "guide", packageElement)
+
+    if (!guide) return []
+
+    return Array.from(guide.children)
+      .filter((reference) => reference.nodeName === "reference")
+      .map((reference) => ({
+        href: reference.getAttribute("href") ?? "",
+        title: reference.getAttribute("title") ?? "",
+        type: (reference.getAttribute("type") ?? "").toLowerCase(),
+      }))
+      .filter((entry) => entry.href)
+  }
+
+  discardAndClose() {
+    this.rootfile = null
+    this.manifest = null
+    this.spine = null
+    void this.adapter.dispose()
+  }
+
+  /**
+   * Write the current contents of the Epub to a new
+   * EPUB archive on disk.
+   *
+   * When this method is called, the "dcterms:modified"
+   * meta tag is automatically updated to the current UTC
+   * timestamp.
+   */
+  async saveAndClose() {
+    this.assertWritable()
+    if (!this.inputPath) {
+      throw new Error("In-memory EPUB files cannot be saved to disk")
+    }
+    if (!this.adapter.serialize) {
+      throw new Error(
+        `adapter ${this.adapterClass.kind} does not support serialization`,
+      )
+    }
+    await this.replaceMetadata(
+      (entry) => entry.properties["property"] === "dcterms:modified",
+      {
+        type: "meta",
+        properties: { property: "dcterms:modified" },
+        // We need UTC with integer seconds, but toISOString gives UTC with ms
+        value: new Date().toISOString().replace(/\.\d+/, ""),
+      },
+    )
+
+    await this.adapter.serialize(this.inputPath)
+  }
+
+  /**
+   * Upgrade an EPUB 2 publication to EPUB 3 in place, returning a new,
+   * valid Epub 3 instance. Equivalent to
+   * `Epub.using(TmpFsAdapter).upgrade(...)`.
+   */
+  static async upgrade(
+    path: string,
+    options: Upgrade.Epub2UpgradeOptions = {},
+  ): Promise<Epub> {
+    return Epub.using(TmpFsAdapter).upgrade(path, options)
+  }
+
+  [Symbol.dispose]() {
+    this.discardAndClose()
+  }
+}
+
+/**
+ * Resolves to {@link Epub} for writable adapters, {@link EpubReader} for read-only ones.
+ *
+ * The conditional pivots on `capabilities.writable`, which must be a literal
+ * `true`/`false` on the adapter class (use `as const`) for inference to work.
+ */
+export type EpubInstanceFor<A extends EpubStorageAdapterClass> =
+  A["capabilities"]["writable"] extends true ? Epub : EpubReader
+
+/**
+ * Adapter-bound factory returned by {@link Epub.using}.
+ *
+ * Mirrors the static factory surface (`from`, `create`, `upgrade`) but routes
+ * all I/O through the supplied adapter. Each method's signature degrades
+ * gracefully when the adapter doesn't support the operation: `create` and
+ * `upgrade` throw at runtime if the adapter is read-only or lacks `initEmpty`.
+ */
+export class EpubFactory<A extends EpubStorageAdapterClass> {
+  constructor(public readonly adapterClass: A) {}
+
+  /**
+   * Open an existing EPUB through this factory's adapter
+   *
+   * @throws {EpubVersionError} when the archive is not a valid EPUB 3
+   */
+  from(
+    source: ArchiveSource,
+    options: FromOptions & { readonly: true } & AdapterOptions<A>,
+  ): Promise<EpubReader & { storage: A["kind"] }>
+  from(
+    source: ArchiveSource,
+    options?: FromOptions & AdapterOptions<A>,
+  ): Promise<EpubInstanceFor<A> & { storage: A["kind"] }>
+  async from(
+    source: ArchiveSource,
+    options: FromOptions = {},
+  ): Promise<
+    (Epub & { storage: A["kind"] }) | (EpubReader & { storage: A["kind"] })
+  > {
+    const adapter = await this.adapterClass.init(
+      source, // oxlint-disable-line typescript/no-unnecessary-type-assertion
+      options as AdapterOptions<A>,
+    )
+    const inputPath = typeof source === "string" ? source : undefined
+    const readonlyOverride = options.readonly === true
+
+    const epub = new Epub(
+      this.adapterClass,
+      adapter,
+      inputPath,
+      readonlyOverride,
+    )
+
+    try {
+      await epub.getPackageElement()
+    } catch (e) {
+      epub.discardAndClose()
+      console.error(e)
+      throw new Error(
+        "This is not a valid EPUB publication. Could not read the package document.",
+      )
+    }
+
+    try {
+      await Epub.assertEpub3(epub)
+    } catch (error) {
+      epub.discardAndClose()
+      throw error
+    }
+    return epub
+  }
+
+  async readPackageDocumentSource(
+    source: ArchiveSource,
+    options: AdapterOptions<A> = {} as AdapterOptions<A>,
+  ): Promise<string> {
+    const adapter = await this.adapterClass.init(source, options)
+    const epub = new Epub(
+      this.adapterClass,
+      adapter,
+      typeof source === "string" ? source : undefined,
+      true,
+    )
+
+    try {
+      return await epub.getPackageDocumentSource()
+    } finally {
+      epub.discardAndClose()
+    }
+  }
+
+  /**
+   * Construct a new EPUB on this factory's adapter, optionally seeded
+   * with the provided metadata. Requires a writable adapter that
+   * implements `initEmpty` (today: {@link TmpFsAdapter}).
+   *
+   * @throws when the adapter is read-only or does not implement initEmpty
+   */
+  async create(
+    path: string,
+    {
+      title,
+      language,
+      identifier,
+      date,
+      subjects,
+      type,
+      creators,
+      contributors,
+    }: DublinCore,
+    additionalMetadata: EpubMetadata = [],
+  ): Promise<EpubInstanceFor<A>> {
+    if (!this.adapterClass.capabilities.writable) {
+      throw new EpubReadOnlyError(
+        `adapter ${this.adapterClass.kind} is read-only; cannot create`,
+      )
+    }
+    if (!this.adapterClass.initEmpty) {
+      throw new Error(
+        `adapter ${this.adapterClass.kind} does not support create() (missing initEmpty)`,
+      )
+    }
+
+    const adapter = await this.adapterClass.initEmpty()
+    if (!adapter.write) {
+      // unreachable: a writable adapter must implement write
+      throw new Error(
+        `adapter ${this.adapterClass.kind} declared writable but did not implement write()`,
+      )
+    }
+
+    const textInfo =
+      typeof language.getTextInfo === "function"
+        ? language.getTextInfo()
+        : language.textInfo
+
+    const epub = new Epub(this.adapterClass, adapter, path)
+    const container = epub.createXmlDocument(
+      <container
+        version="1.0"
+        xmlns="urn:oasis:names:tc:opendocument:xmlns:container"
+      >
+        <rootfiles>
+          <rootfile
+            media-type={MediaType.OPF.mime}
+            full-path="OEBPS/content.opf"
+          />
+        </rootfiles>
+      </container>,
+    )
+
+    await adapter.write("META-INF/container.xml", serialize(container), "utf-8")
+
+    const packageDocument = epub.createXmlDocument(
+      <package
+        xmlns={NS.opf}
+        unique-identifier="pub-id"
+        dir={textInfo?.direction ?? "ltr"}
+        xml:lang={language.toString()}
+        version="3.0"
+        xmlns:dc="http://purl.org/dc/elements/1.1/"
+      >
+        <metadata />
+        <manifest />
+        <spine />
+      </package>,
+    )
+
+    await adapter.write(
+      "OEBPS/content.opf",
+      serialize(packageDocument),
+      "utf-8",
+    )
+
+    const metadata: MetadataEntry[] = [
+      {
+        id: "pub-id",
+        type: "dc:identifier",
+        properties: {},
+        value: identifier,
+      },
+      ...additionalMetadata,
+    ]
+
+    await Promise.all(metadata.map((entry) => epub.addMetadata(entry)))
+
+    await epub.setTitle(title)
+    await epub.setLanguage(language)
+
+    if (date) await epub.setPublicationDate(date)
+    if (type) await epub.setType(type)
+    if (subjects) {
+      await Promise.all(subjects.map((subject) => epub.addSubject(subject)))
+    }
+    if (creators) {
+      await Promise.all(creators.map((creator) => epub.addCreator(creator)))
+    }
+    if (contributors) {
+      await Promise.all(
+        contributors.map((contributor) => epub.addContributor(contributor)),
+      )
+    }
+
+    return epub as EpubInstanceFor<A> // oxlint-disable-line typescript/no-unnecessary-type-assertion
+  }
+
+  /**
+   * Upgrade an EPUB 2 publication to EPUB 3 in place using this
+   * factory's adapter, returning a new, valid Epub 3 instance.
+   *
+   * Performs the following transformations:
+   *  - upgrades OPF metadata to EPUB 3 conventions
+   *  - scans XHTML documents and adds manifest item properties
+   *  - parses the NCX into a TOC tree and generates a nav.xhtml
+   *  - removes the NCX file and the guide element (configurable)
+   *  - fixes common font MIME types
+   *  - bumps the package version to 3.0
+   *  - goes over each xhtml item and rewrites it using XMLParser to make sure the output is valid XHTML
+   *
+   * Requires a writable adapter. When {@link Upgrade.Epub2UpgradeOptions.outputPath}
+   * is set, the source file is copied to that path on disk first; this
+   * only makes sense for adapters whose `source` is a real fs path.
+   *
+   * @throws when the adapter is read-only
+   */
+  async upgrade(
+    path: string,
+    options: Upgrade.Epub2UpgradeOptions = {},
+  ): Promise<EpubInstanceFor<A>> {
+    if (!this.adapterClass.capabilities.writable) {
+      throw new EpubReadOnlyError(
+        `adapter ${this.adapterClass.kind} is read-only; cannot upgrade`,
+      )
+    }
+    const { removeNcx = false, outputPath } = options
+
+    if (outputPath) await copyFile(path, outputPath)
+
+    const source = outputPath ?? path
+    const adapter = await this.adapterClass.init(
+      source, // oxlint-disable-line typescript/no-unnecessary-type-assertion
+      options as AdapterOptions<A>,
+    )
+    const epub = new Epub(this.adapterClass, adapter, source)
+    try {
+      await epub.getPackageElement()
+    } catch (e) {
+      epub.discardAndClose()
+      console.error(e)
+      throw new Error(
+        "This is not a valid EPUB publication. Could not read the package document.",
+      )
+    }
+
+    try {
+      const version = await epub.getVersion()
+      if (version.startsWith("3.")) {
+        // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
+        return epub as EpubInstanceFor<A>
+      }
+
+      const tocEntries = await epub.getNcxTableOfContents()
+
+      let landmarks: Upgrade.Landmark[] = []
+
+      await epub.withPackage((pkg) => {
+        landmarks = Upgrade.extractGuideLandmarks(pkg)
+
+        Upgrade.upgradePackageMetadata(pkg)
+        Upgrade.fixFontMimeTypes(pkg)
+        Upgrade.removeGuide(pkg)
+
+        if (removeNcx) {
+          Upgrade.removeSpineTocRef(pkg)
+        }
+
+        Upgrade.setPackageVersion(pkg, "3.0")
+      })
+
+      // scan xhtml items for svg/script/mathml/switch properties
+      await Upgrade.collectManifestProperties(epub)
+
+      // maybe remove ncx
+      if (removeNcx) {
+        await Upgrade.removeNcx(epub)
+      }
+
+      const navHref = await Upgrade.chooseNavHref(epub)
+      const navContent = await Upgrade.buildNavDocument(
+        epub,
+        tocEntries,
+        landmarks,
+      )
+
+      await epub.addManifestItem(
+        {
+          id: "nav",
+          href: navHref,
+          mediaType: MediaType.XHTML.mime,
+          properties: ["nav"],
+        },
+        navContent,
+        "utf-8",
+      )
+
+      // XHTML 1.x doctypes are not valid HTML5, so rewrite them to
+      // <!DOCTYPE html> as part of the upgrade.
+      const manifest = await epub.getManifest()
+      for (const item of Object.values(manifest)) {
+        if (MediaType.fromMime(item.mediaType ?? "") !== MediaType.XHTML)
+          continue
+
+        const contents = await epub.readXhtmlItemContents(item.id)
+        Upgrade.normalizeDoctype(contents)
+        await epub.writeXhtmlItemContents(item.id, contents)
+      }
+
+      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
+      return epub as EpubInstanceFor<A>
+    } catch (error) {
+      epub.discardAndClose()
+      throw error
+    }
+  }
+}
+
+export type { Epub2UpgradeOptions, Landmark } from "./upgrade.tsx"

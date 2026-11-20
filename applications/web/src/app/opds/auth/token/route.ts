@@ -1,49 +1,34 @@
 import { NextResponse } from "next/server"
+import { z } from "zod"
 
-import { createUserToken } from "@/auth/auth"
+import { MediaType } from "@storyteller/media-types"
+
+import { authenticateUser } from "@/auth/auth"
 import { logger } from "@/logging"
+import { createOPDSToken } from "@/opds/auth"
 
 export const dynamic = "force-dynamic"
 
+const TokenRequestSchema = z.object({
+  grant_type: z.string(),
+  username: z.string(),
+  password: z.string(),
+})
+
 export async function POST(request: Request) {
   try {
-    let password: string | null = null
-    let username: string | null = null
-    let grant_type: string | null = null
+    let body: unknown
     try {
-      if (request.headers.get("Content-Type") === "application/json") {
-        const body = (await request.json()) as {
-          username: string
-          password: string
-          grant_type: string
-        }
-        password = body.password
-        username = body.username
-        grant_type = body.grant_type
-      } else {
-        const body = await request.formData()
-        const pw = body.get("password")?.valueOf()
-        const uname = body.get("username")?.valueOf()
-        const gtype = body.get("grant_type")?.valueOf()
-        if (
-          typeof pw !== "string" ||
-          typeof uname !== "string" ||
-          typeof gtype !== "string"
-        ) {
-          return NextResponse.json(
-            {
-              error: "invalid_request",
-              error_description: "Invalid request body",
-            },
-            { status: 400 },
-          )
-        }
-        password = pw
-        username = uname
-        grant_type = gtype
-      }
+      body =
+        request.headers.get("Content-Type") === MediaType.JSON.mime
+          ? await request.json()
+          : Object.fromEntries(await request.formData())
     } catch (err) {
       logger.error({ msg: "Error parsing request body", err })
+    }
+
+    const parsed = TokenRequestSchema.safeParse(body)
+    if (!parsed.success) {
       return NextResponse.json(
         {
           error: "invalid_request",
@@ -52,6 +37,8 @@ export async function POST(request: Request) {
         { status: 400 },
       )
     }
+
+    const { grant_type, username, password } = parsed.data
 
     if (grant_type !== "password") {
       return NextResponse.json(
@@ -73,14 +60,31 @@ export async function POST(request: Request) {
       )
     }
 
-    const tokenResponse = await createUserToken(username, password)
+    const user = await authenticateUser(username, password)
+    if (!user) {
+      return NextResponse.json(
+        {
+          error: "invalid_grant",
+          error_description: "Invalid username or password",
+        },
+        { status: 400 },
+      )
+    }
 
-    return NextResponse.json(tokenResponse, {
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store",
+    const token = await createOPDSToken(
+      user.id,
+      request.headers.get("User-Agent"),
+    )
+
+    return NextResponse.json(
+      { access_token: token, token_type: "bearer" },
+      {
+        headers: {
+          "Content-Type": MediaType.JSON.mime,
+          "Cache-Control": "no-store",
+        },
       },
-    })
+    )
   } catch {
     return NextResponse.json(
       {

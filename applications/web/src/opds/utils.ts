@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server"
 
+import { ATOM_ACQ, ATOM_NAV } from "@storyteller/opds"
+
 import { getSettings } from "@/database/settings"
+import { SETTINGS_DEFAULTS } from "@/database/settingsTypes"
 
 export async function getOPDSConfig() {
   const settings = await getSettings()
@@ -8,7 +11,12 @@ export async function getOPDSConfig() {
   return {
     enabled: settings.opdsEnabled,
     pageSize: settings.opdsPageSize,
-    format: settings.opdsFormat ?? "readaloud",
+    formats: settings.opdsFormats,
+    sort: {
+      field: settings.opdsSortField ?? SETTINGS_DEFAULTS.opdsSortField,
+      direction:
+        settings.opdsSortDirection ?? SETTINGS_DEFAULTS.opdsSortDirection,
+    },
   }
 }
 
@@ -18,22 +26,8 @@ export function createOPDSResponse(
 ) {
   return new NextResponse(xml, {
     headers: {
-      "Content-Type": `application/atom+xml;profile=opds-catalog;kind=${kind}`,
-      "Cache-Control": "public, max-age=300",
+      "Content-Type": kind === "navigation" ? ATOM_NAV : ATOM_ACQ,
+      "Cache-Control": "private, max-age=300",
     },
   })
-}
-
-export function opdsPaginationOptions(
-  pageSize: number | null,
-  page: number,
-  selfUrl: string,
-) {
-  if (!pageSize) return undefined
-
-  return {
-    currentPage: page,
-    pageSize,
-    selfUrl,
-  }
 }

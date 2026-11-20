@@ -11,6 +11,7 @@ import {
   type StyleProp,
   StyleSheet,
   Text,
+  type TextInstance,
   type TextProps,
   View,
   type ViewStyle,
@@ -117,13 +118,10 @@ function ContextMenuContent({
     <ContextMenuPrimitive.Portal hostName={portalHostName}>
       <FullWindowOverlay>
         <ContextMenuPrimitive.Overlay
-          style={Platform.select({
+          style={Platform.select<StyleProp<ViewStyle>>({
             web: overlayStyle ?? undefined,
             native: overlayStyle
-              ? StyleSheet.flatten([
-                  StyleSheet.absoluteFill,
-                  overlayStyle as typeof StyleSheet.absoluteFill,
-                ])
+              ? StyleSheet.flatten([StyleSheet.absoluteFill, overlayStyle])
               : StyleSheet.absoluteFill,
           })}
           {...(overlayClassName && { className: overlayClassName })}
@@ -300,7 +298,7 @@ function ContextMenuSeparator({
 function ContextMenuShortcut({
   className,
   ...props
-}: TextProps & React.RefAttributes<Text>) {
+}: TextProps & React.RefAttributes<TextInstance>) {
   return (
     <Text
       className={cn(

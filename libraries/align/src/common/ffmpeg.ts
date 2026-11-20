@@ -1,4 +1,4 @@
-import { exec } from "node:child_process"
+import { execFile } from "node:child_process"
 import { copyFile } from "node:fs/promises"
 import { extname } from "node:path"
 import { promisify } from "node:util"
@@ -6,22 +6,23 @@ import { promisify } from "node:util"
 import memoize from "memoize"
 import { type Logger } from "pino"
 
+import { AUDIO_ENCODERS, canCopyCodec } from "@storyteller/audiobooks"
+import { MediaType } from "@storyteller/media-types"
+
 import { type AudioEncoding } from "../process/AudioEncoding.ts"
-import { areSameType } from "../process/mime.ts"
 
-import { quotePath } from "./shell.ts"
-
-const execPromise = promisify(exec)
+const execFilePromise = promisify(execFile)
 
 async function execCmd(
   command: string,
+  args: string[],
   logger?: Logger | null,
   signal?: AbortSignal | null,
 ) {
   try {
     // cover art can be several megabytes, so we need a larger buffer
     // matches what is set in the audiobook package
-    const { stdout } = await execPromise(command, {
+    const { stdout } = await execFilePromise(command, args, {
       maxBuffer: 50 * 1024 * 1024,
       signal: signal ?? undefined,
     })
@@ -43,7 +44,9 @@ async function execCmd(
     if (execErr.stdout) logger?.info(execErr.stdout)
 
     const errorDetail =
-      execErr.stderr || execErr.stdout || `Command failed: ${command}`
+      execErr.stderr ||
+      execErr.stdout ||
+      `Command failed: ${command} ${args.join(" ")}`
 
     throw new Error(errorDetail)
   }
@@ -81,7 +84,8 @@ export const getTrackInfo = memoize(async function getTrackInfo(
   logger?: Logger,
 ) {
   const stdout = await execCmd(
-    `ffprobe -v error -i ${quotePath(path)} -show_format -of json`,
+    "ffprobe",
+    ["-v", "error", "-i", path, "-show_format", "-of", "json"],
     logger,
   )
   const info = JSON.parse(stdout) as FfmpegTrackFormat
@@ -128,9 +132,16 @@ type FfprobePacketsOutput = {
 }
 
 async function probeAudioDuration(path: string): Promise<number | null> {
-  const stdout = await execCmd(
-    `ffprobe -i ${quotePath(path)} -v error -show_entries format=duration -output_format json`,
-  )
+  const stdout = await execCmd("ffprobe", [
+    "-i",
+    path,
+    "-v",
+    "error",
+    "-show_entries",
+    "format=duration",
+    "-output_format",
+    "json",
+  ])
   const { format } = JSON.parse(stdout) as FfprobeFormatDurationOutput
   const duration = Number(format?.duration)
   return Number.isFinite(duration) && duration > 0 ? duration : null
@@ -146,9 +157,20 @@ async function probePacketSizes(
       ? `${startSeconds}%+#${VBR_PROBE_PACKET_COUNT}`
       : `%+#${VBR_PROBE_PACKET_COUNT}`
 
-  const stdout = await execCmd(
-    `ffprobe -i ${quotePath(path)} -v error -select_streams a:0 -read_intervals "${interval}" -show_entries packet=size -output_format json`,
-  )
+  const stdout = await execCmd("ffprobe", [
+    "-i",
+    path,
+    "-v",
+    "error",
+    "-select_streams",
+    "a:0",
+    "-read_intervals",
+    interval,
+    "-show_entries",
+    "packet=size",
+    "-output_format",
+    "json",
+  ])
 
   const { packets } = JSON.parse(stdout) as FfprobePacketsOutput
   return (packets ?? [])
@@ -250,59 +272,6 @@ function parseTrackInfo(format: FfmpegTrackFormat["format"]): TrackInfo {
   }
 }
 
-type FfmpegStreams = {
-  streams: FfmpegStreamInfo[]
-}
-
-type FfmpegStreamInfo = {
-  disposition: {
-    attached_pic: number
-  }
-}
-
-const hasCoverArt = memoize(async function hasCoverArt(path: string) {
-  try {
-    const { stdout } = await execPromise(
-      `ffprobe -v quiet -show_streams -of json ${quotePath(path)}`,
-    )
-
-    const { streams } = JSON.parse(stdout) as FfmpegStreams
-
-    return streams.some((stream) => stream.disposition.attached_pic === 1)
-  } catch {
-    return null
-  }
-})
-
-async function constructExtractCoverArtCommand(
-  source: string,
-  destExtension: string,
-) {
-  if (destExtension === ".wav" || !(await hasCoverArt(source))) {
-    return ""
-  }
-
-  const command = "ffmpeg"
-  const args = [
-    "-nostdin",
-    "-i",
-    quotePath(source),
-    "-map",
-    "0:v",
-    "-c:v",
-    "copy",
-    "-vframes",
-    "1",
-    "-f",
-    "image2",
-    "-update",
-    "1",
-    "pipe:1",
-  ]
-
-  return `${command} ${args.join(" ")} | `
-}
-
 interface FfmpegArgumentOptions {
   sourceExtension: string
   destExtension: string
@@ -317,15 +286,17 @@ function commonFfmpegArguments(options: FfmpegArgumentOptions) {
   if (codec) {
     args.push("-c:a", codec)
 
-    if (codec === "libopus") {
+    if (codec === AUDIO_ENCODERS.opus) {
       args.push("-b:a", bitrate && /^\d+[kK]$/i.test(bitrate) ? bitrate : "32K")
-    } else if (codec === "libmp3lame" && bitrate) {
+    } else if (codec === AUDIO_ENCODERS.mp3 && bitrate) {
       // MP3 is always CBR for accurate seeking; bitrate is a `-b:a` value.
       args.push("-b:a", bitrate)
     }
   } else if (
-    areSameType(sourceExtension, destExtension) ||
-    destExtension == ".mp4"
+    canCopyCodec(
+      MediaType.fromExtension(sourceExtension),
+      MediaType.fromExtension(destExtension),
+    )
   ) {
     args.push("-c:a", "copy")
   }
@@ -334,6 +305,10 @@ function commonFfmpegArguments(options: FfmpegArgumentOptions) {
 
   if (destExtension === ".mp4") {
     args.push("-map_chapters", "-1")
+  }
+
+  if (MediaType.MP4_AUDIO.extensions.includes(destExtension)) {
+    args.push("-movflags", "+faststart")
   }
 
   return args
@@ -358,30 +333,21 @@ export async function splitFile(
   const args = [
     "-nostdin",
     "-ss",
-    start,
+    String(start),
     "-to",
-    end,
+    String(end),
     "-i",
-    quotePath(input),
+    input,
     ...commonFfmpegArguments({
       sourceExtension: extname(input),
       destExtension: extname(output),
       codec: encoding?.codec ?? null,
       bitrate: encoding?.bitrate ?? null,
     }),
-    quotePath(output),
+    output,
   ]
 
-  const coverArtCommand = await constructExtractCoverArtCommand(
-    input,
-    extname(output),
-  )
-
-  await execCmd(
-    `${coverArtCommand}${command} ${args.join(" ")}`,
-    logger,
-    signal,
-  )
+  await execCmd(command, args, logger, signal)
 
   return true
 }
@@ -393,7 +359,12 @@ export async function transcodeFile(
   signal?: AbortSignal | null,
   logger?: Logger | null,
 ) {
-  if (!encoding?.codec && areSameType(input, output)) {
+  const container = MediaType.fromPath(input)
+  if (
+    !encoding?.codec &&
+    container !== null &&
+    container === MediaType.fromPath(output)
+  ) {
     logger?.info(
       `Input and output container and codec are the same, copying ${input} to output directory`,
     )
@@ -409,25 +380,16 @@ export async function transcodeFile(
   const args = [
     "-nostdin",
     "-i",
-    quotePath(input),
+    input,
     ...commonFfmpegArguments({
       sourceExtension: extname(input),
       destExtension: extname(output),
       codec: encoding?.codec ?? null,
       bitrate: encoding?.bitrate ?? null,
     }),
-    quotePath(output),
+    output,
   ]
 
-  const coverArtCommand = await constructExtractCoverArtCommand(
-    input,
-    extname(output),
-  )
-
-  await execCmd(
-    `${coverArtCommand}${command} ${args.join(" ")}`,
-    logger,
-    signal,
-  )
+  await execCmd(command, args, logger, signal)
   return true
 }

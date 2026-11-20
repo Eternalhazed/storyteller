@@ -5,8 +5,10 @@ import {
   IconAlertOctagon,
   IconAlertTriangle,
   IconAlignLeft,
+  IconArrowAutofitDown,
   IconArrowAutofitWidth,
   IconArrowBack,
+  IconArrowBackUp,
   IconArrowDown,
   IconArrowLeft,
   IconArrowMerge,
@@ -25,6 +27,7 @@ import {
   IconBug,
   IconCalendar,
   IconCalendarCheck,
+  IconCalendarEvent,
   IconCalendarPlus,
   IconCertificate,
   IconChartBar,
@@ -38,6 +41,7 @@ import {
   IconCircleCheck,
   IconClick,
   IconClock,
+  IconCode,
   IconColorPicker,
   IconColumns3,
   IconColumns,
@@ -56,6 +60,7 @@ import {
   IconFileText,
   IconFileUpload,
   IconFilter2,
+  IconFlask,
   IconFolder,
   IconFolders,
   IconGitMerge,
@@ -75,6 +80,9 @@ import {
   IconLayoutGrid,
   IconLayoutList,
   IconLayoutSidebar,
+  IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftExpand,
+  IconLetterCase,
   IconLibrary,
   IconLink,
   IconLinkOff,
@@ -91,13 +99,18 @@ import {
   IconMinimize,
   IconMinus,
   IconMoon,
+  IconOutbound,
   IconPalette,
   IconPencil,
   IconPhoto,
   IconPin,
   IconPinFilled,
   IconPlayerPause,
+  IconPlayerPauseFilled,
   IconPlayerPlay,
+  IconPlayerPlayFilled,
+  IconPlayerSkipBack,
+  IconPlayerSkipForward,
   IconPlus,
   IconPointer,
   IconProgress,
@@ -105,6 +118,10 @@ import {
   IconReload,
   IconReplace,
   IconReportAnalytics,
+  IconRewindBackward10,
+  IconRewindBackward15,
+  IconRewindForward10,
+  IconRewindForward15,
   IconRotate2,
   IconRss,
   IconScan,
@@ -121,6 +138,7 @@ import {
   IconSortDescending,
   IconSortDescendingLetters,
   IconSortDescendingNumbers,
+  IconSparkles,
   IconSquare,
   IconSquareCheck,
   IconStack2,
@@ -132,7 +150,9 @@ import {
   IconTagPlus,
   IconTags,
   IconTextCaption,
+  IconTextGrammar,
   IconTextWrap,
+  IconTool,
   IconTrash,
   IconUpload,
   IconUser,
@@ -141,12 +161,17 @@ import {
   IconVolume,
   IconVolumeOff,
   IconX,
+  IconDeviceTablet,
+  IconFileZip,
+  IconSend,
+  IconShare,
 } from "@tabler/icons-react"
 
-import { IconReadaloud } from "@/components/icons/IconReadaloud"
+import { IconReadaloud } from "@/icons/IconReadaloud"
 
 import { styled } from "./styled"
 
+export const Code = /*#__PURE__*/ styled(IconCode)
 export const Plus = /*#__PURE__*/ styled(IconPlus)
 export const Add = /*#__PURE__*/ styled(IconPlus)
 export const Minus = /*#__PURE__*/ styled(IconMinus)
@@ -176,10 +201,12 @@ export const Copy = /*#__PURE__*/ styled(IconCopy)
 export const Replace = /*#__PURE__*/ styled(IconReplace)
 export const Upgrade = /*#__PURE__*/ styled(IconSettingsUp)
 export const Scan = /*#__PURE__*/ styled(IconScan)
+export const Tool = /*#__PURE__*/ styled(IconTool)
 export const Pointer = /*#__PURE__*/ styled(IconPointer)
 export const Logout = /*#__PURE__*/ styled(IconLogout)
 export const ArrowBack = /*#__PURE__*/ styled(IconArrowBack)
 export const Rotate2 = /*#__PURE__*/ styled(IconRotate2)
+export const ArrowAutofitDown = /*#__PURE__*/ styled(IconArrowAutofitDown)
 export const ArrowAutofitWidth = /*#__PURE__*/ styled(IconArrowAutofitWidth)
 
 export const ArrowLeft = /*#__PURE__*/ styled(IconArrowLeft)
@@ -220,6 +247,9 @@ export const FileText = /*#__PURE__*/ styled(IconFileText)
 export const FileUpload = /*#__PURE__*/ styled(IconFileUpload)
 export const Database = /*#__PURE__*/ styled(IconDatabase)
 export const Server = /*#__PURE__*/ styled(IconServer)
+export const Sparkles = /*#__PURE__*/ styled(IconSparkles)
+export const Flask = /*#__PURE__*/ styled(IconFlask)
+export const Undo = /*#__PURE__*/ styled(IconArrowBackUp)
 export const Folder = /*#__PURE__*/ styled(IconFolder)
 
 export const Tag = /*#__PURE__*/ styled(IconTag)
@@ -235,6 +265,10 @@ export const Briefcase = /*#__PURE__*/ styled(IconBriefcase)
 export const LayoutGrid = /*#__PURE__*/ styled(IconLayoutGrid)
 export const LayoutList = /*#__PURE__*/ styled(IconLayoutList)
 export const LayoutSidebar = /*#__PURE__*/ styled(IconLayoutSidebar)
+export const SidebarCollapse = /*#__PURE__*/ styled(
+  IconLayoutSidebarLeftCollapse,
+)
+export const SidebarExpand = /*#__PURE__*/ styled(IconLayoutSidebarLeftExpand)
 export const Columns = /*#__PURE__*/ styled(IconColumns)
 export const Columns3 = /*#__PURE__*/ styled(IconColumns3)
 export const List = /*#__PURE__*/ styled(IconList)
@@ -257,6 +291,7 @@ export const Users = /*#__PURE__*/ styled(IconUsers)
 
 export const Calendar = /*#__PURE__*/ styled(IconCalendar)
 export const CalendarCheck = /*#__PURE__*/ styled(IconCalendarCheck)
+export const CalendarEvent = /*#__PURE__*/ styled(IconCalendarEvent)
 export const CalendarPlus = /*#__PURE__*/ styled(IconCalendarPlus)
 export const Clock = /*#__PURE__*/ styled(IconClock)
 export const History = /*#__PURE__*/ styled(IconHistory)
@@ -320,3 +355,20 @@ export const LightMode = /*#__PURE__*/ styled(IconSun)
 export const System = /*#__PURE__*/ styled(IconDeviceLaptop)
 export const Star = /*#__PURE__*/ styled(IconStar)
 export const LibraryDefault = /*#__PURE__*/ styled(IconHomeCog)
+
+export const PlayerTrackForward = /*#__PURE__*/ styled(IconPlayerSkipForward)
+export const PlayerTrackBack = /*#__PURE__*/ styled(IconPlayerSkipBack)
+export const PlayerSkipForward10 = /*#__PURE__*/ styled(IconRewindForward10)
+export const PlayerSkipBack10 = /*#__PURE__*/ styled(IconRewindBackward10)
+export const PlayerPlayFilled = /*#__PURE__*/ styled(IconPlayerPlayFilled)
+export const PlayerPauseFilled = /*#__PURE__*/ styled(IconPlayerPauseFilled)
+export const RewindBackward15 = /*#__PURE__*/ styled(IconRewindBackward15)
+export const RewindForward15 = /*#__PURE__*/ styled(IconRewindForward15)
+
+export const Aa = /*#__PURE__*/ styled(IconLetterCase)
+export const Outbound = /*#__PURE__*/ styled(IconOutbound)
+export const TextGrammar = /*#__PURE__*/ styled(IconTextGrammar)
+export const DeviceTablet = /*#__PURE__*/ styled(IconDeviceTablet)
+export const FileZip = /*#__PURE__*/ styled(IconFileZip)
+export const Send = /*#__PURE__*/ styled(IconSend)
+export const Share = /*#__PURE__*/ styled(IconShare)

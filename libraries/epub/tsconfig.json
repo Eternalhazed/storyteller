@@ -1,6 +1,9 @@
 {
   "extends": ["@tsconfig/strictest/tsconfig.json"],
   "compilerOptions": {
+    // tsgolint (Oxlint's type-aware engine) does not auto-include
+    // @types packages the way tsc does, so list them explicitly.
+    "types": ["node"],
     "composite": true,
     "emitDeclarationOnly": true,
     "incremental": true,
@@ -11,18 +14,26 @@
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
     "lib": ["ESNext"],
-    "tsBuildInfoFile": "tsconfig.tsbuildinfo",
-    "outDir": "dist",
+    // Enables the jsx-runtime for XML element creation.
+    // The actual pragma is defined per-file so that it
+    // doesn't interfere with React applications that
+    // depend on this lib.
+    "jsx": "react-jsx",
+    "tsBuildInfoFile": ".tsbuild/tsconfig.tsbuildinfo",
+    "outDir": ".tsbuild/types",
     "customConditions": ["@storyteller"]
   },
-  "include": ["./**/*.ts", "!tsup.config.ts"],
-  "exclude": ["dist", "tsup.config.ts"],
+  "include": ["./**/*.ts", "./**/*.tsx"],
+  "exclude": ["dist"],
   "references": [
     {
       "path": "../fs"
     },
     {
       "path": "../path"
+    },
+    {
+      "path": "../media-types"
     }
   ]
 }

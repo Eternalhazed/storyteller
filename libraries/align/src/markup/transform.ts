@@ -1,4 +1,4 @@
-import { Mapping } from "@storyteller-platform/mapping"
+import { Mapping } from "@storyteller/mapping"
 
 import {
   FootnoteNode,
@@ -141,6 +141,7 @@ export function inlineFootnotes(root: Root) {
       new Node(footnote.tagName),
     )
     mapping.insertMap(footnotePos, footnote.nodeSize, 1)
+    cursor = mapping.cursor()
   }
 
   return { root: transformed, footnotePairs, mapping }
@@ -158,7 +159,7 @@ export function replaceFootnotes(
     const noteref = original.resolve(noterefPos).nodeAfter
     const footnote = transformed.resolve(cursor.map(noterefPos)).nodeAfter
 
-    if (!(noteref instanceof Node) || !(footnote instanceof Node)) continue
+    if (!(noteref instanceof TextNode) || !(footnote instanceof Node)) continue
 
     transformed = transformed.replace(cursor.map(noterefPos), noteref)
     mapping.insertMap(noterefPos, footnote.nodeSize, noteref.nodeSize)

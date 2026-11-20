@@ -5,11 +5,10 @@ import { Controller } from "react-hook-form"
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@v3/_/components/ui/card"
-import { Field, FieldDescription } from "@v3/_/components/ui/field"
+import { Field } from "@v3/_/components/ui/field"
 import {
   Select,
   SelectContent,
@@ -35,11 +34,10 @@ export function GeneralTab({ form }: { form: PreferencesFormType }) {
 
   return (
     <div className="space-y-6">
-      <PreferencesSection tab="general" section="language">
+      <PreferencesSection id="language">
         <Card>
           <CardHeader>
             <CardTitle>{t("language.title")}</CardTitle>
-            <CardDescription>{t("language.description")}</CardDescription>
           </CardHeader>
           <CardContent>
             <Controller
@@ -50,7 +48,6 @@ export function GeneralTab({ form }: { form: PreferencesFormType }) {
                   <SettingLabel field="locale">
                     {t("language.label")}
                   </SettingLabel>
-                  <FieldDescription>{t("language.hint")}</FieldDescription>
                   <Select
                     items={localeOptions}
                     value={field.value ?? localeDefault ?? ""}

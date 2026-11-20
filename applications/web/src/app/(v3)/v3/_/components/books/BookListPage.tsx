@@ -1,7 +1,6 @@
 "use client"
 
 import { useHotkey } from "@tanstack/react-hotkeys"
-import dynamic from "next/dynamic"
 import {
   type ReactNode,
   createContext,
@@ -51,7 +50,10 @@ import { useBookInSidePanel } from "@v3/_/hooks/use-open-book"
 import { useReportPanel } from "@v3/_/hooks/use-report-panel"
 import { useTranslation } from "@v3/_/hooks/use-translation"
 
-import { SiteHeader } from "@/app/(v3)/v3/_/components/site-header"
+import {
+  type Breadcrumb,
+  SiteHeader,
+} from "@/app/(v3)/v3/_/components/site-header"
 import { useSidebar } from "@/app/(v3)/v3/_/components/ui/sidebar"
 import { useUserPreferences } from "@/app/(v3)/v3/_/components/user-preferences-provider"
 import { useLayoutAnimations } from "@/app/(v3)/v3/_/hooks/use-layout-animations"
@@ -86,21 +88,10 @@ import {
 import { type UUID } from "@/uuid"
 
 import { BookCountIndicator } from "./BookCountIndicator"
-import { BookDetailsSkeleton } from "./BookDetails/BookDetailsSkeleton"
+import { DynamicBookDetailsContent } from "./BookDetails/DynamicBookDetailsContent"
 import { useCoverScope } from "./CoverScope"
 import { GRID_CARD_WIDTHS, GRID_SPACING_PX } from "./Grid/BookGrid"
 import { PanelResizeProvider } from "./panel-resize-context"
-
-const DynamicBookDetailsContent = dynamic(
-  () =>
-    import("@/app/(v3)/v3/_/components/books/BookDetails/BookDetailsPage").then(
-      (mod) => mod.BookDetailsContent,
-    ),
-  {
-    ssr: false,
-    loading: () => <BookDetailsSkeleton compact={true} />,
-  },
-)
 
 export type BookListSource =
   | {
@@ -117,31 +108,23 @@ export type BookListSource =
       orderDirection?: "asc" | "desc" | null
     }
 
-export type BookListBreadcrumbs = (
-  | { label: string; url?: string }
-  | { render: ReactNode }
-)[]
-
 type BookListPageProps = {
   source: BookListSource
   skip?: boolean
 
   seedLabel?: string | undefined
   defaultSort?: BookSort[number] | undefined
-  extraSortFields?: SortField[]
 
-  breadcrumbs: BookListBreadcrumbs
+  breadcrumbs: [Breadcrumb, ...Breadcrumb[]] | null
   headerActions?: ReactNode
+  banner?: ReactNode
   sidebar?: ReactNode
   description?: string | null | undefined
-  beforeFilters?: ReactNode
-  afterFilters?: ReactNode
   filtersClassName?: string
   contentClassName?: string
   listDisplayFields?: DisplayField[]
 
   bookClickMode?: "panel" | "report"
-  enableBookStepping?: boolean
 
   emptyMessage?: string
   emptySubMessage?: string
@@ -188,18 +171,15 @@ function BookListPageInner({
   skip = false,
   seedLabel,
   defaultSort,
-  extraSortFields,
   breadcrumbs,
   headerActions,
+  banner,
   sidebar,
   description,
-  beforeFilters,
-  afterFilters,
   filtersClassName,
   contentClassName,
   listDisplayFields,
   bookClickMode = "panel",
-  enableBookStepping = false,
   emptyMessage,
   emptySubMessage,
   emptyFilteredSubMessage,
@@ -238,7 +218,12 @@ function BookListPageInner({
     ...(isBooksSource && source.collectionContext
       ? { collectionContext: source.collectionContext }
       : {}),
-    defaultSort,
+    defaultSort: forceDisplayMode
+      ? {
+          field: forceDisplayMode.sortMode,
+          direction: forceDisplayMode.sortDirection,
+        }
+      : defaultSort,
   })
 
   const {
@@ -256,12 +241,8 @@ function BookListPageInner({
   const sortFieldOptions = useMemo<
     { value: SortField; label: string }[]
   >(() => {
-    const fields: SortField[] = [
-      ...(extraSortFields ?? []),
-      ...GENERAL_SORT_FIELDS,
-    ]
-    return fields.map((value) => ({ value, label: tLabel(value) }))
-  }, [extraSortFields, tLabel])
+    return GENERAL_SORT_FIELDS.map((value) => ({ value, label: tLabel(value) }))
+  }, [tLabel])
 
   const booksQueryResult = useListInfiniteBooksInfiniteQuery(
     {
@@ -432,13 +413,12 @@ function BookListPageInner({
 
   const bookUuids = useMemo(() => books.map((b) => b.uuid), [books])
 
-  const selectedIndex =
-    enableBookStepping && selectedBookUuid
-      ? bookUuids.indexOf(selectedBookUuid)
-      : -1
+  const selectedIndex = selectedBookUuid
+    ? bookUuids.indexOf(selectedBookUuid)
+    : -1
 
   useEffect(() => {
-    if (!enableBookStepping || selectedIndex < 0) return
+    if (selectedIndex < 0) return
 
     const remaining = bookUuids.length - 1 - selectedIndex
     if (
@@ -449,7 +429,6 @@ function BookListPageInner({
       void fetchNextPage()
     }
   }, [
-    enableBookStepping,
     selectedIndex,
     bookUuids.length,
     hasNextPage,
@@ -458,26 +437,19 @@ function BookListPageInner({
   ])
 
   const goToNext = useMemo(() => {
-    if (!enableBookStepping) return undefined
     const atEnd = selectedIndex >= bookUuids.length - 1
     if (selectedIndex < 0 || (atEnd && !hasNextPage)) return undefined
     return () => {
       const next = bookUuids[selectedIndex + 1]
       if (next) void setSelectedBookUuid(next)
     }
-  }, [
-    enableBookStepping,
-    selectedIndex,
-    bookUuids,
-    hasNextPage,
-    setSelectedBookUuid,
-  ])
+  }, [selectedIndex, bookUuids, hasNextPage, setSelectedBookUuid])
 
   const goToPrevious = useMemo(() => {
-    if (!enableBookStepping || selectedIndex <= 0) return undefined
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    return () => void setSelectedBookUuid(bookUuids[selectedIndex - 1]!)
-  }, [enableBookStepping, selectedIndex, bookUuids, setSelectedBookUuid])
+    const previous = selectedIndex > 0 ? bookUuids[selectedIndex - 1] : null
+    if (!previous) return undefined
+    return () => void setSelectedBookUuid(previous)
+  }, [selectedIndex, bookUuids, setSelectedBookUuid])
 
   const displayContext = useMemo<SortContext>(
     () => ({
@@ -530,6 +502,7 @@ function BookListPageInner({
 
   const isMobile = useIsMobile()
 
+  // add back if we have grid nav
   const focusCollection = useCallback(() => {
     document.getElementById(BOOK_COLLECTION_ID)?.focus()
   }, [])
@@ -642,7 +615,7 @@ function BookListPageInner({
 
   const shownUuid =
     selectedBookUuid ??
-    (animate && driver.visible ? lastSelectedRef.current?.uuid ?? null : null)
+    (animate && driver.visible ? (lastSelectedRef.current?.uuid ?? null) : null)
   const shownBook = selectedBookUuid
     ? selectedBook
     : lastSelectedRef.current?.book
@@ -773,6 +746,7 @@ function BookListPageInner({
             </PageHeader>
 
             {descriptionText}
+            {banner}
 
             <PageContent className={"relative p-6 pt-0 md:p-0"}>
               <BookFilters
@@ -809,6 +783,14 @@ function BookListPageInner({
                 sortDirection={sort.direction}
                 onSortChange={handleColumnSort}
                 forceLayout={forceDisplayMode?.layout}
+              />
+
+              <SelectionToolbar
+                books={books}
+                requestAllBooks={requestAllBooks}
+                allBooksCount={baselineCount ?? 0}
+                hasNextPage={hasNextPage}
+                isFetchingNextPage={isFetchingNextPage}
               />
             </PageContent>
           </PageMain>
@@ -849,10 +831,7 @@ function BookListPageInner({
             </PageHeader>
 
             {descriptionText}
-
-            {beforeFilters}
-
-            {afterFilters}
+            {banner}
 
             <PageContent
               className={cn(contentClassName ?? "p-6 pt-0", "relative")}
@@ -891,14 +870,8 @@ function BookListPageInner({
                 }
                 listDisplayFieldsOverride={listDisplayFields}
                 displayContext={displayContext}
-                sortField={
-                  forceDisplayMode ? forceDisplayMode.sortMode : sort.field
-                }
-                sortDirection={
-                  forceDisplayMode
-                    ? forceDisplayMode.sortDirection
-                    : sort.direction
-                }
+                sortField={sort.field}
+                sortDirection={sort.direction}
                 forceLayout={forceDisplayMode?.layout}
                 onSortChange={handleColumnSort}
               />

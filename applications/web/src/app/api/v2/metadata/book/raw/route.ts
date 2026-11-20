@@ -1,0 +1,34 @@
+import { asMetadataProvider } from "@storyteller-platform/nodekit"
+import { NextResponse } from "next/server"
+
+import { nodekitErrorResponse } from "@/app/api/v2/metadata/nodekitErrors"
+import { withHasPermission } from "@/auth/auth"
+import { getNodeKit } from "@/services/nodekitService"
+
+export const dynamic = "force-dynamic"
+
+export const GET = withHasPermission("bookRead")(async (request) => {
+  const params = request.nextUrl.searchParams
+  const provider = asMetadataProvider(params.get("provider"))
+  const id = params.get("id")
+
+  if (!provider || !id) {
+    return NextResponse.json(
+      { message: "provider and id are required" },
+      { status: 400 },
+    )
+  }
+
+  try {
+    const json = await getNodeKit().metadataBookRaw({
+      provider,
+      id,
+      region: params.get("region") ?? undefined,
+    })
+    return new Response(json, {
+      headers: { "Content-Type": "application/json" },
+    })
+  } catch (error) {
+    return nodekitErrorResponse(error)
+  }
+})

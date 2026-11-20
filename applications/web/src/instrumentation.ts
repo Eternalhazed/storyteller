@@ -19,19 +19,22 @@ export async function register() {
     })
   }
 
-  const { getWatcher: getWatcher } = await import(
-    "./assets/library/scanner/triggers/watcher"
-  )
-  const { getScheduler: getScheduler } = await import(
-    "./assets/library/scanner/triggers/scheduler"
-  )
+  const { getWatcher: getWatcher } =
+    await import("./assets/library/scanner/triggers/watcher")
+  const { getScheduler: getScheduler } =
+    await import("./assets/library/scanner/triggers/scheduler")
   const { logger } = await import("./logging")
   const { migrate } = await import("./database/migrate")
   const { syncChangelog } = await import("./database/changelog")
   const { getQueuedBooks } = await import("./database/books")
-  const { startProcessing, pump } = await import("./work/distributor")
+  // Load the server-only worker inside register, outside the edge runtime.
+  const { pump } = await import("./work/distributor")
   const { getReadiumService } = await import("./services/readiumService")
   const { env } = await import("./env")
+  const { startLogRetention } = await import("./logRetention")
+  const { startEventLogPruning } = await import("./eventLogPruning")
+
+  startLogRetention()
 
   logger.debug("Debug logging enabled")
 
@@ -53,6 +56,9 @@ export async function register() {
     throw err
   }
 
+  // Start after running db migrations
+  startEventLogPruning()
+
   try {
     await getWatcher().start()
     await getScheduler().refresh()
@@ -71,13 +77,14 @@ export async function register() {
     logger.error(err)
   }
 
-  try {
-    if (env.STORYTELLER_SYNC_CHANGELOG) {
-      await syncChangelog()
-    }
-  } catch (err) {
-    logger.error("Failed to sync changelog from GitLab")
-    logger.error(err)
+  if (env.STORYTELLER_SYNC_CHANGELOG) {
+    // i guess no real reason why we need to wait for this to complete
+    void syncChangelog().catch((err: unknown) => {
+      logger.error({
+        msg: "Failed to sync changelog from GitLab. This may be due to an issue with Gitlab. Storyteller will automatically retry fetching the changelog later.",
+        err,
+      })
+    })
   }
 
   const cron = await import("node-cron")
@@ -93,10 +100,12 @@ export async function register() {
       logger.info("Restoring processing queue...")
     }
     for (const book of queue) {
-      logger.info(`Adding ${book.title} to the queue`)
-      void startProcessing(book.uuid, book.readaloud?.restartPending || false)
+      logger.warn({
+        msg: `Processing ${book.title} was not automatically restarted, you should restart it manually`,
+      })
     }
-    void pump()
+    // X-Ray resumes independently; alignment still requires a manual restart.
+    void pump(undefined, undefined, ["book_xray"])
   } catch (err) {
     logger.error("Failed to restart processing queue")
     logger.error(err)

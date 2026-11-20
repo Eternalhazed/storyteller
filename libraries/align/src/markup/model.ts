@@ -1,34 +1,38 @@
 import { enumerate } from "itertools"
 
-import { type ElementName } from "@storyteller-platform/epub"
-
 import { ResolvedPos } from "./resolvedPos.ts"
 import { BLOCKS } from "./semantics.ts"
 
-export class Root {
-  constructor(public children: (Node | TextNode)[]) {}
+/**
+ * An XML tag name. DOM exposes element names as plain strings, and the type
+ * this replaced was only ever "a string beginning with a letter".
+ */
+export type ElementName = string
 
+export class Root {
+  public isLeaf = false
   public isInline = false
   public isBlock = true
+  public border = 0
+  public nodeSize: number
+  public contentSize: number
 
-  get border() {
-    return 0
+  constructor(public children: (Node | TextNode)[]) {
+    this.isLeaf = false
+    this.isInline = false
+    this.isBlock = true
+    this.border = 0
+
+    let size = 0
+    for (const child of this.children) {
+      size += child.nodeSize
+    }
+    this.nodeSize = this.border + (size || 1) + this.border
+    this.contentSize = this.nodeSize - this.border * 2
   }
 
   get textContent() {
     return this.children.reduce((acc, child) => acc + child.textContent, "")
-  }
-
-  get nodeSize(): number {
-    return (
-      this.border +
-      (this.children.reduce((acc, child) => acc + child.nodeSize, 0) || 1) +
-      this.border
-    )
-  }
-
-  get contentSize(): number {
-    return this.nodeSize - this.border * 2
   }
 
   split(at: number): Root {
@@ -72,7 +76,7 @@ export class Root {
     }
   }
 
-  replace(at: number, withNode: Node) {
+  replace(at: number, withNode: Node | TextNode) {
     const children: (Node | TextNode)[] = []
     let pos = this.border
     for (const child of this.children) {
@@ -112,39 +116,31 @@ export class Root {
 }
 
 export class Node {
+  isLeaf: boolean
+  isInline: boolean
+  isBlock: boolean
+  border: number
+  nodeSize: number
+  contentSize: number
+
   constructor(
     public tagName: ElementName,
     public attrs: Record<string, string> = {},
     public children: (Node | TextNode)[] = [],
     public marks: Mark[] = [],
-  ) {}
+  ) {
+    this.isLeaf = !this.children.length
+    this.isBlock = BLOCKS.includes(this.tagName)
+    this.isInline = !this.isBlock
+    this.border = this.isLeaf ? 0 : 1
 
-  get isLeaf() {
-    return !this.children.length
-  }
+    let size = 0
+    for (const child of this.children) {
+      size += child.nodeSize
+    }
+    this.nodeSize = this.border + (size || 1) + this.border
 
-  get isInline() {
-    return !this.isBlock
-  }
-
-  get isBlock() {
-    return BLOCKS.includes(this.tagName)
-  }
-
-  get border() {
-    return this.isLeaf ? 0 : 1
-  }
-
-  get nodeSize(): number {
-    return (
-      this.border +
-      (this.children.reduce((acc, child) => acc + child.nodeSize, 0) || 1) +
-      this.border
-    )
-  }
-
-  get contentSize(): number {
-    return this.nodeSize - this.border * 2
+    this.contentSize = this.nodeSize - this.border * 2
   }
 
   get textContent(): string {
@@ -198,7 +194,7 @@ export class Node {
     )
   }
 
-  replace(at: number, withNode: Node) {
+  replace(at: number, withNode: Node | TextNode) {
     const children: (Node | TextNode)[] = []
     let pos = this.border
     for (const child of this.children) {
@@ -252,8 +248,6 @@ export class Node {
     }
   }
 }
-
-export class NoterefNode extends Node {}
 
 export class FootnoteNode extends Node {}
 

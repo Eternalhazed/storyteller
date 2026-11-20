@@ -1,14 +1,14 @@
 import {
   type ChildProcess,
-  type ExecException,
-  exec,
+  execFile,
   execSync,
   spawn,
 } from "node:child_process"
+import { stat } from "node:fs/promises"
 import { isAbsolute, join, resolve } from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 
-import { type ReadiumWebPublicationManifest } from "@storyteller-platform/align/readium"
+import { type ReadiumWebPublicationManifest } from "@storyteller/align/readium"
 
 import { DATA_DIR } from "@/directories"
 import { env } from "@/env"
@@ -265,17 +265,39 @@ export class ReadiumService {
     return Buffer.from(path).toString("base64url").replace(/=+$/, "")
   }
 
-  private static encodePath(filepath: string, assetPath: string): string {
+  private static async encodePath(
+    filepath: string,
+    assetPath: string,
+  ): Promise<string> {
     const fullBookPath = isAbsolute(filepath)
       ? filepath
       : join(DATA_DIR, filepath)
 
-    // resolve the path to the absolute path
-    const resolvedPath = resolve(fullBookPath).slice(1)
-    // manually encode the hash in filepaths, readium makes big sad otherwise
-    const hashEncodedPath = resolvedPath.replace(/#/g, "%23")
+    const resolvedPath = resolve(fullBookPath)
+    const { mtimeMs, size } = await stat(resolvedPath).catch(
+      (error: unknown) => {
+        if (
+          error instanceof Error &&
+          "code" in error &&
+          error.code === "ENOENT"
+        ) {
+          throw new ReadiumServiceError(
+            "Book file not found on disk",
+            "file_not_found",
+          )
+        }
+        throw error
+      },
+    )
+    const escapedPath = resolvedPath
+      .slice(1)
+      .replace(/%/g, "%25")
+      .replace(/#/g, "%23")
+      .replace(/\?/g, "%3F")
 
-    const filePathEncoded = ReadiumService.base64Encode(hashEncodedPath)
+    const filePathEncoded = ReadiumService.base64Encode(
+      `${escapedPath}?v=${Math.trunc(mtimeMs)}-${size}`,
+    )
 
     return `/webpub/${filePathEncoded}/${assetPath}`
   }
@@ -299,7 +321,7 @@ export class ReadiumService {
       )
     }
 
-    const path = ReadiumService.encodePath(filepath, assetPath)
+    const path = await ReadiumService.encodePath(filepath, assetPath)
 
     const url = new URL(path, `http://localhost:${this.port}`)
     if (searchParams) {
@@ -379,12 +401,17 @@ export class ReadiumService {
     },
   ): Promise<ReadiumWebPublicationManifest> {
     const res = await new Promise((resolve, reject) => {
-      exec(
-        `readium manifest "${filepath}"${options.inferPageCount ? " --infer-page-count" : ""}`,
+      execFile(
+        "readium",
+        [
+          "manifest",
+          filepath,
+          ...(options.inferPageCount ? ["--infer-page-count"] : []),
+        ],
         {
           signal: options.signal,
         },
-        (error: ExecException | null, stdout: string, stderr: string) => {
+        (error: Error | null, stdout: string, stderr: string) => {
           if (error) {
             reject(error)
           } else {

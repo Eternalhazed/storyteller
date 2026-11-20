@@ -1,6 +1,5 @@
 import { sql } from "kysely"
 
-import { type Role } from "@/components/books/edit/marcRelators"
 import {
   BADGE_FACET_SECTIONS,
   type BadgeFacetSection,
@@ -10,12 +9,18 @@ import {
   isFacetSection,
 } from "@/facet-sections"
 import { ALIGNMENT_GRADES, FORMAT_VALUES, resolveFieldAlias } from "@/fields"
-import { type ShelfFilter } from "@/shelves"
+import { type Role } from "@/metadata/marcRelators"
+import {
+  type ShelfFilter,
+  type ShelfFilterIssue,
+  collectFilterIssues,
+} from "@/shelves"
 import { type UUID } from "@/uuid"
 
 import { db } from "./connection"
 import { FIELD_SQL, formatPredicate } from "./fieldSql"
 import { bookVisibleTo, buildFilterExpression } from "./shelfFilter"
+import { type Permission, type UserPermissionSet } from "./users"
 
 export { type FacetSection, isFacetSection }
 
@@ -26,6 +31,7 @@ export type FacetValue = {
   icon?: string | null
   color?: string | null
   kind?: string
+  filterIssues?: ShelfFilterIssue[]
 }
 
 export const NONE_FACET_KEY = "__none__"
@@ -34,10 +40,13 @@ export type LibraryCounts = Record<BadgeFacetSection, number> & {
   books: number
   collections: Record<string, number>
   shelves: Record<string, number>
+  shelfIssues: Record<string, ShelfFilterIssue[]>
 }
 
 export function visibleBooks(userId: UUID, dab = db) {
-  return dab.selectFrom("book").where((eb) => bookVisibleTo(eb, userId))
+  return dab
+    .selectFrom("book")
+    .where((eb) => bookVisibleTo(eb, "book.uuid", userId))
 }
 
 async function countSmartShelf(userId: UUID, filter: ShelfFilter) {
@@ -49,11 +58,23 @@ async function countSmartShelf(userId: UUID, filter: ShelfFilter) {
   return row?.count ?? 0
 }
 
-function parseShelfFilter(raw: unknown): ShelfFilter {
-  return (typeof raw === "string" ? JSON.parse(raw) : raw) as ShelfFilter
+function readShelfFilter(raw: unknown): {
+  filter: ShelfFilter | null
+  issues: ShelfFilterIssue[]
+} {
+  let parsed: unknown = raw
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return { filter: null, issues: [{ kind: "unparseable" }] }
+    }
+  }
+  const issues = collectFilterIssues(parsed)
+  return { filter: issues.length > 0 ? null : (parsed as ShelfFilter), issues }
 }
 
-async function countCreatorsByRole(_userId: UUID, role: Role) {
+async function countCreatorsByRole(role: Role) {
   const row = await db
     .selectFrom("bookToCreator")
     .where("bookToCreator.role", "=", role)
@@ -65,71 +86,152 @@ async function countCreatorsByRole(_userId: UUID, role: Role) {
   return row?.count ?? 0
 }
 
-const DISTINCT_COUNTS = {
-  series: async () => {
-    const row = await db
-      .selectFrom("series")
-      .select((eb) => eb.fn.count<number>("series.uuid").as("count"))
-      .executeTakeFirst()
-    return row?.count ?? 0
-  },
+async function countVisibleCreatorsByRole(userId: UUID, role: Role) {
+  const row = await visibleBooks(userId)
+    .innerJoin("bookToCreator", "bookToCreator.bookUuid", "book.uuid")
+    .where("bookToCreator.role", "=", role)
+    .select((eb) =>
+      eb.fn.count<number>("bookToCreator.creatorUuid").distinct().as("count"),
+    )
+    .executeTakeFirst()
 
-  authors: (userId) => countCreatorsByRole(userId, "aut"),
-  narrators: (userId) => countCreatorsByRole(userId, "nrt"),
-  translators: (userId) => countCreatorsByRole(userId, "trl"),
+  return row?.count ?? 0
+}
 
-  tags: async () => {
-    const row = await db
-      .selectFrom("tag")
-      .select((eb) => eb.fn.count<number>("tag.uuid").as("count"))
-      .executeTakeFirst()
-    return row?.count ?? 0
-  },
+type DistinctCount = (userId: UUID) => Promise<number>
 
-  statuses: async () => {
-    const row = await db
-      .selectFrom("status")
-      .select((eb) => eb.fn.count<number>("status.uuid").as("count"))
-      .executeTakeFirst()
-    return row?.count ?? 0
-  },
-
-  publicationYears: async (userId) => {
-    const row = await visibleBooks(userId)
-      .select(
-        sql<number>`count(distinct substr(book.publication_date, 1, 4))`.as(
-          "count",
-        ),
-      )
-      .executeTakeFirst()
-    return row?.count ?? 0
-  },
-
-  ratings: async (userId) => {
-    const row = await db
-      .selectFrom("userBookRating")
-      .where("userBookRating.userId", "=", userId)
-      .where("userBookRating.rating", "is not", null)
-      .select((eb) =>
-        eb.fn.count<number>("userBookRating.rating").distinct().as("count"),
-      )
-      .executeTakeFirst()
-    return row?.count ?? 0
-  },
-
-  identifiers: async () => {
-    const row = await db
-      .selectFrom("identifierType")
-      .select((eb) => eb.fn.count<number>("identifierType.uuid").as("count"))
-      .executeTakeFirst()
-    return row?.count ?? 0
-  },
-} as const satisfies Record<
-  BadgeFacetSection,
-  (userId: UUID) => Promise<number>
+type DistinctCounts = { everyone: DistinctCount } & Partial<
+  Record<Permission, DistinctCount>
 >
 
-export async function getLibraryCounts(userId: UUID): Promise<LibraryCounts> {
+const DISTINCT_COUNTS = {
+  series: {
+    everyone: async (userId) => {
+      const row = await visibleBooks(userId)
+        .innerJoin("bookToSeries", "bookToSeries.bookUuid", "book.uuid")
+        .select((eb) =>
+          eb.fn.count<number>("bookToSeries.seriesUuid").distinct().as("count"),
+        )
+        .executeTakeFirst()
+      return row?.count ?? 0
+    },
+    bookUpdate: async () => {
+      const row = await db
+        .selectFrom("series")
+        .select((eb) => eb.fn.count<number>("series.uuid").as("count"))
+        .executeTakeFirst()
+      return row?.count ?? 0
+    },
+  },
+
+  authors: {
+    everyone: (userId) => countVisibleCreatorsByRole(userId, "aut"),
+    bookUpdate: () => countCreatorsByRole("aut"),
+  },
+  narrators: {
+    everyone: (userId) => countVisibleCreatorsByRole(userId, "nrt"),
+    bookUpdate: () => countCreatorsByRole("nrt"),
+  },
+  translators: {
+    everyone: (userId) => countVisibleCreatorsByRole(userId, "trl"),
+    bookUpdate: () => countCreatorsByRole("trl"),
+  },
+
+  tags: {
+    everyone: async (userId) => {
+      const row = await visibleBooks(userId)
+        .innerJoin("bookToTag", "bookToTag.bookUuid", "book.uuid")
+        .select((eb) =>
+          eb.fn.count<number>("bookToTag.tagUuid").distinct().as("count"),
+        )
+        .executeTakeFirst()
+      return row?.count ?? 0
+    },
+    bookUpdate: async () => {
+      const row = await db
+        .selectFrom("tag")
+        .select((eb) => eb.fn.count<number>("tag.uuid").as("count"))
+        .executeTakeFirst()
+      return row?.count ?? 0
+    },
+  },
+
+  statuses: {
+    everyone: async () => {
+      const row = await db
+        .selectFrom("status")
+        .select((eb) => eb.fn.count<number>("status.uuid").as("count"))
+        .executeTakeFirst()
+      return row?.count ?? 0
+    },
+  },
+
+  // doesn't need a separate count bc publicationYears is not a facet backed by a table
+  publicationYears: {
+    everyone: async (userId) => {
+      const row = await visibleBooks(userId)
+        .select(
+          sql<number>`count(distinct substr(book.publication_date, 1, 4))`.as(
+            "count",
+          ),
+        )
+        .executeTakeFirst()
+      return row?.count ?? 0
+    },
+  },
+
+  ratings: {
+    everyone: async (userId) => {
+      const row = await db
+        .selectFrom("userBookRating")
+        .where("userBookRating.userId", "=", userId)
+        .where("userBookRating.rating", "is not", null)
+        .select((eb) =>
+          eb.fn.count<number>("userBookRating.rating").distinct().as("count"),
+        )
+        .executeTakeFirst()
+      return row?.count ?? 0
+    },
+  },
+
+  identifiers: {
+    everyone: async (userId) => {
+      const row = await visibleBooks(userId)
+        .innerJoin("identifier", "identifier.bookUuid", "book.uuid")
+        .select((eb) =>
+          eb.fn
+            .count<number>("identifier.identifierTypeUuid")
+            .distinct()
+            .as("count"),
+        )
+        .executeTakeFirst()
+      return row?.count ?? 0
+    },
+    bookUpdate: async () => {
+      const row = await db
+        .selectFrom("identifierType")
+        .select((eb) => eb.fn.count<number>("identifierType.uuid").as("count"))
+        .executeTakeFirst()
+      return row?.count ?? 0
+    },
+  },
+} as const satisfies {
+  [S in BadgeFacetSection]: { everyone: DistinctCount } & Record<
+    NonNullable<(typeof FACET_SECTION_REGISTRY)[S]["emptyValuesPermission"]>,
+    DistinctCount
+  >
+}
+
+export type FacetViewer = {
+  id: UUID
+  permissions: Partial<UserPermissionSet> | null
+}
+
+export async function getLibraryCounts(
+  viewer: FacetViewer,
+): Promise<LibraryCounts> {
+  const userId = viewer.id
+
   const booksP = visibleBooks(userId)
     .select((eb) => eb.fn.count<number>("book.uuid").distinct().as("count"))
     .executeTakeFirst()
@@ -167,9 +269,16 @@ export async function getLibraryCounts(userId: UUID): Promise<LibraryCounts> {
       collectionRowsP,
       manualShelfRowsP,
       smartShelvesP,
-      ...BADGE_FACET_SECTIONS.map((section) =>
-        DISTINCT_COUNTS[section](userId),
-      ),
+      ...BADGE_FACET_SECTIONS.map((section) => {
+        const counts: DistinctCounts = DISTINCT_COUNTS[section]
+        const permission = FACET_SECTION_REGISTRY[section].emptyValuesPermission
+        const count =
+          (permission &&
+            viewer.permissions?.[permission] &&
+            counts[permission]) ||
+          counts.everyone
+        return count(userId)
+      }),
     ])
 
   const collections: Record<string, number> = {}
@@ -178,13 +287,20 @@ export async function getLibraryCounts(userId: UUID): Promise<LibraryCounts> {
   const shelves: Record<string, number> = {}
   for (const row of manualShelfRows) shelves[row.uuid] = row.count
 
+  const shelfIssues: Record<string, ShelfFilterIssue[]> = {}
   const smartCounts = await Promise.all(
     smartShelves.map(async (shelf) => {
-      const filter = parseShelfFilter(shelf.filter)
+      const { filter, issues } = readShelfFilter(shelf.filter)
+      if (!filter) {
+        shelfIssues[shelf.uuid] = issues
+        return null
+      }
       return [shelf.uuid, await countSmartShelf(userId, filter)] as const
     }),
   )
-  for (const [uuid, count] of smartCounts) shelves[uuid] = count
+  for (const entry of smartCounts) {
+    if (entry) shelves[entry[0]] = entry[1]
+  }
 
   const badges = Object.fromEntries(
     BADGE_FACET_SECTIONS.map((section, i) => [section, badgeCounts[i] ?? 0]),
@@ -195,6 +311,7 @@ export async function getLibraryCounts(userId: UUID): Promise<LibraryCounts> {
     books: books?.count ?? 0,
     collections,
     shelves,
+    shelfIssues,
   }
 }
 
@@ -494,11 +611,27 @@ async function shelfFacets(userId: UUID): Promise<FacetValue[]> {
 
   return Promise.all(
     shelves.map(async (shelf) => {
-      const bookCount =
-        shelf.filter != null
-          ? await countSmartShelf(userId, parseShelfFilter(shelf.filter))
-          : shelf.manualCount
-      return { key: shelf.key, name: shelf.name, bookCount }
+      if (shelf.filter == null) {
+        return {
+          key: shelf.key,
+          name: shelf.name,
+          bookCount: shelf.manualCount,
+        }
+      }
+      const { filter, issues } = readShelfFilter(shelf.filter)
+      if (!filter) {
+        return {
+          key: shelf.key,
+          name: shelf.name,
+          bookCount: 0,
+          filterIssues: issues,
+        }
+      }
+      return {
+        key: shelf.key,
+        name: shelf.name,
+        bookCount: await countSmartShelf(userId, filter),
+      }
     }),
   )
 }
@@ -542,10 +675,16 @@ async function countSectionNone(
 }
 
 export async function getSectionFacets(
-  userId: UUID,
+  viewer: FacetViewer,
   section: FacetSection,
 ): Promise<FacetValue[]> {
-  const facets = await FACET_IMPL[section](userId)
+  const userId = viewer.id
+  const permission = FACET_SECTION_REGISTRY[section].emptyValuesPermission
+  const values = await FACET_IMPL[section](userId)
+  const facets =
+    permission === null || viewer.permissions?.[permission]
+      ? values
+      : values.filter((value) => value.bookCount > 0)
 
   const none = await countSectionNone(userId, section)
   if (none > 0) {

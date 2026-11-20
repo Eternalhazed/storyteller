@@ -1,6 +1,11 @@
 import { basename } from "node:path/posix"
 
-import { Epub, type ParsedXml } from "@storyteller-platform/epub"
+import {
+  type Document,
+  type Element,
+  Epub,
+  findXmlChildByName,
+} from "@storyteller/epub"
 
 import { parseDom } from "./parseDom.ts"
 import { segmentChapter } from "./segmentation.ts"
@@ -15,10 +20,10 @@ import { inlineFootnotes, liftText } from "./transform.ts"
  * index `n` here is always the `n` in that span id.
  */
 export async function liftAndSegment(
-  body: ParsedXml[number],
+  body: Element,
   locale: Intl.Locale | null,
 ) {
-  const original = parseDom(Epub.getXmlChildren(body))
+  const original = parseDom(body)
   const inlined = inlineFootnotes(original)
   const lifted = liftText(inlined.root)
   const segmentation = await segmentChapter(lifted.result, {
@@ -36,13 +41,13 @@ export interface ChapterSentence {
 }
 
 export async function getChapterSentences(
-  chapterXml: ParsedXml,
+  chapterXml: Document,
   locale: Intl.Locale | null,
 ): Promise<ChapterSentence[]> {
-  const html = Epub.findXmlChildByName("html", chapterXml)
+  const html = chapterXml.documentElement
   if (!html) throw new Error("Invalid XHTML document: no html element")
 
-  const body = Epub.findXmlChildByName("body", html["html"])
+  const body = findXmlChildByName("body", html)
   if (!body) throw new Error("Invalid XHTML document: No body element")
 
   const { segmentation } = await liftAndSegment(body, locale)

@@ -7,17 +7,17 @@
   <tbody>
     <tr>
       <td align="center" width="14.28%">
-        <img height="500" src="docs/static/img/league-of-dragons-text.png" />
+        <img height="500" src="applications/docs/static/img/league-of-dragons-text.png" />
       </td>
       <td align="center" width="14.28%">
-        <img height="500" src="docs/static/img/league-of-dragons-audio.png" />
+        <img height="500" src="applications/docs/static/img/league-of-dragons-audio.png" />
       </td>
     </tr>
   </tbody>
 </table>
 
 Want to get started?
-[Head over to the documentation site](https://storyteller-platform.gitlab.io/storyteller/)!
+[Head over to the documentation site](https://storyteller-platform.dev/docs/welcome)!
 
 Storyteller is a self-hosted platform for creating and reading ebooks with
 synced narration. It's made of three components: the API server, the web
@@ -28,13 +28,13 @@ as well as read or listen to (or both!) the resulting synced books.
 ## Contributing
 
 Please take a look at our
-[guidelines for developing Storyteller](https://storyteller-platform.gitlab.io/storyteller/contributing/contributing-overview/)
+[guidelines for developing Storyteller](https://storyteller-platform.dev/contributing/contributing-overview/)
 before contributing.
 
 ## How it works
 
 Check out the docs to learn more about
-[how Storyteller's forced alignment algorithm works](https://storyteller-platform.gitlab.io/storyteller/docs/how-it-works/the-algorithm).
+[how Storyteller's forced alignment algorithm works](https://storyteller-platform.dev/docs/the-algorithm).
 
 ## Contributors
 

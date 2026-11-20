@@ -5,7 +5,7 @@ import {
   ordinalAtProgression,
   ordinalAtTextOffset,
   ordinalOfFragment,
-} from "@storyteller-platform/xray/view"
+} from "@storyteller/xray/view"
 
 import { type ReadiumLocator } from "@/modules/readium/src/Readium.types"
 import { type ReturnToPosition } from "@/store/slices/bookshelfSlice"

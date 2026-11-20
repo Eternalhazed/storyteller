@@ -17,19 +17,35 @@ import {
   DialogTitle,
 } from "@v3/_/components/ui/dialog"
 import { RadioGroup, RadioGroupItem } from "@v3/_/components/ui/radio-group"
+import { useVersionBasePath } from "@v3/_/components/version-context"
+import { usePostDownload } from "@v3/_/hooks/use-post-download"
 import { useCommon, useTranslation } from "@v3/_/hooks/use-translation"
 
 import { AddToShelfList } from "@/app/(v3)/v3/_/components/books/ActionMenu/AddToShelfList"
 import { SetStatusList } from "@/app/(v3)/v3/_/components/books/ActionMenu/SetStatusList"
+import {
+  ImportDialog,
+  type ImportTab,
+} from "@/app/(v3)/v3/_/components/books/BookDetails/ImportDialog"
 import { useProcessingRun } from "@/app/(v3)/v3/_/components/books/BookDetails/useProcessingRun"
 import {
   BulkCoverColorsDialog,
   selectionHasColors,
 } from "@/app/(v3)/v3/_/components/books/BulkCoverColorsDialog"
+import {
+  BulkImportMetadataDialog,
+  type BulkImportMode,
+} from "@/app/(v3)/v3/_/components/books/BulkImportMetadataDialog"
 import { CreateCollectionDialog } from "@/app/(v3)/v3/_/components/books/CreateCollectionDialog"
 import { CreateSeriesDialog } from "@/app/(v3)/v3/_/components/books/CreateSeriesDialog"
 import { CreateTagDialog } from "@/app/(v3)/v3/_/components/books/CreateTagDialog"
 import { DeleteBooksDialog } from "@/app/(v3)/v3/_/components/books/DeleteBooksDialog"
+import { useSendToKindle } from "@/app/(v3)/v3/_/components/books/SendToKindle"
+import {
+  bookLink,
+  canShareFiles,
+  shareBookFile,
+} from "@/app/(v3)/v3/_/components/books/bookSharing"
 import {
   RelationEditList,
   membershipFromBooks,
@@ -43,20 +59,32 @@ import {
   FilterableMenuSubContent,
   FilterableMenuSubTrigger,
 } from "@/app/(v3)/v3/_/components/ui/filterable-menu"
+import {
+  DOWNLOAD_FORMATS,
+  DOWNLOAD_SELECTIONS,
+  type DownloadSelection,
+  downloadSummary,
+  downloadableAsset,
+} from "@/bookDownloads"
 import { type BookWithRelations, type CreatorRelation } from "@/database/books"
 import { usePermissions } from "@/hooks/usePermissions"
 import * as icon from "@/icons"
+import { kindleRefusal } from "@/kindle"
 import {
   useAddBooksToCollectionsMutation,
   useBulkRelocateToInternalMutation,
   useClearBooksCacheMutation,
   useDeleteBooksMutation,
+  useGetBooksCacheUsageQuery,
   useGetCurrentUserQuery,
   useMergeBooksMutation,
+  useRecomputeAlignmentReportsMutation,
   useRelocateToInternalMutation,
   useScanBooksMutation,
   useUpgradeBookEpubMutation,
 } from "@/store/api"
+import { getDownloadUrl } from "@/store/urls"
+import { formatBytes } from "@/strings"
 import { type UUID } from "@/uuid"
 
 type Mode = "single" | "bulk"
@@ -74,6 +102,13 @@ export type BookActionEntry = {
   separatorBefore?: boolean
   disabled?: boolean
   title?: string
+}
+
+const DOWNLOAD_ICONS: Record<DownloadSelection, ReactNode> = {
+  ebook: <icon.BookAlt className="size-4" />,
+  audiobook: <icon.Headphones className="size-4" />,
+  readaloud: <icon.Readaloud className="size-4" />,
+  all: <icon.FileZip className="size-4" />,
 }
 
 const actionRowClassName =
@@ -132,6 +167,7 @@ export function useBookActionItems({
   onAfterDestructive?: () => void
 }) {
   const t = useTranslation("BookActions")
+  const tBook = useTranslation("BookDetailsPage")
   const tp = useTranslation("Processing")
   const c = useCommon()
   const permissions = usePermissions()
@@ -139,6 +175,11 @@ export function useBookActionItems({
   const canDelete = !!permissions?.bookDelete
   const canProcess = !!permissions?.bookProcess
   const canCreateCollection = !!permissions?.collectionCreate
+  const canDownload = !!permissions?.bookDownload
+  const tShare = useTranslation("Sharing")
+  const kindle = useSendToKindle()
+  const postDownload = usePostDownload()
+  const basePath = useVersionBasePath()
 
   const bookUuids = books.map((b) => b.uuid)
   const count = books.length
@@ -148,6 +189,7 @@ export function useBookActionItems({
   const [addToCollections] = useAddBooksToCollectionsMutation()
   const [scanBooks] = useScanBooksMutation()
   const [clearCache] = useClearBooksCacheMutation()
+  const [recomputeAlignmentReports] = useRecomputeAlignmentReportsMutation()
   const [upgradeEpub] = useUpgradeBookEpubMutation()
   const [deleteBooks, { isLoading: isDeleting }] = useDeleteBooksMutation()
   const [mergeBooks, { isLoading: isMerging }] = useMergeBooksMutation()
@@ -165,6 +207,12 @@ export function useBookActionItems({
   const [createShelfName, setCreateShelfName] = useState("")
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [coverColorsOpen, setCoverColorsOpen] = useState(false)
+  const [importTab, setImportTab] = useState<ImportTab | null>(null)
+  const [bulkImportMode, setBulkImportMode] = useState<BulkImportMode | null>(
+    null,
+  )
+
+  const singleBook = mode === "single" ? books[0] : undefined
 
   const epubBooks = books.filter((b) => b.ebook)
 
@@ -191,6 +239,18 @@ export function useBookActionItems({
   const handleClearCache = useCallback(async () => {
     await clearCache({ bookUuids }).unwrap()
   }, [clearCache, bookUuids])
+
+  const handleRecomputeAlignmentReports = useCallback(async () => {
+    try {
+      const { count } = await recomputeAlignmentReports({ bookUuids }).unwrap()
+      toast.success(t("recomputeAlignmentReportsDone", { count }))
+    } catch (error) {
+      console.error(error)
+      toast.error(t("recomputeAlignmentReportsFailed"), {
+        description: (error as Error).message,
+      })
+    }
+  }, [recomputeAlignmentReports, bookUuids, t])
 
   const handleUpgrade = useCallback(async () => {
     await Promise.all(
@@ -289,6 +349,7 @@ export function useBookActionItems({
           description: ebookBook.description || audiobookBook.description,
           publicationDate:
             ebookBook.publicationDate || audiobookBook.publicationDate,
+          releaseDate: audiobookBook.releaseDate || ebookBook.releaseDate,
         },
         relations: {
           creators: Object.values(uniqueCreators),
@@ -326,10 +387,23 @@ export function useBookActionItems({
   const clearCacheAction = useConfirmAction({
     onConfirm: handleClearCache,
     title: t("clearCacheTitle", { count }),
-    description: t("clearCacheDescription"),
     confirmLabel: t("clearCache"),
     variant: "destructive",
   })
+  const { data: cacheUsage, isFetching: isMeasuringCache } =
+    useGetBooksCacheUsageQuery(
+      { bookUuids },
+      {
+        skip: !clearCacheAction.dialogProps.open,
+        refetchOnMountOrArgChange: true,
+      },
+    )
+  const cacheUsageLine =
+    !cacheUsage || isMeasuringCache
+      ? t("clearCacheMeasuring")
+      : cacheUsage.bytes === 0
+        ? t("clearCacheEmpty", { count })
+        : t("clearCacheUsage", { size: formatBytes(cacheUsage.bytes) })
 
   const upgradeAction = useConfirmAction({
     onConfirm: handleUpgrade,
@@ -503,6 +577,25 @@ export function useBookActionItems({
       submenu: () => <SetStatusList books={books} bookUuids={bookUuids} />,
     })
 
+    if (canUpdate) {
+      entries.push({
+        key: "importMetadataEach",
+        label: t.plain("importMetadataEach"),
+        icon: <icon.FileImport className="size-4" />,
+        onSelect: () => {
+          setBulkImportMode("review")
+        },
+      })
+      entries.push({
+        key: "addMetadataAutomatically",
+        label: t.plain("addMetadataAutomatically"),
+        icon: <icon.Sparkles className="size-4" />,
+        onSelect: () => {
+          setBulkImportMode("auto")
+        },
+      })
+    }
+
     if (canUpdate && selectionHasColors(books)) {
       entries.push({
         key: "coverColors",
@@ -524,6 +617,162 @@ export function useBookActionItems({
         },
       })
     }
+  }
+
+  if (canDownload) {
+    const downloads = DOWNLOAD_SELECTIONS.map((selection) => ({
+      selection,
+      ...downloadSummary(books, selection),
+    })).filter(({ selection, count }) => {
+      if (count === 0) {
+        return false
+      }
+
+      if (selection !== "all") {
+        return true
+      }
+
+      return (
+        DOWNLOAD_FORMATS.filter((format) =>
+          books.some((book) => downloadableAsset(book, format)),
+        ).length > 1
+      )
+    })
+
+    if (downloads.length > 0) {
+      entries.push({
+        key: "download",
+        separatorBefore: entries.length > 0,
+        label: tShare.plain("download"),
+        icon: <icon.Download className="size-4" />,
+        submenuSearchable: false,
+        submenu: ({ close }) => (
+          <>
+            {downloads.map(({ selection, count, bytes }) => (
+              <FilterableMenuItem
+                key={selection}
+                onSelect={() => {
+                  if (singleBook && selection !== "all") {
+                    window.location.href = getDownloadUrl(
+                      singleBook.uuid,
+                      selection,
+                    )
+                  } else {
+                    postDownload.download("/api/v2/books/files", {
+                      format: selection,
+                      bookUuids,
+                    })
+                  }
+
+                  close()
+                }}
+                className={actionRowClassName}
+              >
+                {DOWNLOAD_ICONS[selection]}
+                {tShare(`formats.${selection}`)}
+                <span className="text-muted-foreground ml-auto pl-6 whitespace-nowrap tabular-nums">
+                  {singleBook
+                    ? formatBytes(bytes)
+                    : tShare.plain("summary", {
+                        count,
+                        size: formatBytes(bytes),
+                      })}
+                </span>
+              </FilterableMenuItem>
+            ))}
+          </>
+        ),
+      })
+    }
+
+    const kindleBlocked = kindleRefusal(books)
+
+    if (mode === "bulk") {
+      entries.push({
+        key: "sendToKindle",
+        label: tShare.plain("sendToKindle"),
+        icon: <icon.Send className="size-4" />,
+        title: kindleBlocked ? kindle.refusalMessage(kindleBlocked) : undefined,
+        onSelect: (modifiers) => {
+          kindle.send(books, modifiers)
+        },
+      })
+    }
+
+    if (singleBook) {
+      const hasEbook = !kindleBlocked
+      entries.push({
+        key: "share",
+        label: tShare.plain("share"),
+        icon: <icon.Share className="size-4" />,
+        submenuSearchable: false,
+        submenu: ({ close }) => (
+          <>
+            {hasEbook && (
+              <FilterableMenuItem
+                onSelect={(modifiers) => {
+                  kindle.send([singleBook], modifiers)
+                  close()
+                }}
+                className={actionRowClassName}
+              >
+                <icon.Send className="size-4" />
+                {tShare("sendToKindle")}
+              </FilterableMenuItem>
+            )}
+            {hasEbook && canShareFiles() && (
+              <FilterableMenuItem
+                onSelect={() => {
+                  shareBookFile(singleBook, tShare.plain("shareFile")).catch(
+                    () => {
+                      toast.error(tShare.plain("shareFailed"))
+                    },
+                  )
+                  close()
+                }}
+                className={actionRowClassName}
+              >
+                <icon.Share className="size-4" />
+                {tShare("shareFile")}
+              </FilterableMenuItem>
+            )}
+            <FilterableMenuItem
+              onSelect={() => {
+                void navigator.clipboard
+                  .writeText(bookLink(basePath, singleBook.uuid))
+                  .then(() => {
+                    toast.success(tShare.plain("linkCopied"))
+                  })
+                close()
+              }}
+              className={actionRowClassName}
+            >
+              <icon.Link className="size-4" />
+              {tShare("copyLink")}
+            </FilterableMenuItem>
+          </>
+        ),
+      })
+    }
+  }
+
+  if (canUpdate && singleBook) {
+    entries.push({
+      key: "importMetadata",
+      label: tBook.plain("metadataImport.open"),
+      icon: <icon.FileImport className="size-4" />,
+      onSelect: () => {
+        setImportTab("metadata")
+      },
+    })
+    entries.push({
+      key: "importCovers",
+      label: tBook.plain("coverImport.open"),
+      icon: <icon.Search className="size-4" />,
+      onSelect: () => {
+        setImportTab("covers")
+      },
+    })
   }
 
   if (
@@ -557,16 +806,15 @@ export function useBookActionItems({
       title: blockedTitle(unprocessable.map((b) => b.title)),
       submenuSearchable: false,
       submenu: ({ close }) => (
-        <div className="flex flex-col">
+        <>
           {processingRun.positions.map((position) => (
-            <button
+            <FilterableMenuItem
               key={position.key}
-              type="button"
               disabled={position.disabled}
               title={count > 1 ? blockedTitle(position.blockedBy) : undefined}
-              onClick={(event) => {
+              onSelect={(event) => {
                 processingRun.start(position.restart, {
-                  shiftKey: event.shiftKey,
+                  shiftKey: !!event?.shiftKey,
                 })
                 close()
               }}
@@ -574,9 +822,9 @@ export function useBookActionItems({
             >
               {position.icon}
               {tp(position.labelKey)}
-            </button>
+            </FilterableMenuItem>
           ))}
-        </div>
+        </>
       ),
     })
 
@@ -588,6 +836,15 @@ export function useBookActionItems({
         clearCacheAction.confirm(modifiers)
       },
     })
+
+    if (books.some((b) => b.alignmentSummary)) {
+      entries.push({
+        key: "recomputeAlignmentReports",
+        label: t.plain("recomputeAlignmentReports"),
+        icon: <icon.ReportAnalytics className="size-4" />,
+        onSelect: () => void handleRecomputeAlignmentReports(),
+      })
+    }
   }
 
   if (canUpdate) {
@@ -607,6 +864,18 @@ export function useBookActionItems({
       label: c.plain("actions.scan"),
       icon: <icon.Scan className="size-4" />,
       onSelect: handleScan,
+    })
+  }
+
+  if (canUpdate && mode === "single" && bookUuids[0]) {
+    const bookUuid = bookUuids[0]
+    entries.push({
+      key: "debugBundle",
+      label: "Download debug bundle",
+      icon: <icon.Bug className="size-4" />,
+      onSelect: () => {
+        postDownload.download(`/api/v2/books/${bookUuid}/debug/bundle`)
+      },
     })
   }
 
@@ -632,6 +901,13 @@ export function useBookActionItems({
 
   const dialogs = (
     <>
+      {singleBook && canUpdate && (
+        <ImportDialog
+          book={singleBook}
+          tab={importTab}
+          onTabChange={setImportTab}
+        />
+      )}
       <DeleteBooksDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
@@ -639,12 +915,25 @@ export function useBookActionItems({
         onConfirm={handleDelete}
         isLoading={isDeleting}
       />
+      {mode === "bulk" && canUpdate && (
+        <BulkImportMetadataDialog
+          books={books}
+          mode={bulkImportMode ?? "review"}
+          open={bulkImportMode !== null}
+          onOpenChange={(open) => {
+            if (!open) setBulkImportMode(null)
+          }}
+        />
+      )}
       <BulkCoverColorsDialog
         open={coverColorsOpen}
         onOpenChange={setCoverColorsOpen}
         books={books}
       />
-      <ConfirmDialog {...clearCacheAction.dialogProps} />
+      <ConfirmDialog
+        {...clearCacheAction.dialogProps}
+        description={`${t("clearCacheDescription")} ${cacheUsageLine}`}
+      />
       <ConfirmDialog {...upgradeAction.dialogProps} />
       <ConfirmDialog {...mergeAction.dialogProps} isLoading={isMerging} />
 
@@ -742,6 +1031,8 @@ export function useBookActionItems({
       )}
 
       {processingRun.dialog}
+      {kindle.dialog}
+      {postDownload.form}
     </>
   )
 

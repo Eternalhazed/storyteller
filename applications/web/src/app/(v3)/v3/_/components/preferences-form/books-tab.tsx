@@ -7,11 +7,11 @@ import { Button } from "@v3/_/components/ui/button"
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@v3/_/components/ui/card"
 import { Field, FieldDescription, FieldLabel } from "@v3/_/components/ui/field"
+import { InfoTip } from "@v3/_/components/ui/info-tip"
 import { Input } from "@v3/_/components/ui/input"
 import {
   Select,
@@ -131,7 +131,6 @@ export function BooksTab({ form }: { form: PreferencesFormType }) {
   } = useFieldArray({
     control: form.control,
     name: "ratingDimensions",
-    keyName: "_key",
   })
 
   const primaryColor =
@@ -140,11 +139,10 @@ export function BooksTab({ form }: { form: PreferencesFormType }) {
 
   return (
     <div className="space-y-6">
-      <PreferencesSection tab="books" section="gridDisplay">
+      <PreferencesSection id="gridDisplay">
         <Card>
           <CardHeader>
             <CardTitle>{t("gridDisplay.title")}</CardTitle>
-            <CardDescription>{t("gridDisplay.description")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="flex gap-6">
@@ -157,14 +155,9 @@ export function BooksTab({ form }: { form: PreferencesFormType }) {
                       <SettingLabel field="gridCoverDisplay">
                         {t("gridDisplay.coverLabel")}
                       </SettingLabel>
-                      <FieldDescription>
-                        {t("gridDisplay.coverHint")}
-                      </FieldDescription>
                       <SegmentedControl
                         value={field.value ?? gridCoverDisplayDefault}
-                        onChange={(value) => {
-                          field.onChange(value)
-                        }}
+                        onChange={field.onChange}
                         options={gridCoverOptions}
                       />
                     </Field>
@@ -180,14 +173,9 @@ export function BooksTab({ form }: { form: PreferencesFormType }) {
                         <SettingLabel field="doubleCoverAlignment">
                           {t("gridDisplay.alignmentLabel")}
                         </SettingLabel>
-                        <FieldDescription>
-                          {t("gridDisplay.alignmentHint")}
-                        </FieldDescription>
                         <SegmentedControl
                           value={field.value ?? doubleCoverAlignmentDefault}
-                          onChange={(value) => {
-                            field.onChange(value)
-                          }}
+                          onChange={field.onChange}
                           options={alignmentOptions}
                         />
                       </Field>
@@ -211,15 +199,11 @@ export function BooksTab({ form }: { form: PreferencesFormType }) {
                     <Field>
                       <SettingLabel field="coverFit">
                         {t("gridDisplay.fitLabel")}
+                        <InfoTip>{t("gridDisplay.fitTip")}</InfoTip>
                       </SettingLabel>
-                      <FieldDescription>
-                        {t("gridDisplay.fitHint")}
-                      </FieldDescription>
                       <SegmentedControl
                         value={coverFit}
-                        onChange={(value) => {
-                          field.onChange(value)
-                        }}
+                        onChange={field.onChange}
                         options={coverFitOptions}
                       />
                     </Field>
@@ -233,11 +217,10 @@ export function BooksTab({ form }: { form: PreferencesFormType }) {
         </Card>
       </PreferencesSection>
 
-      <PreferencesSection tab="books" section="opening">
+      <PreferencesSection id="opening">
         <Card>
           <CardHeader>
             <CardTitle>{t("opening.title")}</CardTitle>
-            <CardDescription>{t("opening.description")}</CardDescription>
           </CardHeader>
           <CardContent>
             <Controller
@@ -247,13 +230,12 @@ export function BooksTab({ form }: { form: PreferencesFormType }) {
                 <Field>
                   <SettingLabel field="bookOpenTarget">
                     {t("opening.label")}
+                    <InfoTip>{t("opening.tip")}</InfoTip>
                   </SettingLabel>
                   <FieldDescription>{t("opening.hint")}</FieldDescription>
                   <SegmentedControl
                     value={field.value ?? bookOpenTargetDefault}
-                    onChange={(value) => {
-                      field.onChange(value)
-                    }}
+                    onChange={field.onChange}
                     options={openTargetOptions}
                   />
                 </Field>
@@ -263,11 +245,10 @@ export function BooksTab({ form }: { form: PreferencesFormType }) {
         </Card>
       </PreferencesSection>
 
-      <PreferencesSection tab="books" section="detail">
+      <PreferencesSection id="detail">
         <Card>
           <CardHeader>
             <CardTitle>{t("detail.title")}</CardTitle>
-            <CardDescription>{t("detail.description")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <Controller
@@ -283,9 +264,7 @@ export function BooksTab({ form }: { form: PreferencesFormType }) {
                   </FieldDescription>
                   <SegmentedControl
                     value={field.value ?? bookDetailDisplayDefault}
-                    onChange={(value) => {
-                      field.onChange(value)
-                    }}
+                    onChange={field.onChange}
                     options={detailDisplayOptions}
                   />
                 </Field>
@@ -300,11 +279,10 @@ export function BooksTab({ form }: { form: PreferencesFormType }) {
         </Card>
       </PreferencesSection>
 
-      <PreferencesSection tab="books" section="ratings">
+      <PreferencesSection id="ratings">
         <Card>
           <CardHeader>
             <CardTitle>{t("ratings.title")}</CardTitle>
-            <CardDescription>{t("ratings.description")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <Controller
@@ -315,17 +293,14 @@ export function BooksTab({ form }: { form: PreferencesFormType }) {
                   <SettingLabel field="ratingIcon">
                     {t("ratingIcon.label")}
                   </SettingLabel>
-                  <FieldDescription>{t("ratingIcon.hint")}</FieldDescription>
                   <SegmentedControl
                     value={field.value ?? ratingIconDefault}
-                    onChange={(value) => {
-                      field.onChange(value)
-                    }}
+                    onChange={field.onChange}
                     options={ratingIconOptions}
                   />
                   <div className="mt-4 flex flex-col gap-2">
                     <span className="text-muted-foreground text-xs font-medium">
-                      Example
+                      {t("ratingDimensions.example")}
                     </span>
                     <RatingInput
                       value={3.5}
@@ -377,7 +352,7 @@ export function BooksTab({ form }: { form: PreferencesFormType }) {
                 <div className="flex flex-col gap-2">
                   {dimensions.map((dimension, index) => (
                     <div
-                      key={dimension._key}
+                      key={dimension.key}
                       className="flex items-center gap-2"
                     >
                       <Controller
@@ -422,7 +397,7 @@ export function BooksTab({ form }: { form: PreferencesFormType }) {
 
               <div className="mt-4">
                 <span className="text-muted-foreground text-xs font-medium">
-                  Preview
+                  {t("ratingDimensions.preview")}
                 </span>
                 <MultidimensionalRating
                   dimensions={ratingDimensionsValue ?? ratingDimensionsDefault}
@@ -444,11 +419,10 @@ export function BooksTab({ form }: { form: PreferencesFormType }) {
         </Card>
       </PreferencesSection>
 
-      <PreferencesSection tab="books" section="defaultStatus">
+      <PreferencesSection id="defaultStatus">
         <Card>
           <CardHeader>
             <CardTitle>{t("defaultStatus.title")}</CardTitle>
-            <CardDescription>{t("defaultStatus.description")}</CardDescription>
           </CardHeader>
           <CardContent>
             <DefaultStatusField form={form} />
@@ -515,7 +489,6 @@ function DefaultStatusField({ form }: { form: PreferencesFormType }) {
       render={({ field }) => (
         <Field>
           <FieldLabel>{t("label")}</FieldLabel>
-          <FieldDescription>{t("hint")}</FieldDescription>
 
           <Select
             value={field.value ?? USE_LIBRARY_DEFAULT}

@@ -7,13 +7,13 @@ import {
   sql,
 } from "kysely"
 
-import { type Role } from "@/components/books/edit/marcRelators"
 import {
   type AssetFormat,
   type BaseField,
   FORMAT_VALUES,
   type FormatValue,
 } from "@/fields"
+import { type Role } from "@/metadata/marcRelators"
 import {
   type ShelfFilterOperator,
   type ShelfFilterValue,
@@ -23,6 +23,7 @@ import {
 import { type UUID } from "@/uuid"
 
 import { type DB } from "./schema"
+import { WELL_KNOWN_STATUS_NAMES } from "./statusKinds"
 
 export type EB = ExpressionBuilder<DB, "book">
 export type FilterExpression = ExpressionWrapper<DB, "book", SqlBool>
@@ -156,6 +157,7 @@ function stringColumn(column: StringBookColumn): FieldSqlImpl {
 
 type DateBookColumn =
   | "book.publicationDate"
+  | "book.releaseDate"
   | "book.createdAt"
   | "book.updatedAt"
   | "book.alignedAt"
@@ -191,8 +193,8 @@ function dateColumn(column: DateBookColumn): FieldSqlImpl {
   }
 }
 
-function latestReportColumn(column: string) {
-  return sql`(select ${sql.raw(column)} from alignment_report where book_uuid = book.uuid order by created_at desc limit 1)`
+function latestReportColumn(column: string, offset = 0) {
+  return sql`(select ${sql.raw(column)} from alignment_report where book_uuid = book.uuid order by created_at desc, rowid desc limit 1 offset ${sql.lit(offset)})`
 }
 
 function reportNumber(column: string): FieldSqlImpl {
@@ -209,11 +211,16 @@ function reportNumber(column: string): FieldSqlImpl {
   }
 }
 
-function reportString(column: string): FieldSqlImpl {
+function reportString(column: string, offset = 0): FieldSqlImpl {
   return {
-    isEmpty: (eb) => eb(latestReportColumn(column), "is", null),
+    isEmpty: (eb) => eb(latestReportColumn(column, offset), "is", null),
     compare: (eb, operator, value) =>
-      stringExprComparison(eb, latestReportColumn(column), operator, value),
+      stringExprComparison(
+        eb,
+        latestReportColumn(column, offset),
+        operator,
+        value,
+      ),
   }
 }
 
@@ -617,6 +624,50 @@ const series = relationImpl({
     sql<number>`(select count(*) from book_to_series where book_uuid = book.uuid)`,
 })
 
+export function seriesPositionExpr(seriesUuid: string | undefined) {
+  return seriesUuid
+    ? sql<number>`(select position from book_to_series where book_uuid = book.uuid and series_uuid = ${seriesUuid})`
+    : sql<number>`(select position from book_to_series where book_uuid = book.uuid order by featured desc, rowid limit 1)`
+}
+
+export function mainSeriesNameExpr() {
+  return sql<string>`(select series.name from book_to_series inner join series on series.uuid = book_to_series.series_uuid where book_to_series.book_uuid = book.uuid order by book_to_series.featured desc, book_to_series.rowid limit 1)`
+}
+
+function statusSelect(column: RawBuilder<unknown>, userId: UUID | undefined) {
+  return userId
+    ? sql`(select ${column} from book_to_status inner join status on status.uuid = book_to_status.status_uuid where book_to_status.book_uuid = book.uuid and book_to_status.user_id = ${userId} limit 1)`
+    : sql`(select ${column} from book_to_status inner join status on status.uuid = book_to_status.status_uuid where book_to_status.book_uuid = book.uuid limit 1)`
+}
+
+export function statusRankExpr(userId: UUID | undefined) {
+  return statusSelect(
+    sql`case status.name ${sql.join(
+      [...WELL_KNOWN_STATUS_NAMES].map(
+        (name, i) => sql`when ${name} then ${i}`,
+      ),
+      sql` `,
+    )} else ${WELL_KNOWN_STATUS_NAMES.size} end`,
+    userId,
+  )
+}
+
+export function statusLabelExpr(userId: UUID | undefined) {
+  return sql`${statusSelect(sql`coalesce(status.label, status.name)`, userId)} collate nocase`
+}
+
+const seriesPosition: FieldSqlImpl = {
+  isEmpty: (eb, ctx) => eb(seriesPositionExpr(ctx.qualifier), "is", null),
+  compare: (eb, operator, value, ctx) =>
+    numericExprComparison(
+      eb,
+      seriesPositionExpr(ctx.qualifier),
+      operator,
+      value,
+    ),
+  scalar: (_eb, ctx) => seriesPositionExpr(ctx.qualifier),
+}
+
 const creatorsRelation = relationImpl({
   base: creatorBase,
   single: (qb, uuid) => qb.where("bookToCreator.creatorUuid", "=", uuid),
@@ -946,6 +997,38 @@ export function buildBookSearchExpression(
   ])
 }
 
+/**
+ * returns a numeric relevance score for ordering search results.
+ * lower = better match. title exact > title starts-with > title contains >
+ * subtitle > creator > series > description.
+ */
+export function buildBookSearchRelevance(term: string): RawBuilder<number> {
+  const lower = term.toLowerCase()
+  const startsWith = `${lower}%`
+  const contains = `%${lower}%`
+
+  return sql<number>`(case
+    when lower(book.title) = ${lower} then 0
+    when lower(book.title) like ${startsWith} then 1
+    when lower(book.title) like ${contains} then 2
+    when lower(book.subtitle) like ${contains} then 3
+    when exists (
+      select 1 from creator
+      inner join book_to_creator on book_to_creator.creator_uuid = creator.uuid
+      where book_to_creator.book_uuid = book.uuid
+        and lower(creator.name) like ${contains}
+    ) then 4
+    when exists (
+      select 1 from series
+      inner join book_to_series on book_to_series.series_uuid = series.uuid
+      where book_to_series.book_uuid = book.uuid
+        and lower(series.name) like ${contains}
+    ) then 5
+    when lower(book.description) like ${contains} then 6
+    else 7
+  end)`
+}
+
 const search: FieldSqlImpl = {
   isEmpty: (eb) => eb.lit(true),
   compare: (eb, _operator, value) => {
@@ -963,14 +1046,16 @@ export const FIELD_SQL = {
   alignedByStorytellerVersion: stringColumn("book.alignedByStorytellerVersion"),
 
   publicationDate: dateColumn("book.publicationDate"),
+  releaseDate: dateColumn("book.releaseDate"),
   createdAt: dateColumn("book.createdAt"),
   updatedAt: dateColumn("book.updatedAt"),
   alignedAt: dateColumn("book.alignedAt"),
 
   alignmentGrade: reportString("grade"),
-  alignmentScore: reportNumber("score"),
-  alignmentMissingSentences: reportNumber("missing_sentences"),
-  alignmentMutedChapters: reportNumber("muted_chapters"),
+  alignmentPreviousGrade: reportString("grade", 1),
+  alignmentConfidence: reportNumber("confidence"),
+  alignmentSentenceCoverage: reportNumber("sentence_coverage"),
+  alignmentAudioCoverage: reportNumber("audio_coverage"),
 
   pageCount: assetNumeric("pageCount"),
   duration: assetNumeric("duration"),
@@ -984,6 +1069,7 @@ export const FIELD_SQL = {
   tags,
   collections,
   series,
+  seriesPosition,
   creators,
   status,
   identifiers,

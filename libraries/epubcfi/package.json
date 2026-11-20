@@ -1,0 +1,52 @@
+{
+  "name": "@storyteller/epubcfi",
+  "version": "1.1.1",
+  "description": "A spec-compliant library for building, parsing and resolving EPUB CFIs (vendored from colibrio-web-epubcfi)",
+  "author": {
+    "name": "Andreas Duchen",
+    "email": "andreas@colibrio.com"
+  },
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "epub",
+    "cfi",
+    "epubcfi"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist"
+  ],
+  "types": "dist/index.d.ts",
+  "exports": {
+    "@storyteller": "./src/index.ts",
+    "types": "./src/index.ts",
+    "default": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "rm -rf dist .tsbuild && tsc -b tsconfig.build.json",
+    "test": "vitest",
+    "coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@xmldom/xmldom": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vitest/coverage-v8": "5.0.0",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  }
+}

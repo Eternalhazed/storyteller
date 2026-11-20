@@ -27,9 +27,22 @@ export interface Account {
   userId: string
 }
 
+export interface AlignmentDecision {
+  bookUuid: import("@/uuid").UUID
+  createdAt: Generated<string>
+  decision: import("@/alignmentReportView").ChapterDecision
+  endSeconds: number | null
+  key: string
+  kind: "chapter" | "audio"
+  startSeconds: number | null
+  uuid: Generated<import("@/uuid").UUID>
+}
+
 export interface AlignmentReport {
+  audioCoverage: number | null
   bookUuid: import("@/uuid").UUID | null
   chapters: number | null
+  confidence: number | null
   createdAt: Generated<string>
   failedChapters: number | null
   grade: import("@/shelves").AlignmentGrade
@@ -38,12 +51,31 @@ export interface AlignmentReport {
   mutedChapters: number | null
   overrides: string | null
   report: ColumnType<
-    import("@storyteller-platform/align").Report | null,
+    import("@/alignmentReportView").AnyReport | null,
     string | null,
     string | null
   >
   score: number | null
+  sentenceCoverage: number | null
   unalignedAudio: number | null
+  uuid: Generated<import("@/uuid").UUID>
+}
+
+export interface ApiToken {
+  createdAt: Generated<string>
+  expiresAt: Date | null
+  idleTimeoutDays: number | null
+  lastUsedAt: Date | null
+  name: string
+  scope: ColumnType<
+    import("@/database/users").Permission[] | null,
+    string | null,
+    string | null
+  >
+  tokenHash: string
+  tokenStart: string
+  updatedAt: Generated<string>
+  userId: import("@/uuid").UUID
   uuid: Generated<import("@/uuid").UUID>
 }
 
@@ -91,10 +123,21 @@ export interface Book {
   pageCount: number | null
   publicationDate: string | null
   rating: number | null
+  releaseDate: string | null
   subtitle: string | null
   title: string
   updatedAt: Generated<string>
   uuid: Generated<import("@/uuid").UUID>
+}
+
+export interface BookAccess {
+  bookUuid: import("@/uuid").UUID
+  userId: import("@/uuid").UUID
+}
+
+export interface BookAccessView {
+  bookUuid: import("@/uuid").UUID
+  userId: import("@/uuid").UUID
 }
 
 export interface BookToCollection {
@@ -109,7 +152,7 @@ export interface BookToCreator {
   bookUuid: import("@/uuid").UUID
   createdAt: Generated<string>
   creatorUuid: import("@/uuid").UUID
-  role: import("@/components/books/edit/marcRelators").Role | null
+  role: import("@/metadata/marcRelators").Role | null
   updatedAt: Generated<string>
   uuid: Generated<import("@/uuid").UUID>
 }
@@ -216,6 +259,17 @@ export interface Ebook {
   pageCount: number | null
   updatedAt: Generated<string>
   uuid: Generated<import("@/uuid").UUID>
+}
+
+export interface EventLog {
+  bookUuid: string | null
+  createdAt: Generated<string>
+  op: string
+  seq: Generated<number | null>
+  tableName: string
+  token: Generated<string>
+  userId: string | null
+  uuid: string
 }
 
 export interface ExternalData {
@@ -342,7 +396,7 @@ export interface Job {
   stage: "SPLIT_TRACKS" | "TRANSCRIBE_CHAPTERS" | "SYNC_CHAPTERS" | null
   startedAt: string | null
   stats: ColumnType<import("@/work/jobStats").JobStats, string, string> | null
-  status: Generated<import("@/database/jobs").JobStatus>
+  status: Generated<import("@/jobStatuses").JobStatus>
   type: import("@/database/jobs").JobType
   updatedAt: Generated<string>
   uuid: Generated<import("@/uuid").UUID>
@@ -368,6 +422,47 @@ export interface Position {
   updatedAt: Generated<string>
   userId: import("@/uuid").UUID
   uuid: Generated<import("@/uuid").UUID>
+}
+
+export interface Progression {
+  bookUuid: import("@/uuid").UUID
+  createdAt: Generated<string>
+  deviceId: string
+  deviceName: string
+  format: "ebook" | "audiobook" | "readaloud"
+  modified: Date
+  progression: number
+  title: string | null
+  updatedAt: Generated<string>
+  userId: import("@/uuid").UUID
+  uuid: Generated<import("@/uuid").UUID>
+}
+
+export interface ProgressionHistory {
+  bookUuid: import("@/uuid").UUID
+  charRef: string | null
+  createdAt: Generated<string>
+  deviceId: string
+  deviceName: string
+  mediaRef: string | null
+  modified: Date
+  progression: number
+  sourceFormat: string | null
+  title: string | null
+  updatedAt: Generated<string>
+  userId: import("@/uuid").UUID
+  uuid: Generated<import("@/uuid").UUID>
+}
+
+export interface ProgressionReference {
+  createdAt: Generated<string>
+  kind: NonNullable<
+    import("@/progress/uriReference").UriReference["fragmentKind"]
+  >
+  progressionUuid: import("@/uuid").UUID
+  updatedAt: Generated<string>
+  uuid: Generated<import("@/uuid").UUID>
+  value: string
 }
 
 export interface Readaloud {
@@ -565,6 +660,7 @@ export interface UserPermission {
   bookUpdate: Generated<boolean>
   collectionCreate: Generated<boolean>
   createdAt: Generated<string>
+  epoch: Generated<number>
   id: number | null
   inviteDelete: Generated<boolean>
   inviteList: Generated<boolean>
@@ -598,9 +694,13 @@ export interface VerificationToken {
 
 export interface DB {
   account: Account
+  alignmentDecision: AlignmentDecision
   alignmentReport: AlignmentReport
+  apiToken: ApiToken
   audiobook: Audiobook
   book: Book
+  bookAccess: BookAccess
+  bookAccessView: BookAccessView
   bookToCollection: BookToCollection
   bookToCreator: BookToCreator
   bookToSeries: BookToSeries
@@ -612,6 +712,7 @@ export interface DB {
   creator: Creator
   deviceAuthorization: DeviceAuthorization
   ebook: Ebook
+  eventLog: EventLog
   externalData: ExternalData
   externalSource: ExternalSource
   homeSection: HomeSection
@@ -623,6 +724,9 @@ export interface DB {
   job: Job
   migration: Migration
   position: Position
+  progression: Progression
+  progressionHistory: ProgressionHistory
+  progressionReference: ProgressionReference
   readaloud: Readaloud
   series: Series
   serverIdentity: ServerIdentity

@@ -67,7 +67,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
           package-manager-cache: false
 
       - uses: actions/setup-java@v6
@@ -112,7 +112,7 @@ jobs:
 
       - name: Generate the Android project
         run:
-          yarn workspace @storyteller-platform/mobile expo prebuild --platform
+          yarn workspace @storyteller/mobile expo prebuild --platform
           android --clean --no-install
 
       - name: Build the APK

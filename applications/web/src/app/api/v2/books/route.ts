@@ -3,12 +3,13 @@ import { basename, dirname, extname, sep } from "node:path"
 
 import { NextResponse } from "next/server"
 
-import { Epub, MemoryAdapter } from "@storyteller-platform/epub"
+import { Epub, MemoryAdapter } from "@storyteller/epub"
+import { isHiddenFile } from "@storyteller/fs"
 
 import { deleteAssets } from "@/assets/fs"
-import { filepathFolder, scan } from "@/assets/library/scanner/scan"
+import { filepathFolder } from "@/assets/library/paths"
 import { type Candidate } from "@/assets/library/scanner/types"
-import { isAudioFile, isHiddenFile, isZipArchive } from "@/audio"
+import { isAudioFile, isZipArchive } from "@/audio"
 import { withHasPermission } from "@/auth/auth"
 import { deleteBook, getBook, getBooks } from "@/database/books"
 import {
@@ -166,6 +167,7 @@ export const POST = withHasPermission("bookCreate")(async (request) => {
     })
   }
 
+  const { scan } = await import("@/assets/library/scanner/scan")
   await scan({
     source: "api",
     request: { kind: "candidates", candidates },

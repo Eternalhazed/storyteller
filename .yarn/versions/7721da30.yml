@@ -1,0 +1,10 @@
+releases:
+  "@storyteller/tauri": patch
+
+declined:
+  - "@storyteller/docs"
+  - "@storyteller/mobile"
+  - "@storyteller/web"
+  - "@storyteller/mapping"
+  - "@storyteller/nodekit"
+  - "@storyteller/opds"

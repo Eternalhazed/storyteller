@@ -40,13 +40,15 @@ import {
 import { type BookWithRelations } from "@/database/books"
 import { type GridCardSize } from "@/database/userPreferencesTypes"
 import * as icon from "@/icons"
-import { type DisplayField, type SortContext, groupDisplayRows } from "@/sort"
+import { type DisplayField, type SortContext } from "@/sort"
 import { useAppSelector } from "@/store/appState"
 import {
   type GridSpacing,
   selectGridCardSize,
   selectGridSpacing,
 } from "@/store/slices/uiSettingsSlice"
+
+import { COVER_ASPECT, metaHeightFor } from "./bookCardSizing"
 
 type BookGridProps = {
   books: BookWithRelations[]
@@ -82,18 +84,7 @@ export const GRID_SPACING_PX: Record<GridSpacing, number> = {
   cozy: 16,
   spacious: 24,
 }
-const COVER_ASPECT = 16 / 13 // cover box is aspect-13/16 -> height = width * 16/13
 const MOBILE_COLUMNS = 2
-
-function metaHeightFor(fields: DisplayField[]): number {
-  if (fields.length === 0) return 0
-  const TOP = 8 // mt-2
-  const TITLE = 40 // 2 lines, leading-tight
-  const LINE = 20 // one text-xs line + gap-0.5
-  const rows = groupDisplayRows(fields)
-  const titleRows = rows.filter((row) => row[0] === "title").length
-  return TOP + titleRows * TITLE + (rows.length - titleRows) * LINE
-}
 
 export function BookGrid({
   books: rawBooks,
@@ -126,9 +117,9 @@ export function BookGrid({
 
   const animate = useLayoutAnimations() && !isMobile
 
-  const metaHeight = useMemo(
-    () => metaHeightFor(displayFields ?? ["authors", "title"]),
-    [displayFields],
+  const metaHeight = metaHeightFor(
+    displayFields ?? ["authors", "title"],
+    gridCardSize,
   )
 
   const geometry = useMemo<VirtualGridGeometry>(
@@ -213,7 +204,7 @@ export function BookGrid({
   })
 
   const activeUuid =
-    nav.activeIndex !== null ? books[nav.activeIndex]?.uuid ?? null : null
+    nav.activeIndex !== null ? (books[nav.activeIndex]?.uuid ?? null) : null
 
   const c = useCommon()
   const tActions = useTranslation("BookActions")
@@ -297,6 +288,7 @@ export function BookGrid({
                   displayFields={displayFields}
                   displayContext={displayContext}
                   onSelectRange={menu.handleSelectRange}
+                  gridCardSize={gridCardSize}
                 />
               )
             })}

@@ -13,6 +13,7 @@ import {
 import { Provider } from "react-redux"
 import { Uniwind } from "uniwind"
 
+import { BookTransferFeedback } from "@/components/BookTransferFeedback"
 import { StorytellerProvider } from "@/components/StorytellerProvider"
 import { PortalHost } from "@/components/ui/portal-context"
 import "@/global.css"
@@ -37,7 +38,7 @@ export { ErrorBoundary } from "expo-router"
 
 export const unstable_settings = {
   // Ensure that reloading on `/modal` keeps a back button present.
-  initialRouteName: "index",
+  anchor: "(root)",
 }
 
 registerBackgroundTaskAsync()
@@ -96,6 +97,7 @@ function Layout() {
               >
                 <PortalHost>
                   <Slot />
+                  <BookTransferFeedback />
                 </PortalHost>
               </SafeAreaListener>
             </SafeAreaProvider>

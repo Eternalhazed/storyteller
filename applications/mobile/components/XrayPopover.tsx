@@ -10,7 +10,7 @@ import {
 } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 
-import { type XrayEntityView } from "@storyteller-platform/xray/view"
+import { type XrayEntityView } from "@storyteller/xray/view"
 
 import { XrayTypeBadge } from "@/components/XrayTypeBadge"
 import { Button } from "@/components/ui/button"

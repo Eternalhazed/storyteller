@@ -1,5 +1,6 @@
 import { Popover } from "@base-ui/react/popover"
 import { useFormatter, useLocale } from "next-intl"
+import { useQueryState } from "nuqs"
 import { Fragment, memo, useCallback, useMemo } from "react"
 
 import { useIsMobile } from "@v3/_/hooks/use-mobile"
@@ -21,16 +22,24 @@ import {
 import { SelectionCheckbox } from "@/app/(v3)/v3/_/components/books/SelectionCheckbox"
 import { GradePill } from "@/app/(v3)/v3/_/components/books/grade-pill"
 import { bookItemDomId } from "@/app/(v3)/v3/_/components/books/keyboard-nav"
+import {
+  SearchHighlight,
+  SearchMatchLine,
+  isCreatorDisplayField,
+  useSearchMatches,
+} from "@/app/(v3)/v3/_/components/books/search-highlight"
 import { useUserPreferences } from "@/app/(v3)/v3/_/components/user-preferences-provider"
 import { V3Link } from "@/app/(v3)/v3/_/components/v3-link"
-import { IconReadaloud } from "@/components/icons/IconReadaloud"
 import { type BookWithRelations } from "@/database/books"
-import { getFieldDef } from "@/fields"
+import { statusDisplayLabel } from "@/database/statusKinds"
+import type { GridCardSize } from "@/database/userPreferencesTypes"
 import * as icon from "@/icons"
+import { IconReadaloud } from "@/icons/IconReadaloud"
 import {
   type CreatorDisplayField,
   type DisplayField,
   type SortContext,
+  displaySeriesOf,
   groupDisplayRows,
 } from "@/sort"
 import { useAppSelector } from "@/store/appState"
@@ -40,6 +49,8 @@ import {
   selectShowReadaloudBadge,
 } from "@/store/slices/uiSettingsSlice"
 import { type UUID } from "@/uuid"
+
+import { TITLE_HEIGHT_FOR_CARD_SIZE } from "./bookCardSizing"
 
 type BookCardProps = {
   book: BookWithRelations
@@ -61,6 +72,7 @@ type BookCardProps = {
   ) => void
   displayFields?: DisplayField[]
   displayContext?: SortContext
+  gridCardSize: GridCardSize
   handle?: Popover.Handle<unknown>
 }
 
@@ -81,11 +93,13 @@ export function SecondaryText({
   field,
   ctx,
   compact = false,
+  search,
 }: {
   book: BookWithRelations
   field: DisplayField
   ctx: SortContext | undefined
   compact?: boolean
+  search?: string | null
 }): React.ReactNode {
   const { dateTime, relativeTime } = useFormatter()
   const { ratingIcon } = useUserPreferences()
@@ -106,30 +120,31 @@ export function SecondaryText({
         none
       )
     case "seriesPosition": {
-      let series = book.series[0]
-      for (const s of book.series) {
-        if (s.featured) {
-          series = s
-          break
-        }
-        if (s.uuid === ctx?.seriesUuid) {
-          series = s
-          break
-        }
-      }
+      const series = displaySeriesOf(book, ctx)
 
       if (!series || series.position == null) return none
 
       return (
         // TODO: localize
         <span>
-          #{series.position} in {series.name}
+          #{series.position} in{" "}
+          {search ? (
+            <SearchHighlight term={search}>{series.name}</SearchHighlight>
+          ) : (
+            series.name
+          )}
         </span>
       )
     }
     case "publicationDate":
       return book.publicationDate ? (
         <span>{book.publicationDate.slice(0, 4)}</span>
+      ) : (
+        none
+      )
+    case "releaseDate":
+      return book.releaseDate ? (
+        <span>{book.releaseDate.slice(0, 4)}</span>
       ) : (
         none
       )
@@ -205,9 +220,9 @@ export function SecondaryText({
     case "translators":
     case "creators":
       return null
-    case "alignmentScore":
-      return book.alignmentSummary?.score != null ? (
-        <span>{Math.round(book.alignmentSummary.score)}%</span>
+    case "alignmentConfidence":
+      return book.alignmentSummary?.confidence != null ? (
+        <span>{Math.round(book.alignmentSummary.confidence)}%</span>
       ) : (
         none
       )
@@ -217,18 +232,29 @@ export function SecondaryText({
       ) : (
         none
       )
-    case "alignmentMissingSentences":
-      return book.alignmentSummary?.missingSentences != null ? (
-        <span>{book.alignmentSummary.missingSentences}</span>
+    case "alignmentPreviousGrade":
+      return book.alignmentSummary?.previousGrade ? (
+        <GradePill
+          grade={book.alignmentSummary.previousGrade}
+          className="opacity-60"
+        />
       ) : (
         none
       )
-    case "alignmentMutedChapters":
-      return book.alignmentSummary?.mutedChapters != null ? (
-        <span>{book.alignmentSummary.mutedChapters}</span>
+    case "alignmentSentenceCoverage":
+      return book.alignmentSummary?.sentenceCoverage != null ? (
+        <span>{Math.round(book.alignmentSummary.sentenceCoverage)}%</span>
       ) : (
         none
       )
+    case "alignmentAudioCoverage":
+      return book.alignmentSummary?.audioCoverage != null ? (
+        <span>{Math.round(book.alignmentSummary.audioCoverage)}%</span>
+      ) : (
+        none
+      )
+    case "status":
+      return book.status ? <span>{statusDisplayLabel(book.status)}</span> : none
     default: {
       const _exhaustive: never = field
       return null
@@ -264,9 +290,11 @@ const CREATOR_LINK_BASE: Record<CreatorDisplayField, string | null> = {
 export function CreatorsLine({
   book,
   field,
+  search,
 }: {
   book: BookWithRelations
   field: CreatorDisplayField
+  search?: string | null
 }) {
   const people = creatorsFor(book, field)
   if (people.length === 0) return null
@@ -277,29 +305,37 @@ export function CreatorsLine({
 
   return (
     <p className="text-muted-foreground line-clamp-1 text-xs">
-      {visible.map((person, index) => (
-        <Fragment key={person.uuid}>
-          {linkBase ? (
-            <V3Link
-              className="hover:text-tinted-strong relative z-20 hover:underline"
-              prefetch={false}
-              href={`${linkBase}?item=${person.uuid}`}
-              onClick={(e) => {
-                e.stopPropagation()
-              }}
-            >
-              {person.name}
-            </V3Link>
-          ) : (
-            person.name
-          )}
-          {/* the mixed-role row disambiguates each person by their marc code */}
-          {field === "creators" && person.role && (
-            <span className="text-muted-foreground/60"> ({person.role})</span>
-          )}
-          {index < visible.length - 1 && ", "}
-        </Fragment>
-      ))}
+      {visible.map((person, index) => {
+        const name = search ? (
+          <SearchHighlight term={search}>{person.name}</SearchHighlight>
+        ) : (
+          person.name
+        )
+
+        return (
+          <Fragment key={person.uuid}>
+            {linkBase ? (
+              <V3Link
+                className="hover:text-tinted-strong relative z-20 hover:underline"
+                prefetch={false}
+                href={`${linkBase}?item=${person.uuid}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                }}
+              >
+                {name}
+              </V3Link>
+            ) : (
+              name
+            )}
+            {/* the mixed-role row disambiguates each person by their marc code */}
+            {field === "creators" && person.role && (
+              <span className="text-muted-foreground/60"> ({person.role})</span>
+            )}
+            {index < visible.length - 1 && ", "}
+          </Fragment>
+        )
+      })}
       {hiddenCount > 0 && ` +${hiddenCount}`}
       {field === "translators" && (
         <span className="text-muted-foreground/60"> (trl)</span>
@@ -309,11 +345,7 @@ export function CreatorsLine({
 }
 
 function isCreatorField(field: DisplayField): field is CreatorDisplayField {
-  if (field === "seriesPosition") {
-    return false
-  }
-  const fieldDef = getFieldDef(field)
-  return fieldDef.group === "creators"
+  return isCreatorDisplayField(field)
 }
 
 export const BookCard = memo(function BookCard({
@@ -332,6 +364,7 @@ export const BookCard = memo(function BookCard({
   onClick,
   displayFields = ["authors", "title"],
   displayContext,
+  gridCardSize,
   handle,
 }: BookCardProps) {
   const isMobile = useIsMobile()
@@ -344,9 +377,10 @@ export const BookCard = memo(function BookCard({
   const isSynced =
     hasReadaloud && book.readaloud?.status === "ALIGNED" && showReadaloudBadge
   const isProcessing =
-    (book.readaloud?.status === "PROCESSING" ||
-      book.readaloud?.status === "QUEUED") &&
-    showProcessingBadge
+    book.readaloud?.status === "PROCESSING" && showProcessingBadge
+
+  const isQueued = book.readaloud?.status === "QUEUED" && showProcessingBadge
+
   const isMissing = showMissingBadge && hasMissingMedia(book)
   const { gridCoverDisplay } = useUserPreferences()
   const fillCover = gridCoverDisplay !== "auto"
@@ -359,6 +393,16 @@ export const BookCard = memo(function BookCard({
   const progress = getReadingProgress(book)
 
   const scope = useCoverScope(book)
+
+  const [search] = useQueryState("search")
+
+  const { visibleCategories, overrides } = useSearchMatches(
+    book,
+    search,
+    displayFields,
+  )
+
+  const isSmallestCover = gridCardSize === "smallest"
 
   const cardContent = (
     <>
@@ -377,7 +421,7 @@ export const BookCard = memo(function BookCard({
             />
           )}
 
-          {isProcessing && (
+          {(isProcessing || isQueued) && (
             <ProcessingIndicator
               book={book}
               size={22}
@@ -423,7 +467,7 @@ export const BookCard = memo(function BookCard({
           </div>
         )}
 
-        {isMissing && (
+        {!isQueued && !isProcessing && isMissing && (
           <MissingBadge
             book={book}
             className="absolute right-1.5 bottom-1.5 z-20 size-5!"
@@ -452,7 +496,7 @@ export const BookCard = memo(function BookCard({
       </div>
 
       {displayRows.length > 0 && (
-        <div className="mt-2 flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden px-1">
+        <div className="mt-2 flex min-h-0 flex-1 flex-col gap-0.5 px-1">
           {displayRows.map((row) => {
             const [field] = row
             if (!field) return null
@@ -469,22 +513,49 @@ export const BookCard = memo(function BookCard({
                     lang={book.language ?? undefined}
                     className={cn(
                       "group-hover:text-tinted-strong line-clamp-2",
-                      "font-heading font-medium",
-                      "leading-[1.3] hyphens-auto",
+                      "font-heading",
+                      "hyphens-auto",
+                      "leading-[1.2]",
+                      isSmallestCover && "text-sm leading-[1.15]",
+                      // otherwise looks wack
                       "[font-variant-ligatures:none]",
                     )}
+                    style={{ height: TITLE_HEIGHT_FOR_CARD_SIZE[gridCardSize] }}
                   >
-                    {book.title}
+                    {search && visibleCategories.has("title") ? (
+                      <SearchHighlight term={search}>
+                        {book.title}
+                      </SearchHighlight>
+                    ) : (
+                      book.title
+                    )}
                   </h3>
                 </V3Link>
               )
             }
 
             if (isCreatorField(field)) {
-              return <CreatorsLine key={field} book={book} field={field} />
+              const override = overrides.get(field)
+
+              if (override && search) {
+                return (
+                  <SearchMatchLine key={field} match={override} term={search} />
+                )
+              }
+
+              return (
+                <CreatorsLine
+                  key={field}
+                  book={book}
+                  field={field}
+                  search={search}
+                />
+              )
             }
 
-            const hasPill = row.includes("alignmentGrade")
+            const hasPill =
+              row.includes("alignmentGrade") ||
+              row.includes("alignmentPreviousGrade")
 
             return (
               <div
@@ -508,6 +579,7 @@ export const BookCard = memo(function BookCard({
                       field={f}
                       ctx={displayContext}
                       compact
+                      search={search}
                     />
                   </Fragment>
                 ))}
@@ -542,7 +614,7 @@ export const BookCard = memo(function BookCard({
         "aria-selected": active,
       })}
       className={cn(
-        "group relative flex h-full min-h-0 flex-col rounded-lg transition-opacity duration-200",
+        "group relative flex h-full min-h-0 flex-col rounded-card transition-opacity duration-200",
         muted && "opacity-50",
         selected &&
           !isBookSelected &&

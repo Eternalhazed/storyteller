@@ -1,0 +1,9 @@
+releases:
+  "@storyteller/opds": patch
+
+declined:
+  - "@storyteller/web"
+  - "@storyteller/align"
+  - "@storyteller/audiobooks"
+  - "@storyteller/epub"
+  - "@storyteller/ghost-story"

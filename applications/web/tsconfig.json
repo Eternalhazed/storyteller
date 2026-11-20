@@ -8,7 +8,11 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "esModuleInterop": true,
-    "preserveSymlinks": true,
+    // `types` defaults to an empty list in TypeScript 6, and `node-gyp-build`
+    // and `smil-clockvalue` only have ambient `declare module` shims in
+    // `../../types`, so they have to be loaded explicitly for the imports in the
+    // workspace sources this project type-checks to resolve.
+    "types": ["node", "smil-clockvalue"],
     "skipLibCheck": true,
     "checkJs": false,
     "forceConsistentCasingInFileNames": true,
@@ -35,7 +39,12 @@
       "@v3/*": ["./src/app/(v3)/v3/*"]
     },
     "outDir": "tsbuild",
-    "noEmit": false
+    "noEmit": false,
+    "typeRoots": [
+      "./node_modules/@types",
+      "../../node_modules/@types",
+      "../../types"
+    ]
   },
   "extends": ["@tsconfig/strictest/tsconfig.json"],
   "include": [
@@ -63,10 +72,13 @@
       "path": "../../libraries/epub"
     },
     {
+      "path": "../../libraries/epubcfi"
+    },
+    {
       "path": "../../libraries/fs"
     },
     {
-      "path": "../../libraries/audiobook"
+      "path": "../../libraries/audiobooks"
     },
     {
       "path": "../../libraries/ghost-story"
@@ -76,6 +88,9 @@
     },
     {
       "path": "../../libraries/opds"
+    },
+    {
+      "path": "../../libraries/media-types"
     },
     {
       "path": "../../libraries/xray"

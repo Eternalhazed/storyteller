@@ -1,12 +1,29 @@
 import { EventEmitter } from "node:events"
 
+import { type DisplayJob } from "./database/jobs"
 import { type UUID } from "./uuid"
 
-export type JobEvent = {
-  type: "jobCreated" | "jobUpdated" | "jobDeleted"
+export const JOB_EVENT_TYPES = [
+  "jobCreated",
+  "jobUpdated",
+  "jobDeleted",
+] as const
+export type JobEventType = (typeof JOB_EVENT_TYPES)[number]
+
+export type JobEventBase<type extends JobEventType, Payload = void> = {
+  type: type
   jobUuid: UUID
+
+  payload: Payload
 }
 
+export type JobCreatedEvent = JobEventBase<"jobCreated", DisplayJob>
+
+export type JobUpdatedEvent = JobEventBase<"jobUpdated", DisplayJob>
+
+export type JobDeletedEvent = JobEventBase<"jobDeleted">
+
+export type JobEvent = JobCreatedEvent | JobUpdatedEvent | JobDeletedEvent
 /**
  * Next.js app directory seems to have a bug where, in production,
  * a single module can be imported multiple times (breaking the module

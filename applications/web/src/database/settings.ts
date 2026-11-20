@@ -15,6 +15,7 @@ import {
   type Epub2ImportStrategy,
   type ImportMode,
   ImportRuleSchema,
+  SETTINGS_DEFAULTS,
   type Settings,
   isEncryptedSettingKey,
 } from "./settingsTypes"
@@ -26,7 +27,7 @@ import {
 
 async function decryptSettingValue(name: string, value: unknown) {
   if (isEncryptedSettingKey(name) && typeof value === "string" && value) {
-    return (await decryptSecret(value)) ?? ""
+    return (await decryptSecret(value, name)) ?? ""
   }
 
   if (name === "authProviders" && Array.isArray(value)) {
@@ -34,7 +35,10 @@ async function decryptSettingValue(name: string, value: unknown) {
       (value as AuthProvider[]).map(async (provider) => ({
         ...provider,
         clientSecret: provider.clientSecret
-          ? (await decryptSecret(provider.clientSecret)) ?? ""
+          ? ((await decryptSecret(
+              provider.clientSecret,
+              provider.issuer ?? "Custom Provider",
+            )) ?? "")
           : provider.clientSecret,
       })),
     )
@@ -63,6 +67,10 @@ async function encryptSettingValue(name: string, value: unknown) {
 }
 
 export function formatTranscriptionEngineDetails(settings: Settings) {
+  if (settings.aligner === "ctc") {
+    return settings.ctcEngine ?? "ctc-local"
+  }
+
   let details = settings.transcriptionEngine ?? "whisper.cpp"
   if (settings.transcriptionEngine === "whisper.cpp") {
     details += `:${settings.whisperModel ?? "tiny"}`
@@ -157,6 +165,7 @@ async function loadConfigFile(): Promise<ConfigFileCache> {
 
   let settings: Partial<Settings>
   try {
+    // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
     settings = ConfigFileSchema.parse(rawSettings) as Partial<Settings>
   } catch (err) {
     if (err instanceof ZodError) {
@@ -228,17 +237,26 @@ export async function getSetting<Name extends keyof Settings>(name: Name) {
     return configSettings[name] as Settings[Name]
   }
 
-  const { valueJson } = await db
+  const fallback = (SETTINGS_DEFAULTS as Partial<Settings>)[
+    name
+  ] as Settings[Name]
+
+  const row = await db
     .selectFrom("settings")
     .select(["value as valueJson"])
     .where("name", "=", name)
     .orderBy("createdAt", "desc")
-    .executeTakeFirstOrThrow()
+    .executeTakeFirst()
+
+  if (!row) return fallback
 
   const parsed: unknown =
-    typeof valueJson === "string" ? JSON.parse(valueJson) : valueJson
+    typeof row.valueJson === "string"
+      ? JSON.parse(row.valueJson)
+      : row.valueJson
 
-  return (await decryptSettingValue(name, parsed)) as Settings[Name]
+  const value = (await decryptSettingValue(name, parsed)) as Settings[Name]
+  return value ?? fallback
 }
 
 export async function getSettings(): Promise<Settings> {
@@ -257,19 +275,18 @@ export async function getSettings(): Promise<Settings> {
     }),
   )
 
-  const dbDesttings = Object.fromEntries(decrypted) as Settings
+  const stored: Record<string, unknown> = Object.fromEntries(decrypted)
+  for (const [name, fallback] of Object.entries(SETTINGS_DEFAULTS)) {
+    stored[name] ??= fallback
+  }
 
   const { settings: configSettings } = await loadConfigFile()
 
-  const result = {
-    ...dbDesttings,
-    smtpSsl: dbDesttings.smtpSsl ?? true,
-    smtpRejectUnauthorized: dbDesttings.smtpRejectUnauthorized ?? true,
-    backupCronExpression: dbDesttings.backupCronExpression ?? null,
-    backupRetentionCount: dbDesttings.backupRetentionCount ?? null,
+  const { hardcoverApiToken: _, ...settings } = {
+    ...(stored as Settings),
+    ...configSettings,
   }
-
-  return { ...result, ...configSettings }
+  return settings
 }
 
 export async function updateSettings(settings: Settings) {
@@ -279,6 +296,7 @@ export async function updateSettings(settings: Settings) {
   for (const [settingName, value] of Object.entries(settings)) {
     if (lockedKeys.has(settingName as keyof Settings)) continue
     if (settingName === "dataDirAnchor") continue
+    if (settingName === "hardcoverApiToken") continue
 
     const unchanged =
       JSON.stringify(existingSettings[settingName as keyof Settings]) ===
@@ -287,6 +305,7 @@ export async function updateSettings(settings: Settings) {
     if (unchanged) continue
 
     const stored = JSON.stringify(
+      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
       await encryptSettingValue(settingName, value as unknown),
     )
 

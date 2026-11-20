@@ -6,16 +6,25 @@ import { type ReactNode, useCallback, useMemo, useState } from "react"
 
 import { useCommon, useTranslation } from "@v3/_/hooks/use-translation"
 
+import {
+  SearchHighlight,
+  type SearchMatch,
+  SearchMatchLine,
+  computeSearchMatches,
+  computeSearchOverrides,
+} from "@/app/(v3)/v3/_/components/books/search-highlight"
 import { useUserPreferences } from "@/app/(v3)/v3/_/components/user-preferences-provider"
 import { useVersionBasePath } from "@/app/(v3)/v3/_/components/version-context"
 import { useDebounce } from "@/app/(v3)/v3/_/hooks/use-debounce"
+import { useIsTauri } from "@/app/(v3)/v3/_/hooks/use-is-tauri"
 import { useBookInSidePanel } from "@/app/(v3)/v3/_/hooks/use-open-book"
 import { cn } from "@/cn"
-import { IconReadaloud } from "@/components/icons/IconReadaloud"
 import { type BookWithRelations } from "@/database/books"
 import { usePermissions } from "@/hooks/usePermissions"
 import * as icon from "@/icons"
 import { type StyledIcon } from "@/icons"
+import { IconReadaloud } from "@/icons/IconReadaloud"
+import { type DisplayField } from "@/sort"
 import { api } from "@/store/api"
 
 import { Cover } from "./books/Cover"
@@ -25,6 +34,16 @@ import {
   COLLECTION_ICON,
   SHELF_ICON,
 } from "./nav/sidebar-items"
+import { PREFERENCE_SECTIONS, PREFERENCE_TABS } from "./preferences-form/tabs"
+import { TAB_ICONS } from "./settings-form/tab-icons"
+import {
+  SETTINGS_SECTIONS,
+  canSeeSection,
+  type SettingsPage,
+  isSectionOnPlatform,
+  settingsPages,
+  tabs as settingsTabs,
+} from "./settings-form/tabs"
 import { ShelfEditor } from "./shelves/ShelfEditor"
 import {
   Dialog,
@@ -46,6 +65,8 @@ type NavCommand = {
   label: string
   icon: StyledIcon
   href: string
+  parent?: string
+  matchParent?: boolean
 }
 
 export const COMMAND_SEARCH_HOTKEY = "Mod+K"
@@ -54,11 +75,58 @@ export const COMMAND_SEARCH_HOTKEY_PARSED = parseHotkey(COMMAND_SEARCH_HOTKEY)
 function useNavCommands(): NavCommand[] {
   const tSidebar = useTranslation("AppSidebar")
   const tLibrary = useTranslation("LibraryPage")
+  const tSettings = useTranslation("SettingsPage")
+  const tPreferences = useTranslation("PreferencesPage")
   const c = useCommon()
   const permissions = usePermissions()
+  const isTauri = useIsTauri()
 
-  return useMemo(
-    () => [
+  return useMemo(() => {
+    const settingsLabel = tSidebar.plain("settings")
+    const preferencesLabel = tSidebar.plain("account")
+
+    const settingsCommands: NavCommand[] = permissions?.settingsUpdate
+      ? [
+          {
+            key: "settings",
+            label: settingsLabel,
+            icon: icon.Settings,
+            href: "/settings",
+          },
+          ...settingsTabs
+            .filter(
+              (tab) =>
+                tab !== "users" ||
+                permissions.userList ||
+                permissions.inviteList,
+            )
+            .map((tab) => ({
+              key: `settings.${tab}`,
+              label: tSettings.plain(`tabs.${tab}.title`),
+              parent: settingsLabel,
+              matchParent: true,
+              icon: TAB_ICONS[tab],
+              href: `/settings?tab=${tab}`,
+            })),
+          ...SETTINGS_SECTIONS.filter(
+            (section) =>
+              (settingsPages.includes(section.page as SettingsPage) ||
+                section.page === "maintenance") &&
+              canSeeSection(section, permissions) &&
+              isSectionOnPlatform(section, isTauri),
+          ).map((section) => ({
+            key: `settings.section.${section.id}`,
+            label: tSettings.plain(
+              `tabs.${section.page}.sections.${section.key}.title` as never,
+            ),
+            parent: `${settingsLabel} › ${tSettings.plain(`tabs.${section.page}.title`)}`,
+            icon: TAB_ICONS[section.page],
+            href: `/settings?tab=${section.page}&section=${section.id}`,
+          })),
+        ]
+      : []
+
+    return [
       ...BUILTIN_SIDEBAR_ITEMS.filter(
         (item) => !item.permission || !!permissions?.[item.permission],
       ).map((item) => ({
@@ -82,34 +150,74 @@ function useNavCommands(): NavCommand[] {
         icon: COLLECTION_ICON,
         href: "/collections",
       },
-      {
-        key: "settings",
-        label: tSidebar.plain("settings"),
-        icon: icon.Settings,
-        href: "/settings",
-      },
+      ...settingsCommands,
       {
         key: "preferences",
-        label: tSidebar.plain("account"),
+        label: preferencesLabel,
         icon: icon.AdjustmentsHorizontal,
         href: "/preferences",
       },
-    ],
-    [permissions, tSidebar, tLibrary, c],
-  )
+      ...PREFERENCE_TABS.map((tab) => ({
+        key: `preferences.${tab}`,
+        label: tPreferences.plain(`tabs.${tab}.title`),
+        parent: preferencesLabel,
+        matchParent: true,
+        icon: icon.AdjustmentsHorizontal,
+        href: `/preferences?tab=${tab}`,
+      })),
+      ...PREFERENCE_SECTIONS.map((section) => ({
+        key: `preferences.section.${section.id}`,
+        label: tPreferences.plain(
+          `tabs.${section.tab}.sections.${section.id}.title` as never,
+        ),
+        parent: `${preferencesLabel} › ${tPreferences.plain(`tabs.${section.tab}.title`)}`,
+        icon: icon.AdjustmentsHorizontal,
+        href: `/preferences?tab=${section.tab}&section=${section.id}`,
+      })),
+    ]
+  }, [permissions, isTauri, tSidebar, tLibrary, tSettings, tPreferences, c])
 }
 
-const rowClassName = "gap-3 rounded-lg px-2 py-1.5"
+const NO_MATCH = 99
+
+function navRank(cmd: NavCommand, query: string): number {
+  const label = cmd.label.toLowerCase()
+  if (label === query) return 0
+  if (label.startsWith(query)) return 1
+  if (label.includes(query)) return 2
+  if (cmd.matchParent && cmd.parent?.toLowerCase().includes(query)) return 3
+  return NO_MATCH
+}
+
+const rowClassName = "gap-3 rounded-sm px-2 py-1.5"
 
 function BookRow({
   book,
+  search,
   onSelect,
 }: {
   book: BookWithRelations
+  search?: string
   onSelect: (book: BookWithRelations, modifiers?: ActivationModifiers) => void
 }) {
   const isSynced = book.readaloud?.status === "ALIGNED"
   const authors = book.authors.map((a) => a.name).join(", ")
+
+  const matches = useMemo(
+    () => (search ? computeSearchMatches(book, search) : []),
+    [book, search],
+  )
+
+  const { overrides } = useMemo(
+    () =>
+      search
+        ? computeSearchOverrides(["authors", "title"], matches)
+        : { overrides: new Map() as Map<DisplayField, SearchMatch> },
+    [search, matches],
+  )
+
+  const authorOverride = overrides.get("authors")
+  const hasVisibleTitleMatch = matches.some((m) => m.category === "title")
 
   return (
     <FilterableMenuItem
@@ -125,12 +233,25 @@ function BookRow({
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="font-heading truncate text-sm">{book.title}</div>
-        {authors && (
+        <div className="font-heading truncate text-sm">
+          {search && hasVisibleTitleMatch ? (
+            <SearchHighlight term={search}>{book.title}</SearchHighlight>
+          ) : (
+            book.title
+          )}
+        </div>
+
+        {authorOverride && search ? (
+          <SearchMatchLine match={authorOverride} term={search} />
+        ) : authors ? (
           <div className="text-muted-foreground truncate text-xs">
-            {authors}
+            {search ? (
+              <SearchHighlight term={search}>{authors}</SearchHighlight>
+            ) : (
+              authors
+            )}
           </div>
-        )}
+        ) : null}
       </div>
 
       <div className="text-muted-foreground flex shrink-0 items-center gap-1.5">
@@ -268,9 +389,9 @@ function PaletteResults({
 
   const books = searching
     ? debouncedSearch
-      ? searchData?.pages.flat() ?? []
+      ? (searchData?.pages.flat() ?? [])
       : []
-    : recentData?.pages.flat() ?? []
+    : (recentData?.pages.flat() ?? [])
   const isLoadingBooks = searching
     ? isSearchFetching || debouncedSearch !== trimmed
     : isRecentFetching && !recentData
@@ -278,13 +399,11 @@ function PaletteResults({
   const q = trimmed.toLowerCase()
   const matchedNav = searching
     ? navCommands
-        .filter((cmd) => cmd.label.toLowerCase().includes(q))
-        .sort(
-          (a, b) =>
-            Number(b.label.toLowerCase().startsWith(q)) -
-            Number(a.label.toLowerCase().startsWith(q)),
-        )
-    : navCommands
+        .map((cmd, index) => ({ cmd, index, rank: navRank(cmd, q) }))
+        .filter((entry) => entry.rank < NO_MATCH)
+        .sort((a, b) => a.rank - b.rank || a.index - b.index)
+        .map((entry) => entry.cmd)
+    : navCommands.filter((cmd) => !cmd.parent)
 
   const navPrimary =
     searching && matchedNav.some((cmd) => cmd.label.toLowerCase().startsWith(q))
@@ -308,7 +427,12 @@ function PaletteResults({
           </div>
         ) : (
           books.map((book) => (
-            <BookRow key={book.uuid} book={book} onSelect={openBook} />
+            <BookRow
+              key={book.uuid}
+              book={book}
+              search={debouncedSearch || undefined}
+              onSelect={openBook}
+            />
           ))
         )}
       </FilterableMenuGroup>
@@ -328,7 +452,12 @@ function PaletteResults({
           }}
           className={rowClassName}
         >
-          <span className="truncate text-xs">{cmd.label}</span>
+          <span className="truncate text-xs">
+            {cmd.parent && (
+              <span className="text-muted-foreground">{cmd.parent} › </span>
+            )}
+            {cmd.label}
+          </span>
         </FilterableMenuItem>
       ))}
     </FilterableMenuGroup>

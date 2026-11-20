@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { mkdir } from "node:fs/promises"
+import { mkdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 
 import watcher from "@parcel/watcher"
@@ -12,12 +12,23 @@ export type ImportPathChange = {
   type: "create" | "update" | "delete"
 }
 
+const PLATFORM_BACKENDS: Partial<Record<NodeJS.Platform, watcher.BackendType>> =
+  {
+    linux: "inotify",
+    darwin: "fs-events",
+    win32: "windows",
+  }
+
+const backend = PLATFORM_BACKENDS[process.platform]
+
 const WATCHER_OPTIONS = {
-  backend: "watchman",
+  ...(backend && { backend }),
   ignore: [
     "**/*.watchman-cookie*",
     "**/*.json",
     "**/.*",
+    // Synology "hidden" metadata directories
+    "**/@eaDir/**",
     "**/.autoimport/**",
     "**/image-cache/**",
     "**/uploads/**",
@@ -67,6 +78,30 @@ export async function readSnapshotChanges(
   await ensureSnapshotDir()
 
   const snapshot = snapshotPath(importPath)
+
+  const [snapshotStats, rootStats] = await Promise.all([
+    // necessary bc on MacOS watcher wont report any events
+    // if no snapshot exists
+    // so we need to manually inform our watcher to
+    // do a whole scan rather than be like
+    // "nothings changed :)"
+    stat(snapshot).catch(() => null),
+    stat(importPath).catch(() => null),
+  ])
+  if (!snapshotStats) {
+    return { snapshotExists: false, changes: [] }
+  }
+
+  // rare MacOS bug: if you delete and recreate
+  // a watch folder while the watcher isn't looking
+  // would hang forever
+  if (
+    backend === "fs-events" &&
+    rootStats &&
+    rootStats.birthtimeMs > snapshotStats.mtimeMs
+  ) {
+    return { snapshotExists: false, changes: [] }
+  }
 
   try {
     const events = await watcher.getEventsSince(

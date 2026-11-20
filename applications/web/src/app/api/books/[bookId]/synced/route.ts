@@ -4,7 +4,8 @@ import { type FileHandle, open } from "node:fs/promises"
 import { createReadableStreamFromReadable } from "@remix-run/node"
 import contentDisposition from "content-disposition"
 
-import { Epub } from "@storyteller-platform/epub"
+import { Epub } from "@storyteller/epub"
+import { MediaType } from "@storyteller/media-types"
 
 import { withHasPermission } from "@/auth/auth"
 import { getBook, getBookUuid } from "@/database/books"
@@ -116,7 +117,7 @@ export const GET = withHasPermission<Params>("bookDownload")(async (
       "Content-Disposition": contentDisposition(`${title}.epub`, {
         fallback: `${normalizedTitle}.epub`,
       }),
-      "Content-Type": "application/epub+zip",
+      "Content-Type": MediaType.EPUB.mime,
       "Content-Length": `${end - start + 1}`,
       "Accept-Ranges": "bytes",
       "Last-Modified": new Date(stats.mtime).toISOString(),

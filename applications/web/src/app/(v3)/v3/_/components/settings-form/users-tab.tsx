@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useCallback, useLayoutEffect, useState } from "react"
+import { toast } from "sonner"
 
 import { Button } from "@v3/_/components/ui/button"
 import {
@@ -35,6 +36,7 @@ import {
   useListInvitesQuery,
   useListUsersQuery,
   useResendInviteMutation,
+  useSendPasswordResetMutation,
   useUpdateUserMutation,
 } from "@/store/api"
 
@@ -58,6 +60,7 @@ const ADMIN_PERMISSIONS: Permission[] = [
   "userRead",
   "userDelete",
   "userUpdate",
+  "userPasswordReset",
   "settingsUpdate",
 ]
 
@@ -90,7 +93,7 @@ export function UsersTab({
 
   return (
     <div className="space-y-6">
-      <SettingsSection tab="users" section="users-invites">
+      <SettingsSection id="invites">
         {permissions?.inviteList && (
           <Card>
             <CardHeader>
@@ -111,7 +114,7 @@ export function UsersTab({
           </Card>
         )}
       </SettingsSection>
-      <SettingsSection tab="users" section="users-list">
+      <SettingsSection id="usersList">
         {permissions?.userList && (
           <Card>
             <CardHeader>
@@ -124,7 +127,9 @@ export function UsersTab({
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {users?.map((user) => <UserRow key={user.id} user={user} />)}
+              {users?.map((user) => (
+                <UserRow key={user.id} user={user} />
+              ))}
             </CardContent>
           </Card>
         )}
@@ -211,6 +216,8 @@ function UserRow({ user }: { user: User }) {
 
   const [updateUser, { isLoading }] = useUpdateUserMutation()
   const [deleteUser, { isLoading: isDeleting }] = useDeleteUserMutation()
+  const [sendPasswordReset, { isLoading: isSendingReset }] =
+    useSendPasswordResetMutation()
 
   const { permissions: currentUserPermissions } = useGetCurrentUserQuery(
     undefined,
@@ -231,6 +238,7 @@ function UserRow({ user }: { user: User }) {
   }, [permissions, updateUser, user.id])
 
   const tPermissions = useTranslation("SettingsPage.tabs.users.permissions")
+  const t = useTranslation("SettingsPage.tabs.users.sections.users-list")
 
   return (
     <div className="rounded-md border p-3">
@@ -254,6 +262,27 @@ function UserRow({ user }: { user: User }) {
               }}
             >
               {showPermissions ? "Cancel" : "Edit"}
+            </Button>
+          )}
+
+          {currentUserPermissions?.userPasswordReset && user.email && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("sendPasswordReset")}
+              title={t("sendPasswordReset")}
+              disabled={isSendingReset}
+              onClick={async () => {
+                const result = await sendPasswordReset({ userId: user.id })
+                if (result.error) {
+                  toast.error(t("passwordResetFailed"))
+                } else {
+                  toast.success(t("passwordResetSent", { email: user.email }))
+                }
+              }}
+            >
+              {isSendingReset ? <Spinner /> : <icon.Key className="h-4 w-4" />}
             </Button>
           )}
 

@@ -1,10 +1,15 @@
 import { z } from "zod"
 
 import {
+  ALIGNERS,
+  CTC_MODEL_FAMILIES,
   LANGUAGES,
   RECOGNITION_ENGINES,
+  CTC_DEVICES,
+  CTC_DTYPES,
+  CTC_ENGINES,
   WHISPER_MODELS,
-} from "@storyteller-platform/ghost-story/constants"
+} from "@storyteller/ghost-story/constants"
 
 import { Providers } from "@/auth/providers"
 import {
@@ -13,9 +18,24 @@ import {
   watchRuleValidationMessage,
 } from "@/database/importRules.validation"
 import { PreferenceDefaultsSchema } from "@/database/userPreferencesTypes"
+import { MATCH_CONFIDENCES } from "@/metadata/match"
+import { type RegistrySortField, SORTABLE_FIELDS } from "@/sort"
 import { type UUID } from "@/uuid"
 
 export const TranscriptionEngineSchema = z.enum(RECOGNITION_ENGINES)
+
+export const AlignerSchema = z.enum(ALIGNERS)
+export type Aligner = z.infer<typeof AlignerSchema>
+
+export const CtcEngineSchema = z.enum(CTC_ENGINES)
+export type CtcEngine = z.infer<typeof CtcEngineSchema>
+
+export const CtcDeviceSchema = z.enum(CTC_DEVICES)
+export type CtcDevice = z.infer<typeof CtcDeviceSchema>
+
+export const CtcModelFamilySchema = z.enum(CTC_MODEL_FAMILIES)
+export const CtcDtypeSchema = z.enum(CTC_DTYPES)
+export type CtcModelFamily = z.infer<typeof CtcModelFamilySchema>
 
 export const WhisperModelSchema = z.enum(WHISPER_MODELS)
 export type WhisperModel = z.infer<typeof WhisperModelSchema>
@@ -67,20 +87,26 @@ export function defaultMetadataFieldOverrides(
   ) as MetadataFieldOverrides
 }
 
-export const ReadaloudLocationTypeSchema = z.enum([
+export const READALOUD_LOCATION_TYPES = [
   "SUFFIX",
   "SIBLING_FOLDER",
   "INTERNAL",
   "CUSTOM_FOLDER",
-])
+] as const
 
-export const Epub2ImportStrategySchema = z.enum([
+export type ReadaloudLocationType = (typeof READALOUD_LOCATION_TYPES)[number]
+
+export const ReadaloudLocationTypeSchema = z.enum(READALOUD_LOCATION_TYPES)
+
+export const EPUB2_IMPORT_STRATEGIES = [
   "backup-and-convert",
   "convert-alongside",
   "replace",
   "skip",
-])
-export type Epub2ImportStrategy = z.infer<typeof Epub2ImportStrategySchema>
+] as const
+export type Epub2ImportStrategy = (typeof EPUB2_IMPORT_STRATEGIES)[number]
+
+export const Epub2ImportStrategySchema = z.enum(EPUB2_IMPORT_STRATEGIES)
 
 export const EPUB_VERSION_PLACEHOLDER = "{version}"
 
@@ -96,18 +122,12 @@ export function renderEpubSuffix(template: string, version: 2 | 3): string {
   return version === 2 ? template : LEGACY_EPUB3_SUFFIX
 }
 
-// which epub edition a book exposes in the OPDS feed. read-aloud epubs carry
-// media overlays and are large, so low-powered clients (kindle, kobo) often
-// want the plain ebook instead. an audiobook is always served when available.
-export const OpdsFormatSchema = z.enum([
-  // read-aloud if present, else the plain ebook. the default.
-  "readaloud",
-  // plain ebook if present, else read-aloud.
-  "ebook",
-  // both the read-aloud and the plain ebook.
-  "both",
-])
+export const OpdsFormatSchema = z.enum(["readaloud", "ebook", "audiobook"])
 export type OpdsFormat = z.infer<typeof OpdsFormatSchema>
+
+export const OpdsSortFieldSchema = z.enum(
+  SORTABLE_FIELDS as [RegistrySortField, ...RegistrySortField[]],
+)
 
 const optionalUrlSchema = z.union([z.literal(""), z.url()]).optional()
 
@@ -258,7 +278,13 @@ export const ENCRYPTED_SETTING_KEYS = [
   "openAiApiKey",
   "deepgramApiKey",
   "xrayAnthropicApiKey",
+  "ctcServerApiKey",
+  "hardcoverApiToken",
 ] as const
+
+export const ALIGNMENT_GRANULARITY_OPTIONS = ["word", "sentence"] as const
+export type AlignmentGranularity =
+  (typeof ALIGNMENT_GRANULARITY_OPTIONS)[number]
 
 export type EncryptedSettingKey = (typeof ENCRYPTED_SETTING_KEYS)[number]
 
@@ -267,6 +293,8 @@ export function isEncryptedSettingKey(
 ): name is EncryptedSettingKey {
   return (ENCRYPTED_SETTING_KEYS as readonly string[]).includes(name)
 }
+
+export const DEFAULT_LOG_RETENTION_DAYS = 14
 
 // Main settings schema
 export const SettingsSchema = z.object({
@@ -286,7 +314,17 @@ export const SettingsSchema = z.object({
   // Audio settings
   codec: z.string().nullable(),
   bitrate: z.string().nullable(),
-  maxTrackLength: z.coerce.number().nullable(),
+  maxTrackLength: z.coerce.number<number>().nullable(),
+  aligner: AlignerSchema.nullable(),
+  alignmentGranularity: z.enum(ALIGNMENT_GRANULARITY_OPTIONS).nullable(),
+  alignmentAutoExclude: z.boolean().nullable(),
+  ctcEngine: CtcEngineSchema.nullable(),
+  ctcDevice: CtcDeviceSchema.nullable(),
+  ctcModel: CtcModelFamilySchema.nullable(),
+  ctcDtype: CtcDtypeSchema.nullable(),
+  ctcBatchSize: z.coerce.number<number>().nullable(),
+  ctcServerUrl: z.string().nullable(),
+  ctcServerApiKey: z.string().nullable(),
   // Transcription settings
   transcriptionEngine: TranscriptionEngineSchema.nullable(),
   whisperModel: WhisperModelSchema.nullable(),
@@ -313,6 +351,11 @@ export const SettingsSchema = z.object({
   xrayAnthropicApiKey: z.string().nullable(),
   xrayModel: z.string().trim().min(1),
   xrayAutoGenerate: z.boolean(),
+  hardcoverApiToken: z.string().nullable().optional(),
+  metadataAutoImportThresholds: z.object({
+    audnexus: z.enum(MATCH_CONFIDENCES),
+    hardcover: z.enum(MATCH_CONFIDENCES),
+  }),
   // Parallelization settings
   parallelTranscodes: z.number(),
   parallelTranscribes: z.number(),
@@ -327,11 +370,14 @@ export const SettingsSchema = z.object({
   // OPDS settings
   opdsEnabled: z.boolean().nullable(),
   opdsPageSize: z.number().nullable(),
-  opdsFormat: OpdsFormatSchema.nullable(),
+  opdsFormats: z.array(OpdsFormatSchema),
+  opdsSortField: OpdsSortFieldSchema.nullable(),
+  opdsSortDirection: z.enum(["asc", "desc"]).nullable(),
   // Scanning settings
   scanCronExpression: z.string().nullable(),
   backupCronExpression: z.string().nullable().optional(),
   backupRetentionCount: z.number().nullable().optional(),
+  logRetentionDays: z.number().int().min(1).nullable().optional(),
   dataDirAnchor: z.string().nullable().optional(),
   metadataFieldOverrides: MetadataFieldOverridesSchema,
   // EPUB 2 import settings
@@ -357,6 +403,74 @@ export const SettingsSchema = z.object({
   preferenceDefaults: PreferenceDefaultsSchema.optional(),
 })
 export type Settings = z.infer<typeof SettingsSchema>
+
+export const SETTINGS_DEFAULTS = {
+  smtpHost: "",
+  smtpPort: 587,
+  smtpUsername: "",
+  smtpPassword: "",
+  smtpFrom: "",
+  smtpSsl: true,
+  smtpRejectUnauthorized: true,
+  libraryName: "",
+  webUrl: "",
+  importMode: "reference",
+  codec: null,
+  bitrate: null,
+  maxTrackLength: 2,
+  aligner: "whisper",
+  alignmentGranularity: "sentence",
+  alignmentAutoExclude: true,
+  ctcEngine: "ctc-local",
+  ctcDevice: null,
+  ctcModel: "quartznet15x5",
+  ctcDtype: null,
+  ctcBatchSize: null,
+  ctcServerUrl: null,
+  ctcServerApiKey: null,
+  transcriptionEngine: "whisper.cpp",
+  whisperModel: "tiny",
+  whisperThreads: 1,
+  autoDetectLanguage: false,
+  whisperCpuFallback: null,
+  whisperServerUrl: null,
+  whisperServerApiKey: null,
+  googleCloudApiKey: null,
+  azureSubscriptionKey: null,
+  azureServiceRegion: null,
+  amazonTranscribeRegion: null,
+  amazonTranscribeAccessKeyId: null,
+  amazonTranscribeSecretAccessKey: null,
+  amazonTranscribeBucketName: null,
+  openAiApiKey: null,
+  openAiOrganization: null,
+  openAiBaseUrl: null,
+  openAiModelName: null,
+  deepgramApiKey: null,
+  deepgramModel: "nova-3",
+  hardcoverApiToken: null,
+  parallelTranscodes: 1,
+  parallelTranscribes: 1,
+  authProviders: [],
+  disablePasswordLogin: false,
+  readaloudLocationType: "SUFFIX",
+  readaloudLocation: " (readaloud)",
+  maxUploadChunkSize: null,
+  opdsEnabled: true,
+  opdsPageSize: 50,
+  opdsFormats: [...OpdsFormatSchema.options],
+  opdsSortField: "title",
+  opdsSortDirection: "asc",
+  scanCronExpression: null,
+  backupCronExpression: null,
+  backupRetentionCount: null,
+  logRetentionDays: null,
+  metadataFieldOverrides: defaultMetadataFieldOverrides(),
+  epub2ImportStrategy: "backup-and-convert",
+  epub2BackupSuffix: DEFAULT_EPUB_SUFFIX_TEMPLATE,
+  cleanCacheAfterReadaloud: false,
+  metadataAutoImportThresholds: { audnexus: "high", hardcover: "high" },
+} satisfies Settings
 
 // settings-only schema for config file validation;
 // importRules / importPath are extracted before this runs

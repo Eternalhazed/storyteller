@@ -1,5 +1,5 @@
 {
-  "include": [".eslintrc.cjs", "lint-staged.config.js"],
+  "include": ["lint-staged.config.js"],
   "references": [
     {
       "path": "applications/docs"
@@ -17,7 +17,13 @@
       "path": "libraries/epub"
     },
     {
-      "path": "libraries/audiobook"
+      "path": "libraries/epubcfi"
+    },
+    {
+      "path": "libraries/audiobooks"
+    },
+    {
+      "path": "libraries/crengine-xpointer"
     },
     {
       "path": "libraries/path"
@@ -42,6 +48,15 @@
     },
     {
       "path": "libraries/nodekit"
+    },
+    {
+      "path": "libraries/media-types"
+    },
+    {
+      "path": "libraries/mlx-audio"
+    },
+    {
+      "path": "libraries/uri-fragment"
     }
   ]
 }

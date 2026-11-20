@@ -2,9 +2,11 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { pid } from "node:process"
 
+import { MediaType } from "@storyteller/media-types"
+
 import { IMAGE_CACHE_DIR } from "@/directories"
 
-import { AVIF, type EncodedImage, resizeToFit } from "./derive"
+import { type EncodedImage, resizeToFit } from "./derive"
 import { readImageBlob } from "./store"
 
 export const SIZE_BUCKETS = [64, 128, 256, 384, 512, 768, 1024, 1536, 2048]
@@ -44,19 +46,26 @@ function variantEdge(variant: ImageVariant, image: VariantSource): number {
 }
 
 function variantExtension(mimeType: string) {
-  return mimeType === AVIF ? "avif" : "webp"
+  return mimeType === MediaType.AVIF.mime
+    ? MediaType.AVIF.extension
+    : MediaType.WEBP.extension
 }
 
 export function getVariantCacheDirectory(sha256: string) {
-  return join(IMAGE_CACHE_DIR, sha256.slice(0, 2), sha256.slice(2, 4), sha256)
+  // oxfmt-ignore
+  return join(/*turbopackIgnore: true*/ IMAGE_CACHE_DIR,
+    sha256.slice(0, 2),
+    sha256.slice(2, 4),
+    sha256,
+  )
 }
 
 function getVariantCachePath(
   variant: ImageVariant,
   image: VariantSource,
 ): string {
-  return join(
-    getVariantCacheDirectory(image.sha256),
+  // oxfmt-ignore
+  return join(/*turbopackIgnore: true*/ getVariantCacheDirectory(image.sha256),
     `${variant}.${variantExtension(image.mimeType)}`,
   )
 }
@@ -77,7 +86,10 @@ export async function getImageVariant(
   variant: ImageVariant,
 ): Promise<EncodedImage | null> {
   const cachePath = getVariantCachePath(variant, image)
-  const mimeType = image.mimeType === AVIF ? AVIF : "image/webp"
+  const mimeType =
+    image.mimeType === MediaType.AVIF.mime
+      ? MediaType.AVIF.mime
+      : MediaType.WEBP.mime
 
   try {
     return { data: await readFile(cachePath), mimeType }

@@ -11,13 +11,13 @@ build:
         name: Focus install
         command: |
           npm i -g corepack
-          yarn workspaces focus @storyteller-platform/mobile
+          yarn workspaces focus @storyteller/mobile
 
     - eas/resolve_build_config
 
     - run:
         name: Prebuild
-        command: yarn workspace @storyteller-platform/mobile expo prebuild -p android
+        command: yarn workspace @storyteller/mobile expo prebuild -p android
 
     - eas/inject_android_credentials
 

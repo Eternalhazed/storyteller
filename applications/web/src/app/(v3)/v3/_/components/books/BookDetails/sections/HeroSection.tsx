@@ -24,14 +24,18 @@ import { bookDuration, bookPageCount } from "@v3/_/lib/bookMetrics"
 
 import { EditableText } from "@/app/(v3)/v3/_/components/books/BookDetails/EditableText"
 import {
+  ImportDialog,
+  type ImportTab,
+} from "@/app/(v3)/v3/_/components/books/BookDetails/ImportDialog"
+import {
   DurationEdit,
   PageCountEdit,
 } from "@/app/(v3)/v3/_/components/books/BookDetails/MetricEdit"
 import { TooltipButton } from "@/app/(v3)/v3/_/components/ui/tooltip-button"
 import { cn } from "@/cn"
-import { IconReadaloud } from "@/components/icons/IconReadaloud"
 import { usePermissions } from "@/hooks/usePermissions"
 import * as icon from "@/icons"
+import { IconReadaloud } from "@/icons/IconReadaloud"
 import {
   useDeleteUserBookRatingMutation,
   useSetUserBookRatingMutation,
@@ -105,6 +109,7 @@ export function HeroSection({
   const [authorsExpanded, setAuthorsExpanded] = useState(false)
   const [narratorsExpanded, setNarratorsExpanded] = useState(false)
   const [ratingOverrideActive, setRatingOverrideActive] = useState(false)
+  const [importTab, setImportTab] = useState<ImportTab | null>(null)
 
   const visibleAuthors = authorsExpanded
     ? authors
@@ -180,7 +185,16 @@ export function HeroSection({
           transition={layoutTransition}
           className="shrink-0"
         >
-          <CoverEditor compact={compact} />
+          <CoverEditor
+            compact={compact}
+            onSearchCovers={
+              permissions?.bookUpdate
+                ? () => {
+                    setImportTab("covers")
+                  }
+                : undefined
+            }
+          />
         </motion.div>
 
         <motion.div
@@ -515,6 +529,9 @@ export function HeroSection({
       )}
 
       {processingDialog}
+      {permissions?.bookUpdate && (
+        <ImportDialog book={book} tab={importTab} onTabChange={setImportTab} />
+      )}
     </div>
   )
 }

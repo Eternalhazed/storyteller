@@ -1,70 +1,157 @@
 {
-  "name": "@storyteller-platform/epub",
-  "version": "0.7.0",
+  "name": "@storyteller/epub",
+  "version": "1.1.1",
   "type": "module",
-  "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "license": "MIT",
   "exports": {
     ".": {
-      "types": "./node.ts",
-      "default": "./index.ts"
+      "@storyteller": "./src/index.tsx",
+      "types": "./src/index.tsx",
+      "default": "./dist/index.js"
+    },
+    "./jsx-runtime": {
+      "@storyteller": "./src/jsx-runtime.ts",
+      "types": "./src/jsx-runtime.ts",
+      "default": "./dist/jsx-runtime.js"
+    },
+    "./jsx-dev-runtime": {
+      "@storyteller": "./src/jsx-dev-runtime.ts",
+      "types": "./src/jsx-dev-runtime.ts",
+      "default": "./dist/jsx-dev-runtime.js"
+    }
+  },
+  "imports": {
+    "#files": {
+      "@storyteller": {
+        "node": "./src/files.node.ts",
+        "default": "./src/files.browser.ts"
+      },
+      "node": {
+        "types": "./src/files.node.ts",
+        "default": "./dist/files.node.js"
+      },
+      "default": {
+        "types": "./src/files.browser.ts",
+        "default": "./dist/files.browser.js"
+      }
+    },
+    "#tmpfs": {
+      "@storyteller": {
+        "node": "./src/adapters/tmpfs.ts",
+        "default": "./src/adapters/tmpfs.browser.ts"
+      },
+      "node": {
+        "types": "./src/adapters/tmpfs.ts",
+        "default": "./dist/adapters/tmpfs.js"
+      },
+      "default": {
+        "types": "./src/adapters/tmpfs.browser.ts",
+        "default": "./dist/adapters/tmpfs.browser.js"
+      }
+    },
+    "#zip": {
+      "@storyteller": {
+        "node": "./src/zip.node.ts",
+        "default": "./src/zip.browser.ts"
+      },
+      "node": {
+        "types": "./src/zip.node.ts",
+        "default": "./dist/zip.node.js"
+      },
+      "default": {
+        "types": "./src/zip.browser.ts",
+        "default": "./dist/zip.browser.js"
+      }
     }
   },
   "files": [
     "dist/"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "rm -rf dist .tsbuild && tsc -b tsconfig.build.json",
     "readme:toc": "markdown-toc --maxdepth=5 --append='\n- [API Docs](#api-docs)' --bullets='-' -i readme-stub.md",
     "readme:api": "typedoc",
     "readme": "yarn readme:api && yarn readme:toc && cat readme-stub.md > README.md && tail -n +2 gen/README.md >> README.md",
     "install-epubcheck": "tsx scripts/install-epubcheck.ts",
-    "test": "yarn install-epubcheck && tsx -C @storyteller --test *.test.ts",
-    "test:watch": "yarn install-epubcheck && tsx -C @storyteller --test --watch *.test.ts",
+    "test": "yarn install-epubcheck && vitest run",
+    "test:watch": "yarn install-epubcheck && vitest",
     "prepack": "yarn build"
   },
   "devDependencies": {
-    "@storyteller-platform/eslint": "workspace:*",
-    "@storyteller-platform/tsup": "workspace:^",
-    "@tsconfig/strictest": "^2.0.5",
-    "@types/mime-types": "^2",
-    "@types/node": "^24.0.0",
-    "@types/yauzl-promise": "^4",
-    "@types/yazl": "^3",
-    "eslint": "^8.0.0",
-    "markdown-toc": "^1.2.0",
-    "remark-toc": "^9.0.0",
-    "tsup": "^8.5.0",
-    "tsx": "^4.19.2",
-    "typedoc": "^0.28.13",
-    "typedoc-plugin-markdown": "^4.6.3",
-    "typedoc-plugin-remark": "^1.2.0",
-    "typescript": "^5.9.2"
+    "@tsconfig/strictest": "catalog:",
+    "@types/node": "catalog:",
+    "@types/yauzl-promise": "catalog:",
+    "@types/yazl": "catalog:",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "markdown-toc": "catalog:",
+    "remark-toc": "catalog:",
+    "tsx": "catalog:",
+    "typedoc": "catalog:",
+    "typedoc-plugin-markdown": "catalog:",
+    "typedoc-plugin-remark": "catalog:",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vite": "catalog:",
+    "vitest": "catalog:"
   },
   "dependencies": {
-    "@readium/shared": "^2.2.0",
-    "@storyteller-platform/fs": "workspace:^",
-    "@storyteller-platform/path": "workspace:^",
-    "@zip.js/zip.js": "^2.0.0",
-    "async-mutex": "^0.5.0",
-    "fast-xml-parser": "^4.0.1",
+    "@esfx/async-readerwriterlock": "^1.0.0",
+    "@storyteller/fs": "workspace:^",
+    "@storyteller/media-types": "workspace:^",
+    "@storyteller/path": "workspace:^",
+    "@xmldom/xmldom": "catalog:",
+    "@zip.js/zip.js": "catalog:",
     "mem": "^8.0.0",
-    "mime-types": "^3.0.1",
     "nanoid": "^5.1.5",
-    "yauzl-promise": "^4.0.0",
-    "yazl": "^3.3.1"
+    "yauzl-promise": "catalog:",
+    "yazl": "catalog:"
   },
   "publishConfig": {
     "access": "public",
     "exports": {
-      "import": {
+      ".": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
       },
-      "require": {
-        "types": "./dist/index.d.cts",
-        "default": "./dist/index.cjs"
+      "./jsx-runtime": {
+        "types": "./dist/jsx-runtime.d.ts",
+        "default": "./dist/jsx-runtime.js"
+      },
+      "./jsx-dev-runtime": {
+        "types": "./dist/jsx-dev-runtime.d.ts",
+        "default": "./dist/jsx-dev-runtime.js"
+      }
+    },
+    "imports": {
+      "#files": {
+        "node": {
+          "types": "./dist/files.node.d.ts",
+          "default": "./dist/files.node.js"
+        },
+        "default": {
+          "types": "./dist/files.browser.d.ts",
+          "default": "./dist/files.browser.js"
+        }
+      },
+      "#tmpfs": {
+        "node": {
+          "types": "./dist/adapters/tmpfs.d.ts",
+          "default": "./dist/adapters/tmpfs.js"
+        },
+        "default": {
+          "types": "./dist/adapters/tmpfs.browser.d.ts",
+          "default": "./dist/adapters/tmpfs.browser.js"
+        }
+      },
+      "#zip": {
+        "node": {
+          "types": "./dist/zip.node.d.ts",
+          "default": "./dist/zip.node.js"
+        },
+        "default": {
+          "types": "./dist/zip.browser.d.ts",
+          "default": "./dist/zip.browser.js"
+        }
       }
     }
   }

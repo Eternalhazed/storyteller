@@ -1,0 +1,6 @@
+releases:
+  "@storyteller/uri-fragment": patch
+
+declined:
+  - "@storyteller/web"
+  - "@storyteller/crengine-xpointer"

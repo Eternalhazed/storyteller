@@ -1,0 +1,5 @@
+releases:
+  "@storyteller/opds": patch
+
+declined:
+  - "@storyteller/web"

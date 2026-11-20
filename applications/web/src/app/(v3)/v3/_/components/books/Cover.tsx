@@ -1,5 +1,6 @@
 "use client"
 
+import { type JsColor } from "@storyteller-platform/okmain"
 import { type Variant } from "motion/react"
 import {
   createContext,
@@ -11,8 +12,6 @@ import {
   useState,
 } from "react"
 
-import { type JsColor } from "@storyteller-platform/okmain"
-
 import { useUserPreferences } from "@/app/(v3)/v3/_/components/user-preferences-provider"
 import { useIsMobile } from "@/app/(v3)/v3/_/hooks/use-mobile"
 import { cn } from "@/cn"
@@ -22,7 +21,7 @@ import {
   type GridCoverDisplay,
 } from "@/database/userPreferencesTypes"
 import * as icon from "@/icons"
-import { getImageUrl } from "@/store/api"
+import { getImageUrl } from "@/store/urls"
 
 import { getBlurhashDataUri } from "./blurhash-data-uri"
 import {
@@ -118,6 +117,7 @@ export const Tile = memo(function Tile({
     >
       {load && (
         <img
+          draggable={false}
           key={image.sha256}
           src={getImageUrl(image.sha256, size)}
           srcSet={`${getImageUrl(image.sha256, size)} 1x, ${getImageUrl(image.sha256, size * 2)} 2x`}
@@ -213,7 +213,8 @@ export const Cover = memo(function Cover({
 // old double cover
 
 const TILE_CLASS =
-  "absolute inset-0 m-auto  shadow-md group-hover/covers:overflow-hidden  "
+  // gotta have rounded-cover here otherwise shadow looks weird
+  "absolute inset-0 m-auto shadow-md group-hover/covers:overflow-hidden rounded-cover"
 
 const STACK_WIDTH = 0.82
 
@@ -312,6 +313,7 @@ export function BookDoubleCover({
     ab.style.zIndex = String(STATES.idle.audiobook.z)
     eb.style.transform = tx(STATES.idle.ebook)
     eb.style.zIndex = String(STATES.idle.ebook.z)
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const transitionTo = useCallback((target: CoverState) => {
@@ -361,6 +363,7 @@ export function BookDoubleCover({
     }
 
     stateRef.current = target
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- pre-existing; these dependencies are left out on purpose
   }, [])
 
   useEffect(() => {

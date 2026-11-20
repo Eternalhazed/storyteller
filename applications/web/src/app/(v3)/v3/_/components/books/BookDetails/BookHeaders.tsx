@@ -22,7 +22,7 @@ import * as icon from "@/icons"
 import { useBookForm } from "./BookFormProvider"
 
 const pill =
-  "flex items-center gap-0.5 rounded-full bg-background/55 p-0.5 shadow-sm ring-1 ring-black/5 backdrop-blur-md dark:ring-white/10"
+  "flex items-center gap-0.5 rounded-full bg-background/55 p-0.5 h-8 shadow-sm ring-1 ring-black/5 backdrop-blur-md dark:ring-white/10"
 
 export function BookPageHeader({ onCustomize }: { onCustomize?: () => void }) {
   const { book, isEditing, setIsEditing } = useBookForm()
@@ -130,7 +130,10 @@ export function BookPanelHeader({
       <AnimatePresence>
         {showCheckbox && (
           <motion.div
-            className={cn("absolute top-4 left-3 z-50 p-1", pill)}
+            className={cn(
+              "absolute top-3 left-3 z-50 size-8 justify-center",
+              pill,
+            )}
             initial={{ x: 0, opacity: 0 }}
             animate={{ x: 3, opacity: 1 }}
             exit={{ x: 0, opacity: 0 }}
@@ -155,7 +158,7 @@ export function BookPanelHeader({
           className={cn(
             "absolute top-3 left-3 z-50",
             "transition-[left]",
-            selection?.isSelecting && "left-12",
+            selection?.isSelecting && "left-13",
             pill,
           )}
         >
@@ -186,7 +189,7 @@ export function BookPanelHeader({
         </ButtonGroup>
       )}
 
-      <div className={cn("absolute top-2.5 right-3 z-50", pill)}>
+      <div className={cn("absolute top-3 right-3 z-50", pill)}>
         <TooltipButton
           variant="real-ghost"
           size="icon-sm"

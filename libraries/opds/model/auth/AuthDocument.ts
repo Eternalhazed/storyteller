@@ -1,5 +1,7 @@
 import { Links } from "@readium/shared"
 
+import { MediaType } from "@storyteller/media-types"
+
 import { type OPDSError, type Result, err, ok } from "../../result.ts"
 import { type OPDSAuthenticationDocument } from "../../types/authentication.ts"
 
@@ -34,7 +36,7 @@ export const oauthPassword = (
   links: new Links([
     {
       href: authenticate,
-      type: "application/json",
+      type: MediaType.JSON.mime,
       rels: new Set(["authenticate"]),
     },
   ] as ConstructorParameters<typeof Links>[0]),
@@ -45,7 +47,11 @@ export const oauthPassword = (
 export const oauthImplicit = (authenticate: string): AuthFlow => ({
   type: AuthFlowType.oauthImplicit,
   links: new Links([
-    { href: authenticate, type: "text/html", rels: new Set(["authenticate"]) },
+    {
+      href: authenticate,
+      type: MediaType.HTML.mime,
+      rels: new Set(["authenticate"]),
+    },
   ] as ConstructorParameters<typeof Links>[0]),
 })
 
@@ -85,13 +91,11 @@ export class AuthDocument {
 
     const doc = json as OPDSAuthenticationDocument
 
-    const authentication = doc.authentication.map(
-      (flow): AuthFlow => ({
-        type: flow.type,
-        links: flow.links ? Links.deserialize(flow.links) : undefined,
-        labels: flow.labels,
-      }),
-    )
+    const authentication = doc.authentication.map((flow): AuthFlow => ({
+      type: flow.type,
+      links: flow.links ? Links.deserialize(flow.links) : undefined,
+      labels: flow.labels,
+    }))
 
     return ok(
       new AuthDocument({

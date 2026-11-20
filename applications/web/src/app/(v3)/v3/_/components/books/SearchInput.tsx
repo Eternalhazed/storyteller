@@ -12,6 +12,7 @@ export function SearchInput({
   placeholder,
   className,
   shortcut,
+  children,
   ...props
 }: {
   value: string
@@ -23,7 +24,7 @@ export function SearchInput({
   return (
     <div
       className={cn(
-        "bg-card border-border focus-within:border-primary focus-within:ring-primary/15 relative flex h-7 flex-1 items-center gap-2 rounded-full border px-3 py-1 transition-[border-color,box-shadow] focus-within:ring-2",
+        "bg-card border-border focus-within:border-primary focus-within:ring-primary/15 relative flex h-8 min-w-0 flex-1 items-center gap-2 rounded-full border px-3 py-1 transition-[border-color,box-shadow] focus-within:ring-2",
         className,
       )}
     >
@@ -45,6 +46,7 @@ export function SearchInput({
         {...props}
       />
       {!value && shortcut && <KeyboardShortcut shortcut={shortcut} />}
+      {children}
       {value && (
         <Button
           variant="ghost"

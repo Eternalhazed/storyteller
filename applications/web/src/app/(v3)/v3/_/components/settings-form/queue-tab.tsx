@@ -1,40 +1,64 @@
 "use client"
 
+import { type UniqueIdentifier } from "@dnd-kit/abstract"
 import {
+  Accessibility,
+  defaultPreset,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from "@dnd-kit/dom"
+import { move } from "@dnd-kit/helpers"
+import { DragDropProvider } from "@dnd-kit/react"
+import { isSortable, useSortable } from "@dnd-kit/react/sortable"
+import {
+  parseAsArrayOf,
   parseAsInteger,
   parseAsString,
   parseAsStringEnum,
   useQueryState,
 } from "nuqs"
-import { useEffect, useEffectEvent, useState } from "react"
+import { Fragment, useEffect, useEffectEvent, useState } from "react"
 
 import { Button } from "@v3/_/components/ui/button"
-import { Input } from "@v3/_/components/ui/input"
 import {
   Item,
   ItemActions,
   ItemContent,
-  ItemDescription,
   ItemMedia,
-  ItemTitle,
 } from "@v3/_/components/ui/item"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@v3/_/components/ui/select"
 
+import {
+  audioPercentTone,
+  percentTone,
+  TONE_BADGE,
+  TONE_TEXT,
+} from "@/app/(v3)/v3/_/components/books/AlignmentReport/shared"
+import { SearchInput } from "@/app/(v3)/v3/_/components/books/SearchInput"
 import { GradePill } from "@/app/(v3)/v3/_/components/books/grade-pill"
 import { StaticProgressBar } from "@/app/(v3)/v3/_/components/processing/ProgressVisualization"
 import {
   jobToView,
   overallProgress,
 } from "@/app/(v3)/v3/_/components/processing/shared"
+import { useEstimatedRemaining } from "@/app/(v3)/v3/_/components/processing/useEstimatedRemaining"
 import { useStageLabels } from "@/app/(v3)/v3/_/components/processing/useStageLabels"
+import { ButtonGroupSeparator } from "@/app/(v3)/v3/_/components/ui/button-group"
+import {
+  FilterableMenu,
+  FilterableMenuContent,
+  FilterableMenuItem,
+  FilterableMenuTrigger,
+} from "@/app/(v3)/v3/_/components/ui/filterable-menu"
+import { Spinner } from "@/app/(v3)/v3/_/components/ui/spinner"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/app/(v3)/v3/_/components/ui/tooltip"
 import { TooltipButton } from "@/app/(v3)/v3/_/components/ui/tooltip-button"
 import { V3Link } from "@/app/(v3)/v3/_/components/v3-link"
+import { createSortParser } from "@/app/(v3)/v3/_/hooks/use-book-filters"
 import {
   useCommon,
   useTranslation,
@@ -44,88 +68,152 @@ import {
   useFormatDuration,
   useFormatRelativeTime,
 } from "@/app/(v3)/v3/_/lib/formatters"
-import { type PublicJob } from "@/database/jobs"
+import { cn } from "@/app/(v3)/v3/_/lib/utils"
+import { type DisplayJob } from "@/database/jobs"
 import * as icon from "@/icons"
+import { JOB_STATUSES, type JobStatus } from "@/jobStatuses"
 import {
-  getCoverUrl,
   useCancelJobMutation,
-  useGetAlignmentEstimateQuery,
   useGetJobsQuery,
   usePauseJobMutation,
   useReorderJobsMutation,
   useResumeJobMutation,
 } from "@/store/api"
+import { getCoverUrl } from "@/store/urls"
 import { type UUID } from "@/uuid"
 
-const PAGE_SIZE = 10
+const PAGE_SIZE = 25
+
+type AnnounceKind = "lifted" | "moved" | "dropped" | "canceled"
 
 const SORT_OPTIONS = {
-  recent: { sort: "finishedAt", order: "desc" },
-  oldest: { sort: "finishedAt", order: "asc" },
-  title: { sort: "title", order: "asc" },
-  status: { sort: "status", order: "asc" },
+  finishedAt: {
+    field: "finishedAt",
+    defaultDirection: "desc",
+    icon: icon.Clock,
+  },
+  title: { field: "title", defaultDirection: "asc", icon: icon.Heading },
+  status: { field: "status", defaultDirection: "asc", icon: icon.Tag },
 } as const
 
 type SortKey = keyof typeof SORT_OPTIONS
 
 export function QueueTab() {
-  const t = useTranslation("Queue")
+  const t = useTranslation("SettingsPage.tabs.queue")
   const { data: activeJobs } = useGetJobsQuery({ type: "active" })
   const [cancelJob] = useCancelJobMutation()
   const [pauseJob] = usePauseJobMutation()
   const [resumeJob] = useResumeJobMutation()
   const [reorderJobs] = useReorderJobsMutation()
 
-  const list = activeJobs ?? []
-  const queued = list.filter((j) => j.status === "QUEUED")
+  const jobs = activeJobs ?? []
+  const order = jobs.map((job) => job.uuid)
+  const byUuid = new Map(jobs.map((job) => [job.uuid, job]))
 
-  function move(job: PublicJob, direction: -1 | 1) {
-    const lane = queued.filter((queuedJob) => queuedJob.type === job.type)
-    const index = lane.findIndex((j) => j.uuid === job.uuid)
-    const target = index + direction
-    if (index < 0 || target < 0 || target >= lane.length) return
-    const next = [...lane]
-    const [removed] = next.splice(index, 1)
-    if (!removed) return
-    next.splice(target, 0, removed)
-    void reorderJobs({ order: next.map((j) => j.uuid) })
+  const announce = (kind: AnnounceKind, id: UniqueIdentifier, index: number) =>
+    t(`announce.${kind}`, {
+      title: byUuid.get(String(id) as UUID)?.bookTitle ?? t("untitled"),
+      position: index + 1,
+      total: jobs.length,
+    })
+
+  const [plugins] = useState(() => [
+    ...defaultPreset.plugins.filter((plugin) => plugin !== Accessibility),
+    Accessibility.configure({
+      screenReaderInstructions: { draggable: t("announce.instructions") },
+      announcements: {
+        dragstart: ({ operation: { source } }: DragStartEvent) =>
+          source && isSortable(source)
+            ? announce("lifted", source.id, source.index)
+            : undefined,
+        dragover: ({ operation: { source } }: DragOverEvent) =>
+          source && isSortable(source)
+            ? announce("moved", source.id, source.index)
+            : undefined,
+        dragend: ({ operation: { source }, canceled }: DragEndEvent) =>
+          source && isSortable(source)
+            ? announce(
+                canceled ? "canceled" : "dropped",
+                source.id,
+                canceled ? source.initialIndex : source.index,
+              )
+            : undefined,
+      },
+    }),
+  ])
+
+  // const pauseAll = () => {
+  //   jobs.forEach((job) => {
+  //     if (job.status === "RUNNING") {
+  //       void pauseJob({ uuid: job.uuid })
+  //     }
+  //   })
+  // }
+  // const resumeAll = () => {
+  //   jobs.forEach((job) => {
+  //     if (job.status === "PAUSED") {
+  //       void resumeJob({ uuid: job.uuid })
+  //     }
+  //   })
+  // }
+
+  const actions = {
+    pauseJob: (uuid: UUID) => void pauseJob({ uuid }),
+    resumeJob: (uuid: UUID) => void resumeJob({ uuid }),
+    cancelJob: (uuid: UUID) => void cancelJob({ uuid }),
   }
 
+  // const someAreActive = jobs.some((job) => job.status === "RUNNING")
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex max-w-3xl flex-col gap-6">
       <div className="flex flex-col gap-3">
-        {list.length > 0 && (
+        {jobs.length > 0 && (
           <div>
-            <h2 className="font-heading text-lg font-medium">{t("title")}</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-medium">{t("title")}</h2>
+              {/* <TooltipButton
+                variant="outline"
+                size="icon"
+                tooltip={someAreActive ? t("pauseAll") : t("resumeAll")}
+                aria-label={someAreActive ? t("pauseAll") : t("resumeAll")}
+                onClick={someAreActive ? pauseAll : resumeAll}
+              >
+                {someAreActive ? <icon.PlayerPause /> : <icon.PlayerPlay />}
+              </TooltipButton> */}
+            </div>
             <p className="text-muted-foreground text-sm">
-              {t("subtitle", { count: list.length })}
+              {t("subtitle", { count: jobs.length })}
             </p>
+            {/* {jobs.length > 1 && (
+              <p className="text-muted-foreground mt-1 text-sm">
+                {t("reorderHint")}
+              </p>
+            )} */}
           </div>
         )}
 
-        {list.length === 0 ? (
+        {jobs.length === 0 ? (
           <p className="text-muted-foreground text-sm">{t("empty")}</p>
         ) : (
-          <div className="flex flex-col gap-2">
-            {list.map((job) => {
-              const lane = queued.filter(
-                (queuedJob) => queuedJob.type === job.type,
-              )
-              const queuedIndex = lane.findIndex((j) => j.uuid === job.uuid)
-              return (
-                <JobItem
+          <DragDropProvider
+            plugins={plugins}
+            onDragEnd={(event) => {
+              if (event.canceled) return
+              void reorderJobs({ order: move(order, event) })
+            }}
+          >
+            <div className="flex flex-col gap-2">
+              {jobs.map((job, index) => (
+                <SortableJobItem
                   key={job.uuid}
                   job={job}
-                  isFirst={queuedIndex <= 0}
-                  isLast={queuedIndex >= lane.length - 1}
-                  move={move}
-                  pauseJob={(uuid) => void pauseJob({ uuid })}
-                  resumeJob={(uuid) => void resumeJob({ uuid })}
-                  cancelJob={(uuid) => void cancelJob({ uuid })}
+                  index={index}
+                  {...actions}
                 />
-              )
-            })}
-          </div>
+              ))}
+            </div>
+          </DragDropProvider>
         )}
       </div>
 
@@ -135,18 +223,25 @@ export function QueueTab() {
 }
 
 function FinishedJobs() {
-  const t = useTranslation("Queue")
+  const t = useTranslation("SettingsPage.tabs.queue")
   const [debouncedSearch, setDebouncedSearch] = useQueryState(
     "search",
     parseAsString.withDefault(""),
   )
   const [search, setSearch] = useState("")
-  const [sortKey, setSortKey] = useQueryState(
+  const [sort, setSort] = useQueryState(
     "sort",
-    parseAsStringEnum(Object.keys(SORT_OPTIONS) as SortKey[]).withDefault(
-      "recent",
-    ),
+    createSortParser<SortKey>().withDefault({
+      field: "finishedAt",
+      direction: "desc",
+    }),
   )
+
+  const [statuses, setStatuses] = useQueryState(
+    "status",
+    parseAsArrayOf(parseAsStringEnum(Object.keys(JOB_STATUSES) as JobStatus[])),
+  )
+
   const [page, setPage] = useQueryState("page", parseAsInteger.withDefault(0))
 
   const setDebouncedSearchEvent = useEffectEvent((search: string) => {
@@ -163,13 +258,13 @@ function FinishedJobs() {
     }
   }, [search])
 
-  const { sort, order } = SORT_OPTIONS[sortKey]
-  const { data: finishedJobs } = useGetJobsQuery(
+  const { data: finishedJobs, isFetching } = useGetJobsQuery(
     {
       type: "finished",
       search: debouncedSearch || undefined,
-      sort,
-      order,
+      sort: sort.field,
+      order: sort.direction,
+      statuses: statuses ?? undefined,
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     },
@@ -180,22 +275,188 @@ function FinishedJobs() {
   const hasNext = jobs.length === PAGE_SIZE
   const hasPrev = page > 0
 
+  const finishedJobsStatuses = JOB_STATUSES.filter(
+    (status) =>
+      status !== "RUNNING" && status !== "PAUSED" && status !== "QUEUED",
+  )
+
+  const filters = [
+    { label: t("status.all"), value: "all" as const },
+    ...finishedJobsStatuses.map((status) => ({
+      label: t.plain(`status.${status}`),
+      value: status,
+    })),
+  ]
+
+  const handleStatusSelect = (status: JobStatus | "all") => {
+    if (status === "all") {
+      void setStatuses(null)
+      return
+    }
+
+    void setStatuses((old) => {
+      if (!old) {
+        return [status]
+      }
+
+      if (old.includes(status)) {
+        const newStatuses = old.filter((s) => s !== status)
+        if (newStatuses.length === 0) {
+          return null
+        }
+        return newStatuses
+      }
+
+      return [...old, status]
+    })
+  }
+
+  const activeSort = SORT_OPTIONS[sort.field]
+
   return (
     <div className="flex flex-col gap-3">
       <h2 className="text-lg font-medium">{t("finishedTitle")}</h2>
 
-      <div className="flex items-center gap-2">
-        <Input
-          placeholder={t("searchPlaceholder")}
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchInput
           value={search}
-          onChange={(e) => {
-            setSearch(e.target.value)
+          onChange={(value) => {
+            setSearch(value)
+            void setPage(null)
           }}
-          className="h-9 flex-1"
-        />
-        <Select
+          placeholder={t.plain("searchPlaceholder")}
+          className="h-8 w-full flex-1"
+        >
+          {isFetching && <Spinner className="text-muted-foreground size-4" />}
+        </SearchInput>
+
+        <div className="flex flex-wrap items-center gap-1">
+          <FilterableMenu>
+            <FilterableMenuTrigger
+              render={
+                <TooltipButton
+                  size="default"
+                  tooltip={t("filtersTitle")}
+                  className="rounded-full px-2"
+                  variant="outline"
+                  aria-label={t("filtersTitle")}
+                >
+                  <icon.Filter />
+                  {statuses?.length && statuses.length > 0 && (
+                    <span className="text-xs">{statuses.length}</span>
+                  )}
+                </TooltipButton>
+              }
+            />
+            <FilterableMenuContent>
+              {filters.map((filter) => {
+                const active =
+                  filter.value === "all"
+                    ? !statuses
+                    : statuses
+                      ? statuses.includes(filter.value)
+                      : false
+                return (
+                  <FilterableMenuItem
+                    key={filter.value}
+                    onSelect={() => {
+                      handleStatusSelect(filter.value)
+                      void setPage(0)
+                    }}
+                    textValue={filter.value}
+                    closeOnClick={false}
+                  >
+                    {filter.value === "all" ? (
+                      t.plain("status.all")
+                    ) : (
+                      <StatusBadge status={filter.value} />
+                    )}
+                    {active && <icon.Check className="size-4" />}
+                  </FilterableMenuItem>
+                )
+              })}
+            </FilterableMenuContent>
+          </FilterableMenu>
+
+          <FilterableMenu>
+            <div className="flex items-center gap-0 rounded-full">
+              <FilterableMenuTrigger
+                render={
+                  <TooltipButton
+                    size="icon"
+                    variant="outline"
+                    className="rounded-l-full rounded-r-none border-r-0"
+                    tooltip={t("sortTitle")}
+                    aria-label={t("sortTitle")}
+                  >
+                    <activeSort.icon className="size-4" />
+                  </TooltipButton>
+                }
+              />
+              <ButtonGroupSeparator />
+
+              <TooltipButton
+                size="icon"
+                variant="outline"
+                tooltip={t(`sort.${sort.direction}`)}
+                data-slot="sort-button"
+                className="rounded-l-none rounded-r-full border-l-0"
+                aria-label={t(`sort.${sort.direction}`)}
+                onClick={() => {
+                  void setSort({
+                    field: sort.field,
+                    direction: sort.direction === "desc" ? "asc" : "desc",
+                  })
+                }}
+              >
+                {sort.direction === "desc" ? (
+                  <icon.ArrowDown className="size-4" />
+                ) : (
+                  <icon.ArrowUp className="size-4" />
+                )}
+              </TooltipButton>
+            </div>
+            <FilterableMenuContent>
+              {(Object.keys(SORT_OPTIONS) as SortKey[]).map((key) => {
+                const active = key === sort.field
+                return (
+                  <FilterableMenuItem
+                    key={key}
+                    textValue={key}
+                    closeOnClick={false}
+                    onSelect={() => {
+                      if (!active) {
+                        void setSort({
+                          field: key,
+                          direction: SORT_OPTIONS[key].defaultDirection,
+                        })
+                      } else {
+                        void setSort({
+                          field: sort.field,
+                          direction: sort.direction === "desc" ? "asc" : "desc",
+                        })
+                      }
+                      void setPage(0)
+                    }}
+                  >
+                    <span className="grow">{t(`sort.${key}`)}</span>
+                    {active &&
+                      (sort.direction === "asc" ? (
+                        <icon.ArrowUp />
+                      ) : (
+                        <icon.ArrowDown />
+                      ))}
+                  </FilterableMenuItem>
+                )
+              })}
+            </FilterableMenuContent>
+          </FilterableMenu>
+        </div>
+
+        {/* <Select
           value={sortKey}
           onValueChange={(value) => {
+            // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
             void setSortKey(value as SortKey)
             void setPage(0)
           }}
@@ -214,7 +475,7 @@ function FinishedJobs() {
               </SelectItem>
             ))}
           </SelectContent>
-        </Select>
+        </Select> */}
       </div>
 
       {jobs.length === 0 ? (
@@ -266,8 +527,8 @@ const statusStyles: Record<string, string> = {
   CANCELED: "bg-orange-500/10 text-orange-600",
 }
 
-function StatusBadge({ status }: { status: PublicJob["status"] }) {
-  const t = useTranslation("Queue")
+function StatusBadge({ status }: { status: DisplayJob["status"] }) {
+  const t = useTranslation("SettingsPage.tabs.queue")
   return (
     <span
       className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${statusStyles[status] ?? "bg-muted text-muted-foreground"}`}
@@ -277,48 +538,48 @@ function StatusBadge({ status }: { status: PublicJob["status"] }) {
   )
 }
 
-function useEstimatedRemaining(job: PublicJob) {
-  const isRunning = job.type === "book_align" && job.status === "RUNNING"
-  const bookUuid = job.bookUuid ?? ("" as UUID)
+type JobActions = {
+  pauseJob?: (uuid: UUID) => void
+  resumeJob?: (uuid: UUID) => void
+  cancelJob?: (uuid: UUID) => void
+}
 
-  const { data } = useGetAlignmentEstimateQuery(
-    {
-      bookUuid,
-      engine: job.config?.transcriptionEngine ?? "",
-      whisperModel: job.config?.whisperModel ?? null,
-      restart: (job as { restart?: string | false }).restart || false,
-    },
-    { skip: !isRunning || !job.bookUuid || !job.config?.transcriptionEngine },
+function SortableJobItem({
+  job,
+  index,
+  ...actions
+}: { job: DisplayJob; index: number } & JobActions) {
+  const { ref, handleRef, isDragging } = useSortable({
+    id: job.uuid,
+    index,
+  })
+
+  return (
+    <JobItem
+      job={job}
+      dragRef={ref}
+      handleRef={handleRef}
+      isDragging={isDragging}
+      {...actions}
+    />
   )
-
-  if (!isRunning || !data?.estimateSeconds || !job.startedAt) return null
-
-  const elapsedSeconds = Math.floor(
-    (Date.now() - new Date(job.startedAt).getTime()) / 1000,
-  )
-  const remaining = Math.max(0, data.estimateSeconds - elapsedSeconds)
-
-  return remaining
 }
 
 function JobItem({
   job,
-  isFirst,
-  isLast,
-  move,
+  dragRef,
+  handleRef,
+  isDragging,
   pauseJob,
   resumeJob,
   cancelJob,
 }: {
-  job: PublicJob
-  isFirst?: boolean
-  isLast?: boolean
-  move?: (job: PublicJob, direction: -1 | 1) => void
-  pauseJob?: (uuid: UUID) => void
-  resumeJob?: (uuid: UUID) => void
-  cancelJob?: (uuid: UUID) => void
-}) {
-  const t = useTranslation("Queue")
+  job: DisplayJob
+  dragRef?: (element: Element | null) => void
+  handleRef?: (element: Element | null) => void
+  isDragging?: boolean
+} & JobActions) {
+  const t = useTranslation("SettingsPage.tabs.queue")
   const c = useCommon()
   const stageLabels = useStageLabels()
   const relativeTime = useFormatRelativeTime()
@@ -333,13 +594,21 @@ function JobItem({
     const stats = (job as { stats?: { totalWallMs: number } | null }).stats
 
     if (stats?.totalWallMs) {
-      return formatDuration(stats.totalWallMs / 1000)
+      return formatDuration(stats.totalWallMs / 1000, {
+        approximate: false,
+        compact: false,
+        full: true,
+      })
     }
 
     if (job.finishedAt && job.startedAt) {
       const ms =
         new Date(job.finishedAt).getTime() - new Date(job.startedAt).getTime()
-      return formatDuration(ms / 1000)
+      return formatDuration(ms / 1000, {
+        approximate: false,
+        compact: false,
+        full: true,
+      })
     }
 
     return null
@@ -349,10 +618,6 @@ function JobItem({
   const detail =
     job.status === "RUNNING" ? (
       `${stageLabel ?? t(`types.${job.type}`)} · ${pct}%`
-    ) : job.status === "QUEUED" ? (
-      t("detail.waiting")
-    ) : job.status === "PAUSED" ? (
-      t("detail.paused")
     ) : job.finishedAt ? (
       <time
         title={formatDate(job.finishedAt)}
@@ -360,21 +625,58 @@ function JobItem({
       >
         {t("detail.finished", { time: relativeTime(job.finishedAt) })}
       </time>
-    ) : (
-      job.status.toLowerCase()
-    )
+    ) : null
 
-  const configSummary = [
-    job.config?.transcriptionEngine,
-    job.config?.whisperModel,
-    job.config?.language,
-  ]
+  const configSummary = (
+    job.config?.aligner === "ctc"
+      ? [job.config.ctcEngine, job.config.ctcModel, job.config.language]
+      : [
+          job.config?.transcriptionEngine,
+          job.config?.whisperModel,
+          job.config?.language,
+        ]
+  )
     .filter(Boolean)
     .join(" · ")
 
+  const detailParts = [
+    detail,
+    runTime && job.status === "DONE"
+      ? t("detail.runTime", { duration: runTime })
+      : null,
+    estimatedRemaining != null
+      ? t("detail.remaining", {
+          duration: formatDuration(estimatedRemaining, { approximate: true }),
+        })
+      : null,
+    configSummary || null,
+    job.error ?? null,
+  ].filter((part) => part != null)
+
   return (
-    <Item variant="outline" className="items-start">
-      <ItemMedia variant="image" className="self-center">
+    <Item
+      ref={dragRef}
+      variant="outline"
+      className={cn(
+        "relative flex-nowrap gap-3 overflow-clip",
+        isDragging && "opacity-60 shadow-md",
+        job.status === "RUNNING" && "border-primary/40",
+      )}
+    >
+      {handleRef && (
+        <button
+          ref={handleRef}
+          type="button"
+          aria-label={t("actions.reorder", {
+            title: job.bookTitle ?? t("untitled"),
+          })}
+          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring -mr-1 flex size-6 shrink-0 cursor-grab touch-none items-center justify-center rounded outline-none focus-visible:ring-2 active:cursor-grabbing"
+        >
+          <icon.GripVertical className="size-4" />
+        </button>
+      )}
+
+      <ItemMedia variant="image" className="h-11 w-8 shrink-0">
         {job.bookUuid ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -392,90 +694,96 @@ function JobItem({
         )}
       </ItemMedia>
 
-      <ItemContent>
-        <ItemTitle className="max-w-full">
+      <ItemContent className="min-w-0 gap-0.5">
+        <div className="flex w-full min-w-0 items-center gap-2 leading-snug font-medium">
           <V3Link
             href={`/books/${job.bookUuid}`}
-            className="hover:text-primary truncate hover:underline"
+            className="hover:text-primary min-w-0 flex-1 truncate hover:underline"
           >
             {job.bookTitle ?? t("untitled")}
           </V3Link>
-          <StatusBadge status={job.status} />
           <span className="text-muted-foreground text-xs">
             {t(`types.${job.type}`)}
           </span>
+
           {job.type === "book_align" &&
             job.status === "DONE" &&
             job.alignmentGrade &&
             job.bookUuid && (
-              <V3Link
-                href={`/books/${job.bookUuid}/alignment`}
-                className="inline-flex items-center gap-1"
-              >
-                <GradePill grade={job.alignmentGrade} />
-                {job.alignmentScore != null && (
-                  <span className="text-muted-foreground text-xs tabular-nums">
-                    {job.alignmentScore}%
-                  </span>
+            <V3Link
+              href={`/books/${job.bookUuid}?report=true`}
+              className="inline-flex shrink-0 items-center gap-1"
+            >
+              <GradePill grade={job.alignmentGrade} />
+            </V3Link>
+          )}
+          {job.alignmentAudioCoverage != null &&
+          job.alignmentSentenceCoverage != null ? (
+            <Tooltip>
+              <TooltipTrigger
+                aria-label={t("actions.alignmentReport")}
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-1 px-1 text-[11px]",
+                  TONE_BADGE[percentTone(job.alignmentSentenceCoverage)],
+                  TONE_TEXT[percentTone(job.alignmentSentenceCoverage)],
                 )}
-              </V3Link>
-            )}
-        </ItemTitle>
-        <ItemDescription>
-          {detail}
-          {runTime && job.status === "DONE"
-            ? ` · ${t("detail.runTime", { duration: runTime })}`
-            : ""}
-          {estimatedRemaining != null
-            ? ` · ${t("detail.remaining", { duration: formatDuration(estimatedRemaining, { approximate: true }) })}`
-            : ""}
-          {configSummary ? ` · ${configSummary}` : ""}
-          {job.error ? ` · ${job.error}` : ""}
-        </ItemDescription>
-        {isActive && (
-          <StaticProgressBar view={view} className="mt-1.5 max-w-xs" />
-        )}
+              >
+                <icon.TextGrammar className="size-3" />{" "}
+                {job.alignmentSentenceCoverage}%
+              </TooltipTrigger>
+              <TooltipContent> {t("actions.alignmentReport")} </TooltipContent>
+            </Tooltip>
+          ) : null}
+          {job.alignmentAudioCoverage != null &&
+          job.alignmentSentenceCoverage != null ? (
+            <Tooltip>
+              <TooltipTrigger
+                aria-label={t("actions.alignmentReport")}
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-1 px-1 text-[11px]",
+                  TONE_BADGE[audioPercentTone(job.alignmentAudioCoverage)],
+                  TONE_TEXT[audioPercentTone(job.alignmentAudioCoverage)],
+                )}
+              >
+                <icon.Audiobook className="size-3" />{" "}
+                {job.alignmentAudioCoverage}%
+              </TooltipTrigger>
+              <TooltipContent> {t("actions.alignmentReport")} </TooltipContent>
+            </Tooltip>
+          ) : null}
+
+          {job.status === "DONE" && job.bookUuid && job.alignmentReportUuid ? (
+            <TooltipButton
+              variant="ghost"
+              className="size-5 shrink-0"
+              aria-label={t("actions.alignmentReport")}
+              tooltip={t("actions.alignmentReport")}
+              render={
+                <V3Link
+                  href={`/books/${job.bookUuid}?report=true&reportUuid=${job.alignmentReportUuid}`}
+                />
+              }
+            >
+              <icon.FileText className="size-4" />
+            </TooltipButton>
+          ) : null}
+        </div>
+        <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+          <StatusBadge status={job.status} />
+          {detailParts.map((part, i) => (
+            <Fragment key={i}>
+              {i > 0 && <span aria-hidden>·</span>}
+              <span className="min-w-0 break-words">{part}</span>
+            </Fragment>
+          ))}
+        </div>
       </ItemContent>
 
-      <ItemActions>
-        {move && (
-          <>
-            <TooltipButton
-              variant="ghost"
-              size="icon"
-              className="size-7"
-              aria-label={t("actions.moveUp")}
-              tooltip={t("actions.moveUp")}
-              delay={500}
-              disabled={isFirst}
-              onClick={() => {
-                move(job, -1)
-              }}
-            >
-              <icon.ChevronUp className="size-4" />
-            </TooltipButton>
-            <TooltipButton
-              variant="ghost"
-              size="icon"
-              className="size-7"
-              aria-label={t("actions.moveDown")}
-              tooltip={t("actions.moveDown")}
-              delay={500}
-              disabled={isLast}
-              onClick={() => {
-                move(job, 1)
-              }}
-            >
-              <icon.ChevronDown className="size-4" />
-            </TooltipButton>
-          </>
-        )}
-
+      <ItemActions className="shrink-0 gap-1">
         {job.status === "PAUSED" && resumeJob ? (
           <TooltipButton
             variant="ghost"
-            size="icon"
-            className="size-7"
+            className="size-5"
             aria-label={t("actions.resume")}
             tooltip={t("actions.resume")}
             onClick={() => {
@@ -487,8 +795,7 @@ function JobItem({
         ) : pauseJob ? (
           <TooltipButton
             variant="ghost"
-            size="icon"
-            className="size-7"
+            className="size-5"
             aria-label={t("actions.pause")}
             tooltip={t("actions.pause")}
             onClick={() => {
@@ -502,8 +809,7 @@ function JobItem({
         {cancelJob ? (
           <TooltipButton
             variant="ghost-destructive"
-            size="icon"
-            className="size-7"
+            className="size-5"
             aria-label={c("actions.cancel")}
             tooltip={t("actions.cancel")}
             onClick={() => {
@@ -513,20 +819,13 @@ function JobItem({
             <icon.Close className="size-4" />
           </TooltipButton>
         ) : null}
-
-        {job.type === "book_align" && job.status === "DONE" && job.bookUuid ? (
-          <TooltipButton
-            variant="ghost"
-            size="icon"
-            className="size-7"
-            aria-label={t("actions.alignmentReport")}
-            tooltip={t("actions.alignmentReport")}
-            render={<V3Link href={`/books/${job.bookUuid}/alignment`} />}
-          >
-            <icon.FileText className="size-4" />
-          </TooltipButton>
-        ) : null}
       </ItemActions>
+
+      {isActive && (
+        <div className="absolute right-0 bottom-0 left-0 w-full">
+          <StaticProgressBar view={view} className="h-1" />
+        </div>
+      )}
     </Item>
   )
 }

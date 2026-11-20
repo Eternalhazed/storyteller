@@ -2,7 +2,6 @@
 
 import {
   type Hotkey,
-  useHotkey,
   useHotkeySequence,
   useKeyHold,
 } from "@tanstack/react-hotkeys"
@@ -15,6 +14,7 @@ import {
   type NavSecondaryItem,
 } from "@v3/_/components/nav/nav-secondary"
 import { NavUser } from "@v3/_/components/nav/nav-user"
+import { FilterIssueList } from "@v3/_/components/shelves/filter-issues"
 import { KeyboardShortcut } from "@v3/_/components/ui/kbd"
 import {
   Sidebar,
@@ -36,9 +36,11 @@ import {
 import { Skeleton } from "@v3/_/components/ui/skeleton"
 import { V3Link } from "@v3/_/components/v3-link"
 import { useVersionBasePath } from "@v3/_/components/version-context"
-import { useLibraryCounts } from "@v3/_/hooks/use-library-counts"
+import {
+  type LibraryCounts,
+  useLibraryCounts,
+} from "@v3/_/hooks/use-library-counts"
 import { useSidebarPrefetch } from "@v3/_/hooks/use-sidebar-prefetch"
-import { useTheme } from "@v3/_/hooks/use-theme"
 import { useTranslation } from "@v3/_/hooks/use-translation"
 
 import type { User } from "@/apiModels"
@@ -50,6 +52,7 @@ import {
 import { usePermission } from "@/hooks/usePermission"
 import { usePermissions } from "@/hooks/usePermissions"
 import * as icon from "@/icons"
+import { sanitizeHtml } from "@/sanitizeHtml"
 import {
   useGetLatestChangelogQuery,
   useListCollectionsQuery,
@@ -60,11 +63,11 @@ import {
 import { useAppDispatch, useAppSelector } from "@/store/appState"
 import {
   selectCollapsedSidebarGroups,
-  selectTheme,
+  selectProcessingToastLocation,
   uiSettingsSlice,
 } from "@/store/slices/uiSettingsSlice"
 import { extractEmojiIcon } from "@/strings"
-import { BETA_TAGS, compareVersions } from "@/versions"
+import { compareVersions } from "@/versions"
 
 import { CreateCollectionDialog } from "./books/CreateCollectionDialog"
 import { CommandSearch, useCommandSearch } from "./command-search"
@@ -76,6 +79,7 @@ import {
   SHELF_ICON,
 } from "./nav/sidebar-items"
 import { toSidebarGroupInputs } from "./nav/sidebar-payload"
+import { ProcessingSidebarItem } from "./processing/ProcessingSidebarItem"
 import {
   DISMISSED_VERSION_KEY,
   formatChangelogDescription,
@@ -98,14 +102,14 @@ import { TooltipButton } from "./ui/tooltip-button"
 
 const THIRTY_MINUTES = 30 * 60 * 1000
 
-function UpdateDot() {
-  return (
-    <span
-      className="bg-primary size-2 rounded-full"
-      aria-label="Update available"
-    />
-  )
-}
+// function UpdateDot() {
+//   return (
+//     <span
+//       className="bg-primary size-2 rounded-full"
+//       aria-label="Update available"
+//     />
+//   )
+// }
 
 export function AppSidebar({
   user,
@@ -133,7 +137,8 @@ export function AppSidebar({
   const [creatingShelf, setCreatingShelf] = useState(false)
   const [setSidebarGroupsMut] = useSetSidebarGroupsMutation()
   const canAccessSettings = usePermission("settingsUpdate")
-  const { pinned } = useSidebar()
+  const canProcess = usePermission("bookProcess")
+  const { pinned, setPinned } = useSidebar()
 
   // editing only makes sense while the sidebar stays open
   useEffect(() => {
@@ -164,7 +169,6 @@ export function AppSidebar({
   const { data: latestChangelog } = useGetLatestChangelogQuery(
     {
       component: "web",
-      beta: BETA_TAGS.some((tag) => currentVersion.includes(tag)),
     },
     { pollingInterval: THIRTY_MINUTES },
   )
@@ -199,9 +203,8 @@ export function AppSidebar({
 
     toastShownRef.current = true
 
-    const cleanedDescription = formatChangelogDescription(
-      latestChangelog?.description,
-    )
+    const formatted = formatChangelogDescription(latestChangelog?.description)
+    const cleanedDescription = formatted ? sanitizeHtml(formatted) : undefined
 
     toast(`A new version (v${latestVersion}) is available`, {
       dismissible: true,
@@ -232,90 +235,78 @@ export function AppSidebar({
   const { openSearch } = useCommandSearch()
 
   const t = useTranslation("AppSidebar")
-  const theme = useAppSelector(selectTheme)
-  const { setTheme } = useTheme()
 
-  const toggleTheme = () => {
-    setTheme(
-      theme === "dark" ? "system" : theme === "system" ? "light" : "dark",
-    )
-  }
-
-  useHotkey("Mod+Shift+L", () => {
-    toggleTheme()
-  })
+  const processingToastLocation = useAppSelector(selectProcessingToastLocation)
 
   const navSecondary: NavSecondaryItem[] = [
-    {
-      onClick: () => {
-        // eslint-disable-next-line react-compiler/react-compiler
-        document.cookie = "frontend-version=v2; path=/; max-age=31536000"
-        window.location.href = "/"
-      },
-      icon: icon.ArrowBack,
-      title: t("switchToClassic"),
-      key: "switchToClassic",
-    },
-    {
-      custom: (
-        <SidebarMenuItem>
-          <Tooltip delay={500}>
-            <TooltipTrigger
-              render={
-                <SidebarMenuButton
-                  onClick={toggleTheme}
-                  className="flex items-center gap-2"
-                  size="sm"
-                  suppressHydrationWarning
-                >
-                  {theme === "dark" ? (
-                    <icon.DarkMode className="size-4" />
-                  ) : theme === "system" ? (
-                    <icon.System className="size-4" />
-                  ) : (
-                    <icon.LightMode className="size-4" />
-                  )}
-                  <span>{t(theme)}</span>
-                </SidebarMenuButton>
-              }
-            />
-            <TooltipContent side="right" suppressHydrationWarning>
-              {t("toggleTheme")}
-              <KeyboardShortcut shortcut={["Mod+Shift+L"]} />
-            </TooltipContent>
-          </Tooltip>
-        </SidebarMenuItem>
-      ),
-      key: "theme",
-    },
-    {
-      custom: (
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            onClick={openSearch}
-            size="sm"
-            className="flex justify-between gap-2"
-          >
-            <icon.Search />
-            <span className="flex grow justify-between">
-              {t("search")}
-              <KeyboardShortcut shortcut={["Mod+K"]} />
-            </span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      ),
-      key: "search",
-    },
-    ...(canAccessSettings
+    // {
+    //   custom: (
+    //     <SidebarMenuItem>
+    //       <Tooltip>
+    //         <TooltipTrigger
+    //           render={
+    //             <SidebarMenuButton
+    //               onClick={toggleTheme}
+    //               className="flex items-center gap-2"
+    //               size="sm"
+    //               suppressHydrationWarning
+    //             >
+    //               {theme === "dark" ? (
+    //                 <icon.DarkMode className="size-4" />
+    //               ) : theme === "system" ? (
+    //                 <icon.System className="size-4" />
+    //               ) : (
+    //                 <icon.LightMode className="size-4" />
+    //               )}
+    //               <span>{t(theme)}</span>
+    //             </SidebarMenuButton>
+    //           }
+    //         />
+    //         <TooltipContent side="right" suppressHydrationWarning>
+    //           {t("toggleTheme")}
+    //           <KeyboardShortcut shortcut={["Mod+Shift+L"]} />
+    //         </TooltipContent>
+    //       </Tooltip>
+    //     </SidebarMenuItem>
+    //   ),
+    //   key: "theme",
+    // },
+    // {
+    //   custom: (
+    //     <SidebarMenuItem>
+    //       <SidebarMenuButton
+    //         onClick={openSearch}
+    //         size="sm"
+    //         className="flex justify-between gap-2"
+    //       >
+    //         <icon.Search />
+    //         <span className="flex grow justify-between">
+    //           {t("search")}
+    //           <KeyboardShortcut shortcut={["Mod+K"]} />
+    //         </span>
+    //       </SidebarMenuButton>
+    //     </SidebarMenuItem>
+    //   ),
+    //   key: "search",
+    // },
+    ...(processingToastLocation === "sidebar" && canProcess
       ? [
           {
-            title: t("settings"),
-            url: "/settings",
-            icon: icon.Settings,
-            badge: hasUpdate ? <UpdateDot /> : undefined,
+            custom: <ProcessingSidebarItem />,
+            key: "processingJobs",
           },
         ]
       : []),
+    // ...(canAccessSettings
+    //   ? [
+    //       {
+    //         title: t("settings"),
+    //         url: "/settings",
+    //         icon: icon.Settings,
+    //         badge: hasUpdate ? <UpdateDot /> : undefined,
+    //       },
+    //     ]
+    //   : []),
   ]
 
   return (
@@ -350,16 +341,14 @@ export function AppSidebar({
 
           <div className="relative flex items-center gap-0.5 group-data-[collapsible=icon]:hidden">
             <TooltipButton
-              size="sm"
-              variant="real-ghost"
-              className="hover:text-sidebar-accent-foreground size-7 shrink-0"
-              onClick={() => {
-                setEditMode(true)
-              }}
-              tooltip={t("customize")}
-              aria-label={t("customize")}
+              variant="ghost"
+              size="icon-sm"
+              onClick={openSearch}
+              tooltip={t("search")}
+              shortcut={["Mod+K"]}
+              aria-label={t("search")}
             >
-              <icon.AdjustmentsHorizontal className="size-4" />
+              <icon.Search className="size-4" />
             </TooltipButton>
             <SidebarPinButton />
           </div>
@@ -416,12 +405,16 @@ export function AppSidebar({
           )}
         </SidebarContent>
 
-        <SidebarFooter>
+        <SidebarFooter className="py-0">
           <NavUser
             user={{
               name: user.name ?? null,
               email: user.email,
               username: user.username ?? null,
+            }}
+            onCustomize={() => {
+              setPinned(true)
+              setEditMode(true)
             }}
           />
         </SidebarFooter>
@@ -464,10 +457,7 @@ function SidebarNavGroup({
   onCreateNew,
 }: {
   group: SidebarGroupWithItems
-  libraryCounts: Record<
-    string,
-    { count: number | undefined; isLoading: boolean }
-  >
+  libraryCounts: LibraryCounts
   startIndex: number
   onPrefetchEnter: (item: SidebarItemDetail) => void
   onPrefetchLeave: () => void
@@ -580,8 +570,6 @@ function SidebarNavGroup({
                       "small-caps",
                       "group-data-[collapsible=icon]:opacity-0",
                       "group-data-[collapsible=icon]:w-0",
-
-                      "tracking-[0.08em]",
                     )}
                   >
                     {group.name}
@@ -589,7 +577,7 @@ function SidebarNavGroup({
                   <span
                     aria-hidden
                     className={cn(
-                      "bg-muted-foreground/60 group-data-[collapsible=icon]:bg-muted-foreground h-px min-w-3 flex-1 group-data-[collapsible=icon]:ml-0.75 group-data-[collapsible=icon]:max-w-6 group-data-[collapsible=icon]:min-w-6",
+                      "bg-muted-foreground/60 group-data-[collapsible=icon]:bg-muted-foreground/40 h-px min-w-3 flex-1 group-data-[collapsible=icon]:ml-0.75 group-data-[collapsible=icon]:max-w-6 group-data-[collapsible=icon]:min-w-6",
                       totalCount == null &&
                         "mr-3 group-data-[collapsible=icon]:mr-0",
                     )}
@@ -673,10 +661,7 @@ function SidebarNavItem({
   index: number
   item: SidebarItemDetail
   builtinTitle: (builtin: BuiltinSidebarItem) => string
-  libraryCounts: Record<
-    string,
-    { count: number | undefined; isLoading: boolean }
-  >
+  libraryCounts: LibraryCounts
   onPrefetchEnter: (item: SidebarItemDetail) => void
   onPrefetchLeave: () => void
   onEdit?: () => void
@@ -708,6 +693,7 @@ function SidebarNavItem({
     },
   )
   const [tooltipOpen, setTooltipOpen] = useState(false)
+  const tIssues = useTranslation("ShelfFilterIssues")
 
   const resolved = resolveItem(item, builtinTitle)
   if (!resolved) return null
@@ -721,6 +707,7 @@ function SidebarNavItem({
     : null
   const count = countResult?.count
   const isCountLoading = countResult?.isLoading ?? false
+  const filterIssues = countResult?.issues ?? []
 
   const isEntity = item.kind === "shelf" || item.kind === "collection"
 
@@ -731,11 +718,7 @@ function SidebarNavItem({
       }}
       onPointerLeave={onPrefetchLeave}
     >
-      <Tooltip
-        open={tooltipOpen || isAltHeld}
-        delay={500}
-        onOpenChange={setTooltipOpen}
-      >
+      <Tooltip open={tooltipOpen || isAltHeld} onOpenChange={setTooltipOpen}>
         <TooltipTrigger
           render={
             <SidebarMenuButton
@@ -791,8 +774,28 @@ function SidebarNavItem({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <SidebarMenuBadge className="group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0 peer-data-popup-open/item-action:opacity-0">
-            {count != null ? (
+          <SidebarMenuBadge
+            className={cn(
+              filterIssues.length > 0
+                ? "pointer-events-auto"
+                : "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0 peer-data-popup-open/item-action:opacity-0",
+            )}
+          >
+            {filterIssues.length > 0 ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="text-destructive inline-flex">
+                      <icon.AlertTriangle className="size-3.5" />
+                    </span>
+                  }
+                />
+                <TooltipContent side="right" className="max-w-64">
+                  <FilterIssueList issues={filterIssues} />
+                  <p className="mt-1">{tIssues("openToFix")}</p>
+                </TooltipContent>
+              </Tooltip>
+            ) : count != null ? (
               count
             ) : isCountLoading ? (
               <Skeleton className="h-3.5 w-5 rounded" />
@@ -826,7 +829,7 @@ function ShelfEditorFromSidebar({
   const shelves = rawShelves
 
   const shelf = shelfUuid
-    ? shelves.find((s) => s.uuid === shelfUuid) ?? null
+    ? (shelves.find((s) => s.uuid === shelfUuid) ?? null)
     : null
 
   return (

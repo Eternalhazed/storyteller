@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs"
 import { rm, stat } from "node:fs/promises"
 import { Readable } from "node:stream"
 
+import { MediaType } from "@storyteller/media-types"
 import contentDisposition from "content-disposition"
 import { NextResponse } from "next/server"
 
@@ -31,7 +32,7 @@ export const GET = withHasPermission("settingsUpdate")(async () => {
 
   return new Response(Readable.toWeb(readStream) as ReadableStream, {
     headers: {
-      "Content-Type": "application/vnd.sqlite3",
+      "Content-Type": MediaType.SQLITE.mime,
       "Content-Length": String(size),
       "Content-Disposition": contentDisposition(
         `storyteller-${new Date().toISOString().slice(0, 10)}.db`,

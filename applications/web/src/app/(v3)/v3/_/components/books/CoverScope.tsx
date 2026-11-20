@@ -1,8 +1,7 @@
 "use client"
 
-import { useMemo } from "react"
-
 import { type JsColor } from "@storyteller-platform/okmain"
+import { useMemo } from "react"
 
 import { useUserPreferences } from "@v3/_/components/user-preferences-provider"
 
@@ -42,12 +41,14 @@ export function useCoverScope(
     const vars: Record<string, string> = {
       "--cover-1": swatches.primary.css,
       "--primary": swatches.primary.css,
+      "--primary-foreground": swatches.primary.onColor,
     }
     if (swatches.secondary !== swatches.primary) {
       vars["--cover-2"] = swatches.secondary.css
     }
 
     return {
+      // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsgolint treats the cast as unnecessary but it still narrows the type
       style: { ...vars, ...extraStyle } as React.CSSProperties,
       "data-cover": "" as const,
     }

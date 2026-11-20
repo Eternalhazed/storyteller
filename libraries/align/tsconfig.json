@@ -1,6 +1,9 @@
 {
   "extends": ["@tsconfig/strictest/tsconfig.json"],
   "compilerOptions": {
+    // tsgolint does not auto-include
+    // @types packages the way tsc does, so list them explicitly.
+    "types": ["node", "smil-clockvalue"],
     "composite": true,
     "emitDeclarationOnly": true,
     "incremental": true,
@@ -12,18 +15,37 @@
     "rewriteRelativeImportExtensions": true,
     "resolveJsonModule": true,
     "lib": ["esnext"],
-    "outDir": "dist"
+    // Enables the jsx-runtime for EPUB lib's XML element creation.
+    // The actual pragma is defined per-file so that it
+    // doesn't interfere with React applications that
+    // depend on this lib.
+    "jsx": "react-jsx",
+    "tsBuildInfoFile": ".tsbuild/tsconfig.tsbuildinfo",
+    "outDir": ".tsbuild/types",
+    "typeRoots": [
+      "./node_modules/@types",
+      "../../node_modules/@types",
+      "../../types"
+    ]
   },
-  "include": ["package.json", "src/**/*.ts"],
+  "include": [
+    "package.json",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/align/opencc/TSCharacters.json"
+  ],
   "references": [
     {
       "path": "../epub"
     },
     {
-      "path": "../audiobook"
+      "path": "../audiobooks"
     },
     {
       "path": "../ghost-story"
+    },
+    {
+      "path": "../media-types"
     }
   ]
 }

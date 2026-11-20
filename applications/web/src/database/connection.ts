@@ -1,6 +1,6 @@
+import { randomUUID } from "node:crypto"
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
-import { cwd } from "node:process"
 
 import Db, { type Database } from "better-sqlite3"
 import type { Kysely } from "kysely"
@@ -22,21 +22,29 @@ const DATABASE_URL = join(
   env.STORYTELLER_DB_FILENAME || "storyteller.db",
 )
 
-const UUID_EXT_PATH = join(cwd(), "sqlite", "uuid.c")
-
 let sqlite: Database = null as unknown as Database
 
 if (!SKIP_INIT) {
   mkdirSync(DB_DIR, { recursive: true })
   sqlite = createDatabase()
 
+  sqlite.function("uuid", () => randomUUID())
   sqlite.pragma("journal_mode = WAL")
   sqlite.pragma("busy_timeout = 5000")
 
+  // needs to optimize occasionally per connection, bc other
+  // connections don't see it
+  optimize("optimize = 0x10002")
+  setInterval(() => {
+    optimize("optimize")
+  }, 60 * 60_000).unref()
+}
+
+function optimize(pragma: string) {
   try {
-    sqlite.loadExtension(UUID_EXT_PATH)
-  } catch (e) {
-    logger.error(e)
+    sqlite.pragma(pragma)
+  } catch (err) {
+    logger.warn({ msg: "Failed to refresh database query planner stats", err })
   }
 }
 

@@ -1,5 +1,9 @@
 import { type BookWithRelations } from "@/database/books"
-import { ALIGNMENT_GRADES, FIELD_REGISTRY } from "@/fields"
+import {
+  WELL_KNOWN_STATUS_NAMES,
+  statusDisplayLabel,
+} from "@/database/statusKinds"
+import { ALIGNMENT_GRADES, COMPACT_FIELDS, FIELD_REGISTRY } from "@/fields"
 import { type ShelfFilterNode } from "@/shelves"
 import { type UUID } from "@/uuid"
 
@@ -9,7 +13,7 @@ export type RegistrySortField = AcceptedKeys<
   typeof FIELD_REGISTRY,
   { sortable: true }
 >
-export type SortField = RegistrySortField | "seriesPosition"
+export type SortField = RegistrySortField
 
 export const SORTABLE_FIELDS = Object.entries(FIELD_REGISTRY)
   .filter(([_f, p]) => p.sortable)
@@ -36,11 +40,22 @@ export const CREATOR_DISPLAY_FIELDS: readonly CreatorDisplayField[] =
     .filter(([, def]) => def.group === "creators" && !def.sortable)
     .map(([field]) => field) as CreatorDisplayField[]
 
-export type DisplayField = SortField | CreatorDisplayField
+export type DisplayOnlyField = AcceptedKeys<
+  typeof FIELD_REGISTRY,
+  { displayOnly: true }
+>
+export const DISPLAY_ONLY_FIELDS: readonly DisplayOnlyField[] = Object.entries(
+  FIELD_REGISTRY,
+)
+  .filter(([, def]) => "displayOnly" in def)
+  .map(([field]) => field) as DisplayOnlyField[]
+
+export type DisplayField = SortField | CreatorDisplayField | DisplayOnlyField
 
 export const DISPLAY_FIELDS = [
   ...SORTABLE_FIELDS,
   ...CREATOR_DISPLAY_FIELDS,
+  ...DISPLAY_ONLY_FIELDS,
 ] as const
 
 const NEUTRAL_DISPLAY_FIELDS: readonly SortField[] = [
@@ -83,17 +98,9 @@ export function deriveDisplayFields(
   return secondary === "title" ? ["title"] : [secondary, "title"]
 }
 
-const COMPACT_DISPLAY_FIELDS: ReadonlySet<DisplayField> = new Set([
-  "pageCount",
-  "duration",
-  "fileSize",
-  "publicationDate",
-  "userRating",
-  "alignmentScore",
-  "alignmentGrade",
-  "alignmentMissingSentences",
-  "alignmentMutedChapters",
-])
+const COMPACT_DISPLAY_FIELDS: ReadonlySet<DisplayField> = new Set(
+  COMPACT_FIELDS,
+)
 
 const MAX_COMPACT_PER_ROW = 3
 
@@ -124,12 +131,14 @@ export function insertDisplayField(
   return [...fields.slice(0, titleIndex), field, ...fields.slice(titleIndex)]
 }
 
-function seriesPositionOf(
+export function displaySeriesOf(
   book: BookWithRelations,
   ctx: SortContext | undefined,
-): number | null {
-  if (!ctx?.seriesUuid) return null
-  return book.series.find((s) => s.uuid === ctx.seriesUuid)?.position ?? null
+): BookWithRelations["series"][number] | undefined {
+  if (ctx?.seriesUuid) {
+    return book.series.find((s) => s.uuid === ctx.seriesUuid)
+  }
+  return book.series.find((s) => s.featured) ?? book.series[0]
 }
 
 function sortValue(
@@ -148,6 +157,8 @@ function sortValue(
       return book.updatedAt
     case "publicationDate":
       return book.publicationDate
+    case "releaseDate":
+      return book.releaseDate
     case "userRating":
       return book.userBookRating?.rating ?? null
     case "pageCount":
@@ -158,23 +169,57 @@ function sortValue(
       return book.ebook?.fileSize ?? book.audiobook?.fileSize ?? null
     case "authors":
       return book.authors.map((a) => a.name).join(", ")
-    case "alignmentScore":
-      return book.alignmentSummary?.score ?? null
+    case "alignmentConfidence":
+      return book.alignmentSummary?.confidence ?? null
     case "alignmentGrade":
       return book.alignmentSummary?.grade
-        ? GRADE_RANK[book.alignmentSummary.grade] ?? null
+        ? (GRADE_RANK[book.alignmentSummary.grade] ?? null)
         : null
-    case "alignmentMissingSentences":
-      return book.alignmentSummary?.missingSentences ?? null
-    case "alignmentMutedChapters":
-      return book.alignmentSummary?.mutedChapters ?? null
+    case "alignmentSentenceCoverage":
+      return book.alignmentSummary?.sentenceCoverage ?? null
+    case "alignmentAudioCoverage":
+      return book.alignmentSummary?.audioCoverage ?? null
     case "alignedAt":
       return book.alignedAt
     case "lastRead":
       return book.position?.updatedAt ?? null
     case "seriesPosition":
-      return seriesPositionOf(book, ctx)
+      return displaySeriesOf(book, ctx)?.position ?? null
+    case "status": {
+      if (!book.status) {
+        return null
+      }
+
+      const rank = [...WELL_KNOWN_STATUS_NAMES].indexOf(book.status.name)
+      return rank === -1 ? WELL_KNOWN_STATUS_NAMES.size : rank
+    }
   }
+}
+
+type SortKey = (book: BookWithRelations) => string | number | null
+
+function compareSortValues(
+  av: string | number | null,
+  bv: string | number | null,
+  dir: number,
+) {
+  if (av === null && bv === null) {
+    return 0
+  }
+
+  if (av === null) {
+    return 1
+  }
+
+  if (bv === null) {
+    return -1
+  }
+
+  if (typeof av === "string" && typeof bv === "string") {
+    return av.localeCompare(bv) * dir
+  }
+
+  return (Number(av) - Number(bv)) * dir
 }
 
 export function makeBookComparator(
@@ -183,17 +228,25 @@ export function makeBookComparator(
   ctx?: SortContext,
 ): (a: BookWithRelations, b: BookWithRelations) => number {
   const dir = direction === "asc" ? 1 : -1
+  const value: SortKey = (book) => sortValue(book, field, ctx)
+  const keys: SortKey[] =
+    field === "seriesPosition" && !ctx?.seriesUuid
+      ? [(book) => displaySeriesOf(book, ctx)?.name ?? null, value]
+      : field === "status"
+        ? [
+            value,
+            (book) => (book.status ? statusDisplayLabel(book.status) : null),
+          ]
+        : [value]
+
   return (a, b) => {
-    const av = sortValue(a, field, ctx)
-    const bv = sortValue(b, field, ctx)
-
-    if (av === null && bv === null) return 0
-    if (av === null) return 1
-    if (bv === null) return -1
-
-    if (typeof av === "string" && typeof bv === "string") {
-      return av.localeCompare(bv) * dir
+    for (const key of keys) {
+      const result = compareSortValues(key(a), key(b), dir)
+      if (result !== 0) {
+        return result
+      }
     }
-    return (Number(av) - Number(bv)) * dir
+
+    return 0
   }
 }

@@ -1,20 +1,12 @@
 import { mkdir, open, readdir, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { basename, dirname, extname, join } from "node:path"
 
-import { extension, lookup } from "mime-types"
+import { Audiobook } from "@storyteller/audiobooks"
+import { Epub, type EpubReader, MemoryAdapter } from "@storyteller/epub"
+import { scratchPath } from "@storyteller/fs"
+import { MediaType } from "@storyteller/media-types"
 
-import {
-  Audiobook,
-  type AudiobookInputs,
-} from "@storyteller-platform/audiobook"
-import {
-  Epub,
-  type EpubReader,
-  MemoryAdapter,
-} from "@storyteller-platform/epub"
-
-import { COVER_IMAGE_FILE_EXTENSIONS, isAudioFile } from "@/audio"
+import { getAudiobookTracks } from "@/assets/audiobooks.ts"
 import { type Book, touchBook } from "@/database/books"
 
 import { getAudioCoverItem } from "./metadata"
@@ -24,6 +16,10 @@ export type CoverData = {
   filename: string
   mimeType: string
   data: Uint8Array
+}
+
+function isCoverImage(nameOrPath: string): boolean {
+  return MediaType.fromPath(nameOrPath)?.cover === true
 }
 
 export type CoverKind = "ebook" | "audiobook"
@@ -42,10 +38,17 @@ async function readCoverFromEpub(epub: EpubReader): Promise<CoverData | null> {
   const data = await epub.getCoverImage()
   if (!data) return null
 
+  let filename = basename(coverImageItem.href)
+  try {
+    filename = decodeURIComponent(filename)
+  } catch {}
+
   return {
-    filename: basename(coverImageItem.href),
+    filename,
     mimeType:
-      coverImageItem.mediaType ?? (lookup(coverImageItem.href) || "image/jpeg"),
+      coverImageItem.mediaType ??
+      MediaType.fromPath(coverImageItem.href)?.mime ??
+      MediaType.JPEG.mime,
     data: new Uint8Array(data),
   }
 }
@@ -65,9 +68,14 @@ async function readAudioCoverFromReadaloud(
   if (!coverImageItem) return null
 
   const data = await epub.readItemContents(coverImageItem.id)
+  let filename = basename(coverImageItem.href)
+  try {
+    filename = decodeURIComponent(filename)
+  } catch {}
+
   return {
-    filename: basename(coverImageItem.href),
-    mimeType: coverImageItem.mediaType ?? "image/jpeg",
+    filename,
+    mimeType: coverImageItem.mediaType ?? MediaType.JPEG.mime,
     data: new Uint8Array(data),
   }
 }
@@ -94,7 +102,7 @@ async function readAudioCoverFromReadaloudAudio(
   if (!firstAudioItem) return null
 
   const audio = await epub.readItemContents(firstAudioItem.id)
-  const tmpAudioPath = join(tmpdir(), "storyteller", firstAudioItem.href)
+  const tmpAudioPath = scratchPath("storyteller", firstAudioItem.href)
 
   try {
     await mkdir(dirname(tmpAudioPath), { recursive: true })
@@ -105,7 +113,9 @@ async function readAudioCoverFromReadaloudAudio(
     if (!coverArt) return null
 
     return {
-      filename: coverArt.name || `Cover.${extension(coverArt.mimeType)}`,
+      filename:
+        coverArt.name ||
+        `Cover${MediaType.fromMime(coverArt.mimeType)?.extension ?? ".jpg"}`,
       mimeType: coverArt.mimeType,
       data: new Uint8Array(coverArt.data),
     }
@@ -150,17 +160,11 @@ export async function extractCoverFileFromAudioDir(
     const ext = extname(entry)
     const name = basename(entry, ext)
 
-    if (
-      name.toLowerCase() === "cover" &&
-      COVER_IMAGE_FILE_EXTENSIONS.includes(ext)
-    ) {
+    if (name.toLowerCase() === "cover" && isCoverImage(entry)) {
       cover = join(audioDir, entry)
     }
 
-    if (
-      name.toLowerCase() === "audio cover" &&
-      COVER_IMAGE_FILE_EXTENSIONS.includes(ext)
-    ) {
+    if (name.toLowerCase() === "audio cover" && isCoverImage(entry)) {
       audioCover = join(audioDir, entry)
     }
 
@@ -170,7 +174,7 @@ export async function extractCoverFileFromAudioDir(
   }
 
   // when an epub sits alongside audio, only honour an explicit "audio cover"
-  const filepath = hasEpub ? audioCover : audioCover ?? cover
+  const filepath = hasEpub ? audioCover : (audioCover ?? cover)
   if (!filepath) return null
 
   const file = await open(filepath)
@@ -179,7 +183,7 @@ export async function extractCoverFileFromAudioDir(
 
   return {
     filename: basename(filepath),
-    mimeType: lookup(filepath) || "image/jpeg",
+    mimeType: MediaType.fromPath(filepath)?.mime ?? MediaType.JPEG.mime,
     data: new Uint8Array(data),
   }
 }
@@ -190,7 +194,7 @@ async function readCoverFromAudiobook(
   const coverArt = await audiobook.getCoverArt()
   if (!coverArt) return null
   return {
-    filename: `Cover.${extension(coverArt.mimeType)}`,
+    filename: `Cover${MediaType.fromMime(coverArt.mimeType)?.extension ?? ".jpg"}`,
     mimeType: coverArt.mimeType,
     data: new Uint8Array(coverArt.data),
   }
@@ -205,12 +209,9 @@ export async function extractCoverFromAudioFiles(
 ): Promise<CoverData | null> {
   if (typeof source !== "string") return readCoverFromAudiobook(source)
 
-  const entries = await readdir(source)
-  const audioFiles = entries.filter((entry) => isAudioFile(entry))
+  const tracks = await getAudiobookTracks(source)
 
-  using audiobook = await Audiobook.from(
-    ...(audioFiles.map((file) => join(source, file)) as AudiobookInputs),
-  )
+  using audiobook = await Audiobook.from(...tracks)
   return await readCoverFromAudiobook(audiobook)
 }
 
@@ -225,9 +226,7 @@ export async function getExtractedCover(book: Book, kind: CoverKind) {
 
   try {
     const entries = await readdir(coverDir)
-    const coverEntry = entries.find((entry) =>
-      COVER_IMAGE_FILE_EXTENSIONS.includes(extname(entry)),
-    )
+    const coverEntry = entries.find((entry) => isCoverImage(entry))
     if (!coverEntry) return null
 
     const file = await open(join(coverDir, coverEntry))
@@ -237,7 +236,7 @@ export async function getExtractedCover(book: Book, kind: CoverKind) {
 
     return {
       filename: basename(coverEntry),
-      mimeType: lookup(coverEntry) || "image/jpeg",
+      mimeType: MediaType.fromPath(coverEntry)?.mime ?? MediaType.JPEG.mime,
       stats,
       data,
     }
