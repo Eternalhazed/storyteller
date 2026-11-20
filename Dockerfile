@@ -39,18 +39,26 @@ ENV ONNXRUNTIME_NODE_INSTALL=skip
 RUN yarn install --inline-builds
 
 # manualy reproducing that stupid onnxruntime install step
+# CUDA 12 comes from NuGet, where onnxruntime-node's own installer gets it;
+# the GitHub release assets are no longer served.
 ARG BASE_TAG
 RUN case "$BASE_TAG" in \
       cuda-12*) ORT_CUDA=cuda12 ;; \
       cuda-13*) ORT_CUDA=cuda13 ;; \
       *) ORT_CUDA= ;; \
     esac && \
-    if [ -n "$ORT_CUDA" ]; then \
-      ORT_VERSION=$(node -p "require('./node_modules/onnxruntime-node/package.json').version") && \
+    ORT_VERSION=$(node -p "require('./node_modules/onnxruntime-node/package.json').version") && \
+    ORT_TARGET=node_modules/onnxruntime-node/bin/napi-v6/linux/x64 && \
+    if [ "$ORT_CUDA" = cuda12 ]; then \
+      curl -fL --retry 5 --retry-all-errors --retry-delay 15 --connect-timeout 30 --speed-limit 10000 --speed-time 60 \
+        -o /tmp/ort.nupkg "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.gpu.linux/$ORT_VERSION/microsoft.ml.onnxruntime.gpu.linux.$ORT_VERSION.nupkg" && \
+      python3 -c "import sys, zipfile; z = zipfile.ZipFile('/tmp/ort.nupkg'); [open(sys.argv[1] + '/' + name, 'wb').write(z.read('runtimes/linux-x64/native/' + name)) for name in ('libonnxruntime_providers_cuda.so', 'libonnxruntime_providers_shared.so')]" "$ORT_TARGET" && \
+      rm /tmp/ort.nupkg; \
+    elif [ -n "$ORT_CUDA" ]; then \
       ORT_DIST="onnxruntime-linux-x64-gpu_$ORT_CUDA-$ORT_VERSION" && \
       curl -fL --retry 5 --retry-all-errors --retry-delay 15 --connect-timeout 30 --speed-limit 10000 --speed-time 60 \
         -o /tmp/ort.tgz "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/$ORT_DIST.tgz" && \
-      tar -xzf /tmp/ort.tgz --strip-components=2 -C node_modules/onnxruntime-node/bin/napi-v6/linux/x64 \
+      tar -xzf /tmp/ort.tgz --strip-components=2 -C "$ORT_TARGET" \
         "$ORT_DIST/lib/libonnxruntime_providers_cuda.so" "$ORT_DIST/lib/libonnxruntime_providers_shared.so" && \
       rm /tmp/ort.tgz; \
     fi
