@@ -31,6 +31,7 @@ import {
   useListBooksQuery as useListLocalBooksQuery,
   useListCollectionsQuery,
 } from "@/store/localApi"
+import { periodicalsLast } from "@/store/periodicals"
 
 import {
   filterCurrentlyReading,
@@ -59,7 +60,12 @@ export default function Home() {
 
   const { isLoading, refetch } = useListAllServerBooks()
   const { data: liveBooks = EMPTY_BOOKS } = useListLocalBooksQuery()
-  const { data: collections = EMPTY_COLLECTIONS } = useListCollectionsQuery()
+  const { data: listedCollections = EMPTY_COLLECTIONS } =
+    useListCollectionsQuery()
+  const collections = useMemo(
+    () => periodicalsLast(listedCollections),
+    [listedCollections],
+  )
 
   const staleBooksRef = useRef<BookWithRelations[]>(liveBooks)
 

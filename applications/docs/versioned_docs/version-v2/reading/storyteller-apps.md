@@ -47,6 +47,14 @@ Be sure to keep the app open and in the foreground during the download (support
 for background downloads is on the roadmap!). Once your book is downloaded,
 you'll find it on your Bookshelf, where you can start reading or listening!
 
+### Magazines on the home screen
+
+Books in a collection named **Magazines** are kept off the home screen's **Start
+reading** and **Recently added** shelves, so a batch of issues doesn't push your
+books out of view. They appear on their own Magazines shelf at the end of the
+home screen, newest first, and an issue you're reading still shows under
+**Currently reading**.
+
 ## Highlighting and looking up selected text
 
 While reading an ebook, select a word or phrase to show the selection toolbar: a

@@ -111,8 +111,10 @@ an emulator; the fixes below still need their targeted device checks.
       chapter heading shows how many mentions it groups; each mention shows the
       entity's name in bold.
 - [ ] Toggle newest/oldest first and use All entries.
-- [ ] Expected: mention and chapter order changes together; All entries returns
-      to the in-tab list without closing the sheet.
+- [ ] Expected: key fact, mention and chapter order all change together, and
+      TalkBack reads the button as "Sorted newest first" (or oldest) with a hint
+      naming what a tap does; All entries returns to the in-tab list without
+      closing the sheet.
 - [ ] In an entity detail view, press Android hardware Back.
 - [ ] Expected: the entity list returns inside the same sheet; a later Back
       can dismiss the sheet normally. Switching tabs leaves no detail handler.

@@ -228,14 +228,23 @@ export function getXrayDetailRows({
       title: "Key facts",
       count: entity.facts.length,
     })
-    entity.facts.forEach((fact, index) => {
+    // One order for the whole entry: the sort control above the list says
+    // "Newest first", so the facts under it must be newest first too.
+    const facts = entity.facts
+      .map((fact, index) => ({ fact, index }))
+      .sort((a, b) =>
+        newestFirst
+          ? b.fact.sentence - a.fact.sentence
+          : a.fact.sentence - b.fact.sentence,
+      )
+    for (const { fact, index } of facts) {
       rows.push({
         kind: "fact",
         key: `fact:${index}`,
         ordinal: fact.sentence,
         text: fact.text,
       })
-    })
+    }
   }
   rows.push({
     kind: "section",

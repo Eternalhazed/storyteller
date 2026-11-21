@@ -535,6 +535,30 @@ test("detail rows contain visible facts and mentions, grouped by chapter in eith
   )
 })
 
+test("key facts follow the same order as mentions", () => {
+  const withFacts: Xray = {
+    ...xray,
+    entities: [
+      {
+        ...xray.entities[0]!,
+        facts: [
+          { at: 20, sentence: 6, text: "Earlier fact" },
+          { at: 90, sentence: 70, text: "Later fact" },
+        ],
+      },
+    ],
+  }
+  const entity = viewXray(withFacts, 95)[0]!
+  const chapterLinks = getXrayChapterLinks(withFacts, manifest)
+  const factOrder = (newestFirst: boolean) =>
+    getXrayDetailRows({ xray: withFacts, entity, chapterLinks, newestFirst })
+      .filter((row) => row.kind === "fact")
+      .map((row) => row.text)
+
+  assert.deepEqual(factOrder(true), ["Later fact", "Earlier fact"])
+  assert.deepEqual(factOrder(false), ["Earlier fact", "Later fact"])
+})
+
 test("thousands of mentions remain separate virtualizable rows with stable unique keys", () => {
   const large: Xray = {
     ...xray,
