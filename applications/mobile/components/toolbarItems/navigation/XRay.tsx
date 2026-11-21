@@ -396,7 +396,8 @@ function XrayDetails({
         <Button
           className="h-11 px-2 sm:h-11"
           variant="ghost"
-          accessibilityLabel={`Show ${newestFirst ? "oldest" : "newest"} mentions first`}
+          accessibilityLabel={`Sorted ${newestFirst ? "newest" : "oldest"} first`}
+          accessibilityHint={`Shows facts and mentions ${newestFirst ? "oldest" : "newest"} first`}
           onPress={() => setNewestFirst((value) => !value)}
         >
           <Icon as={ArrowUpDown} size={16} />
