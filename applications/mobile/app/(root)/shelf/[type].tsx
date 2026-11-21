@@ -4,6 +4,7 @@ import { useMemo } from "react"
 import { BookGrid } from "@/components/BookGrid"
 import { type BookWithRelations } from "@/database/books"
 import { useListBooksQuery } from "@/store/localApi"
+import { withoutPeriodicals } from "@/store/periodicals"
 import { type UUID } from "@/uuid"
 
 const EMPTY_BOOKS: BookWithRelations[] = []
@@ -78,7 +79,7 @@ export function filterNextUp(books: BookWithRelations[]) {
 }
 
 export function filterStartReading(books: BookWithRelations[]) {
-  return books
+  return withoutPeriodicals(books)
     .filter((book) => book.status?.name === "To read")
     .sort(
       (a, b) =>
@@ -87,12 +88,9 @@ export function filterStartReading(books: BookWithRelations[]) {
 }
 
 export function filterRecentlyAdded(books: BookWithRelations[]) {
-  return books
-    .slice()
-    .sort(
-      (a, b) =>
-        new Date(b.createdAt).valueOf() - new Date(a.createdAt).valueOf(),
-    )
+  return withoutPeriodicals(books).sort(
+    (a, b) => new Date(b.createdAt).valueOf() - new Date(a.createdAt).valueOf(),
+  )
 }
 
 const SHELF_FILTERS: Record<
