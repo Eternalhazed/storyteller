@@ -29,8 +29,9 @@ export async function createAccessToken(
 }
 
 const callbackUrl = "storyteller://settings"
+const tokenPath = "/api/v2/token/app"
 
-export const GET: ReturnType<typeof nextAuth.auth> = await (nextAuth.auth(
+const issueToken: ReturnType<typeof nextAuth.auth> = await (nextAuth.auth(
   async (request) => {
     if (request.auth) {
       const token = await createAccessToken(
@@ -48,7 +49,7 @@ export const GET: ReturnType<typeof nextAuth.auth> = await (nextAuth.auth(
     return new Response(null, {
       status: 302,
       headers: {
-        Location: `/login?callbackUrl=${encodeURIComponent("/api/v2/token/app")}`,
+        Location: `/login?callbackUrl=${encodeURIComponent(tokenPath)}`,
       },
     })
     // We have to do a cast here because NextAuthResult is
@@ -56,6 +57,25 @@ export const GET: ReturnType<typeof nextAuth.auth> = await (nextAuth.auth(
     // when passed a lazy init function
   },
 ) as unknown as Promise<ReturnType<typeof nextAuth.auth>>)
+
+type RouteHandler = (
+  request: NextRequest,
+  context: unknown,
+) => Promise<Response>
+
+/**
+ * Starts the app's browser sign-in. With `?prompt=login` the browser's
+ * existing web session is signed out first, so the app can switch to a
+ * different account instead of silently reusing the current one.
+ */
+export async function GET(request: NextRequest, context: unknown) {
+  if (request.nextUrl.searchParams.get("prompt") === "login") {
+    await nextAuth.signOut({
+      redirectTo: `/login?callbackUrl=${encodeURIComponent(tokenPath)}`,
+    })
+  }
+  return (issueToken as unknown as RouteHandler)(request, context)
+}
 
 export async function POST(request: NextRequest) {
   const unauthorized = new Response(null, { status: 401 })

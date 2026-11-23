@@ -50,6 +50,22 @@ startAppListening({
 
     logger.debug("Syncing book metadata from server")
 
+    // Shelves are pulled after every book sync, and screens reread the
+    // local rows the sync just wrote.
+    const finishSync = () => {
+      listenerApi.dispatch(serverBooksSynced({ serverUuid }))
+      listenerApi.dispatch(
+        localApi.util.invalidateTags([
+          "Books",
+          "Collections",
+          "Creators",
+          "Series",
+          "Servers",
+          "Tags",
+        ]),
+      )
+    }
+
     try {
       const server = await getServer(serverUuid)
       const lastListBooksResponse = await getLastListBooksResponse(serverUuid)
@@ -106,6 +122,7 @@ startAppListening({
         await trimDeletedServerBooks(serverBooks, serverUuid)
 
         await setLastListBooksResponse(serverUuid, serverBooks)
+        finishSync()
         return
       }
 
@@ -378,18 +395,7 @@ startAppListening({
 
       await trimDeletedServerBooks(serverBooks, serverUuid)
       await setLastListBooksResponse(serverUuid, serverBooks)
-      listenerApi.dispatch(serverBooksSynced({ serverUuid }))
-
-      listenerApi.dispatch(
-        localApi.util.invalidateTags([
-          "Books",
-          "Collections",
-          "Creators",
-          "Series",
-          "Servers",
-          "Tags",
-        ]),
-      )
+      finishSync()
     } finally {
       logger.debug("Done syncing book metadata from server")
       running.delete(serverUuid)

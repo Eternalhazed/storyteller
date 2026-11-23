@@ -84,7 +84,7 @@ export function LooksFinishedCard({ className }: LooksFinishedCardProps = {}) {
   return (
     <View
       className={cn(
-        "border-border bg-card w-full rounded-xl border p-4",
+        "border-border bg-card mr-safe-or-4 max-w-3xl rounded-xl border p-4",
         className,
       )}
     >

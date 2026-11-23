@@ -8,6 +8,7 @@ import { saveServerSession } from "@/auth/saveServerSession"
 import { logger } from "@/logger"
 import { useAppDispatch } from "@/store/appState"
 import { localApi } from "@/store/localApi"
+import { serverApi } from "@/store/serverApi"
 import { type UUID } from "@/uuid"
 
 import { Button } from "./ui/button"
@@ -16,18 +17,27 @@ import { Text } from "./ui/text"
 interface Props {
   serverUrl: string
   serverUuid?: UUID
+  /**
+   * Sign out the browser's web session first, so a different account can sign
+   * in. The token replaces the one stored for `serverUuid`, keeping this
+   * device's books and downloads.
+   */
+  switchAccount?: boolean
 }
 
-export function LoginButton({ serverUrl, serverUuid }: Props) {
+export function LoginButton({ serverUrl, serverUuid, switchAccount }: Props) {
   const router = useRouter()
   const dispatch = useAppDispatch()
   return (
     <Button
-      accessibilityLabel="Log in to server"
+      accessibilityLabel={switchAccount ? "Switch account" : "Log in to server"}
+      variant={switchAccount ? "secondary" : "default"}
+      className={switchAccount ? "my-2" : ""}
       size="flex"
       onPress={async () => {
         const redirectUrl = Linking.createURL("settings")
         const tokenUrl = new URL("/api/v2/token/app", serverUrl)
+        if (switchAccount) tokenUrl.searchParams.set("prompt", "login")
         const result = await WebBrowser.openAuthSessionAsync(
           tokenUrl.toString(),
           redirectUrl,
@@ -81,12 +91,14 @@ export function LoginButton({ serverUrl, serverUuid }: Props) {
           ...(serverUuid ? { serverUuid } : {}),
         })
 
+        // Cached server responses belong to the previous account.
+        if (switchAccount) dispatch(serverApi.util.resetApiState())
         dispatch(localApi.util.invalidateTags(["Servers"]))
 
         router.replace("settings")
       }}
     >
-      <Text>Login</Text>
+      <Text>{switchAccount ? "Switch account" : "Login"}</Text>
     </Button>
   )
 }

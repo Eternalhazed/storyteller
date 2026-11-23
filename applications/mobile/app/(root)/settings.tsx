@@ -72,6 +72,11 @@ export default function Settings() {
                       <>
                         <Text>Logged in as:</Text>
                         <Text>{server.username}</Text>
+                        <LoginButton
+                          serverUrl={homepageUrl.toString()}
+                          serverUuid={server.uuid}
+                          switchAccount
+                        />
                         <Button
                           accessibilityLabel={`Log out of ${serverUrl.hostname}`}
                           variant="secondary"

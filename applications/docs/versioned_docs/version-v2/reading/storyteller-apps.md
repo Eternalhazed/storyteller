@@ -27,6 +27,18 @@ your server URL in the app settings. This should be set to the URL for your
 server, it is the base URL in your invite (the URL minus the
 /invite/bunch-of-numbers part).
 
+### Switching to a different account
+
+To sign this device in as someone else on the same server, open Settings and tap
+**Switch account** under the server. The browser signs out of its current web
+session and asks for the other account's login. Books, downloads, and highlights
+stay on the device; the library, reading statuses, positions, and Shortlist
+switch to the new account. Books the new account cannot see are removed from the
+device.
+
+Avoid **Log out** for this: it removes the server and every book on it that is
+not downloaded, along with those books' highlights.
+
 ## Downloading books
 
 Once you are
