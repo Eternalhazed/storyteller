@@ -11,6 +11,11 @@ export const bookImported = createAction(
   (payload: { url: string; from: "home" | "open-with" }) => ({ payload }),
 )
 
+/** Book metadata and membership for this account have been persisted locally. */
+export const serverBooksSynced = createAction<{ serverUuid: UUID }>(
+  "serverBooksSynced",
+)
+
 export const bookDoubleTapped = createAction(
   "bookDoubleTapped",
   (payload: {

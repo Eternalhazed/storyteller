@@ -86,6 +86,48 @@ export function sameBookOrder(a: readonly UUID[], b: readonly UUID[]): boolean {
   return a.length === b.length && a.every((uuid, index) => uuid === b[index])
 }
 
+/**
+ * Replay this device's membership edits on fresh server state. A local reorder
+ * rearranges only surviving known-book slots; remote-only books keep their
+ * server order, and new local additions are appended in their local order.
+ */
+export function rebaseShelfBooks(
+  baseBookUuids: readonly UUID[],
+  localBookUuids: readonly UUID[],
+  remoteBookUuids: readonly UUID[],
+): UUID[] {
+  const base = new Set(baseBookUuids)
+  const local = new Set(localBookUuids)
+  const added = [...local].filter((uuid) => !base.has(uuid))
+  const addedSet = new Set(added)
+  const removed = new Set([...base].filter((uuid) => !local.has(uuid)))
+  const kept = [...new Set(remoteBookUuids)].filter(
+    (uuid) => !removed.has(uuid) && !addedSet.has(uuid),
+  )
+  const keptSet = new Set(kept)
+  const localKept = [...local].filter(
+    (uuid) => base.has(uuid) && keptSet.has(uuid),
+  )
+  const baseKept = [...base].filter(
+    (uuid) => local.has(uuid) && keptSet.has(uuid),
+  )
+  if (!sameBookOrder(localKept, baseKept)) {
+    const reordered = new Set(localKept)
+    let index = 0
+    for (let slot = 0; slot < kept.length; slot++) {
+      if (reordered.has(kept[slot]!)) kept[slot] = localKept[index++]!
+    }
+  }
+  return [...kept, ...added]
+}
+
+export function pruneShelfBooks(
+  bookUuids: readonly UUID[],
+  serverBookUuids: ReadonlySet<UUID>,
+): UUID[] {
+  return bookUuids.filter((uuid) => serverBookUuids.has(uuid))
+}
+
 /** Keep offline edits and stable local ids; drop only clean, remotely deleted rows. */
 export function mergePulledShelves(
   localShelves: readonly Shelf[],

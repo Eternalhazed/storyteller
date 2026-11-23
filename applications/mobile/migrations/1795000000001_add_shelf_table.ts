@@ -5,6 +5,7 @@ import { type Kysely, sql } from "kysely"
  * shelves built in the web app), so they work offline. `remote_uuid` is null
  * until a shelf created on this device has been saved on the server, and
  * `dirty` marks local membership changes that still need uploading.
+ * `synced_book_uuids` retains the merge base for edits from other devices.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
@@ -18,6 +19,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("kind", "text", (col) => col.notNull())
     .addColumn("position", "integer", (col) => col.notNull().defaultTo(0))
     .addColumn("book_uuids", "text", (col) => col.notNull().defaultTo("[]"))
+    .addColumn("synced_book_uuids", "text", (col) =>
+      col.notNull().defaultTo("[]"),
+    )
     .addColumn("dirty", "text", (col) => col.notNull().defaultTo("false"))
     .addColumn("created_at", "text", (col) =>
       col.notNull().defaultTo(sql`CURRENT_TIMESTAMP`),

@@ -5,6 +5,8 @@ import {
   applyShortlistChange,
   getShortlists,
   mergePulledShelves,
+  pruneShelfBooks,
+  rebaseShelfBooks,
   sameBookOrder,
 } from "@/store/shortlist"
 import { type UUID, randomUUID } from "@/uuid"
@@ -101,6 +103,55 @@ export async function changeShortlist({
   })
 }
 
+/**
+ * Persist orphan pruning without turning unacknowledged server additions into
+ * local intent. A failed push must be retried against the same merge base.
+ */
+export async function prepareShelfPush(
+  uuid: UUID,
+  remoteBookUuids: readonly UUID[] | null,
+) {
+  return db.transaction().execute(async (tr) => {
+    let snapshot = await getShelf(uuid, tr)
+    if (!snapshot || snapshot.dirty !== "true") return undefined
+    const serverBooks = new Set(
+      (
+        await tr
+          .selectFrom("book")
+          .select("uuid")
+          .where("serverUuid", "=", snapshot.serverUuid)
+          .execute()
+      ).map((book) => book.uuid),
+    )
+    // Fresh remote membership is FK-valid on this server even if another
+    // device added a book that has not reached this device's catalog yet.
+    if (remoteBookUuids) {
+      for (const bookUuid of remoteBookUuids) serverBooks.add(bookUuid)
+    }
+    const pruned = pruneShelfBooks(snapshot.bookUuids, serverBooks)
+    if (!sameBookOrder(pruned, snapshot.bookUuids)) {
+      snapshot = await tr
+        .updateTable("shelf")
+        .set({
+          bookUuids: storedBooks(pruned),
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        })
+        .where("uuid", "=", uuid)
+        .returningAll()
+        .executeTakeFirstOrThrow()
+    }
+    const bookUuids =
+      remoteBookUuids === null
+        ? snapshot.bookUuids
+        : rebaseShelfBooks(
+            snapshot.syncedBookUuids,
+            snapshot.bookUuids,
+            remoteBookUuids,
+          )
+    return { snapshot, bookUuids }
+  })
+}
+
 /** Adopt an already-existing server Shortlist instead of creating a duplicate. */
 export async function bindShelfToRemote(uuid: UUID, remote: Shelf) {
   return db.transaction().execute(async (tr) => {
@@ -109,17 +160,15 @@ export async function bindShelfToRemote(uuid: UUID, remote: Shelf) {
     const cachedRemote = (await getShelves(local.serverUuid, tr)).find(
       (shelf) => shelf.remoteUuid === remote.remoteUuid && shelf.uuid !== uuid,
     )
-    // On first use, or when adopting an older duplicate, retain the canonical
-    // shelf's books as well as additions made against the previous local list.
-    const bookUuids =
-      local.remoteUuid !== remote.remoteUuid
-        ? [
-            ...new Set([
-              ...(cachedRemote?.bookUuids ?? remote.bookUuids),
-              ...local.bookUuids,
-            ]),
-          ]
-        : local.bookUuids
+    // A different remote shelf has a different merge base. Only its cached
+    // local intent can be inherited; fresh remote additions are merged at PUT.
+    const changingRemote = local.remoteUuid !== remote.remoteUuid
+    const bookUuids = changingRemote
+      ? [...new Set([...(cachedRemote?.bookUuids ?? []), ...local.bookUuids])]
+      : local.bookUuids
+    const syncedBookUuids = changingRemote
+      ? (cachedRemote?.syncedBookUuids ?? [])
+      : local.syncedBookUuids
     if (cachedRemote) {
       await tr
         .deleteFrom("shelf")
@@ -134,6 +183,7 @@ export async function bindShelfToRemote(uuid: UUID, remote: Shelf) {
         position: remote.position,
         createdAt: remote.createdAt,
         bookUuids: storedBooks(bookUuids),
+        syncedBookUuids: storedBooks(syncedBookUuids),
         dirty: "true",
         updatedAt: sql`CURRENT_TIMESTAMP`,
       })
@@ -148,14 +198,19 @@ export async function acknowledgeShelfPush(snapshot: Shelf, remote: Shelf) {
   await db.transaction().execute(async (tr) => {
     const latest = await getShelf(snapshot.uuid, tr)
     if (!latest) return
+    const bookUuids = rebaseShelfBooks(
+      snapshot.bookUuids,
+      latest.bookUuids,
+      remote.bookUuids,
+    )
     await tr
       .updateTable("shelf")
       .set({
         remoteUuid: remote.remoteUuid,
         createdAt: remote.createdAt,
-        dirty: sameBookOrder(latest.bookUuids, snapshot.bookUuids)
-          ? "false"
-          : "true",
+        bookUuids: storedBooks(bookUuids),
+        syncedBookUuids: storedBooks(remote.bookUuids),
+        dirty: sameBookOrder(bookUuids, remote.bookUuids) ? "false" : "true",
       })
       .where("uuid", "=", snapshot.uuid)
       .execute()
@@ -180,7 +235,11 @@ export async function applyShelfPull(serverUuid: UUID, pulledShelves: Shelf[]) {
     }
     for (const shelf of merged) {
       if (shelf.dirty === "true") continue
-      const values = { ...shelf, bookUuids: storedBooks(shelf.bookUuids) }
+      const values = {
+        ...shelf,
+        bookUuids: storedBooks(shelf.bookUuids),
+        syncedBookUuids: storedBooks(shelf.syncedBookUuids),
+      }
       await tr
         .insertInto("shelf")
         .values(values)

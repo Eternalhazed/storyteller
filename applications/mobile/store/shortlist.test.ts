@@ -11,6 +11,8 @@ import {
   isShortlistShelf,
   mergePulledShelves,
   moveShortlistBook,
+  pruneShelfBooks,
+  rebaseShelfBooks,
   removeFromShortlist,
   sameBookOrder,
   shouldRemoveFromShortlist,
@@ -32,6 +34,7 @@ function shelf(overrides: Partial<Shelf> = {}): Shelf {
     kind: "manual",
     position: 0,
     bookUuids: [a, b],
+    syncedBookUuids: [a, b],
     dirty: "false",
     createdAt: "2026-01-01 00:00:00",
     updatedAt: "2026-01-01 00:00:00",
@@ -115,6 +118,7 @@ test("pulling clean shelves replaces membership, order and metadata but preserve
     uuid: c,
     name: "Next",
     bookUuids: [c, a],
+    syncedBookUuids: [c, a],
     position: 4,
   })
   assert.deepEqual(mergePulledShelves([local], [pulled]), [
@@ -125,7 +129,12 @@ test("pulling clean shelves replaces membership, order and metadata but preserve
 
 test("pulling never overwrites dirty membership, order or metadata", () => {
   const local = shelf({ bookUuids: [c, a], dirty: "true" })
-  const pulled = shelf({ uuid: b, bookUuids: [], name: "Changed on server" })
+  const pulled = shelf({
+    uuid: b,
+    bookUuids: [],
+    syncedBookUuids: [],
+    name: "Changed on server",
+  })
   assert.equal(mergePulledShelves([local], [pulled])[0], local)
 })
 
@@ -181,4 +190,104 @@ test("a pending offline list stays visible until it is adopted by the server she
   const remote = shelf()
   assert.deepEqual(getShortlists([remote, pending]), [pending])
   assert.deepEqual(getShortlists([pending, remote]), [pending])
+})
+
+test("rebasing preserves remote additions while applying local additions", () => {
+  assert.deepEqual(rebaseShelfBooks([a], [a, b], [a, c]), [a, c, b])
+})
+
+test("rebasing preserves remote removals instead of resurrecting unchanged local books", () => {
+  assert.deepEqual(rebaseShelfBooks([a, b], [a, b, c], [a]), [a, c])
+})
+
+test("rebasing applies local removals without removing books added on the server", () => {
+  assert.deepEqual(rebaseShelfBooks([a, b], [b], [c, a, b]), [c, b])
+})
+
+test("rebasing keeps server reordering when local membership changed but order did not", () => {
+  assert.deepEqual(rebaseShelfBooks([a, b, c], [a, c], [c, b, a, server]), [
+    c,
+    a,
+    server,
+  ])
+})
+
+test("rebasing applies local reordering within kept slots without reordering remote-only books", () => {
+  assert.deepEqual(
+    rebaseShelfBooks([a, b, c], [c, a, b], [a, server, b, otherServer, c]),
+    [c, server, a, otherServer, b],
+  )
+})
+
+test("rebasing appends new local books once in local order even if another device also added them", () => {
+  assert.deepEqual(rebaseShelfBooks([a], [c, a, b], [b, a, server, c]), [
+    a,
+    server,
+    c,
+    b,
+  ])
+})
+
+test("rebasing an offline first-use list preserves the existing server shelf", () => {
+  assert.deepEqual(rebaseShelfBooks([], [c], [a, b]), [a, b, c])
+})
+
+test("rebasing no-op edits preserves the remote order", () => {
+  assert.deepEqual(rebaseShelfBooks([a, b], [a, b], [b, c, a]), [b, c, a])
+})
+
+test("rebasing concurrent removals can empty the shelf without restoring deleted entries", () => {
+  assert.deepEqual(rebaseShelfBooks([a, b], [b], [a]), [])
+})
+
+test("rebasing a pruned local list removes deleted or foreign server-book ids", () => {
+  const serverBooks = new Set<UUID>([a, c])
+  const local = pruneShelfBooks([a, b, server], serverBooks)
+  const remote = pruneShelfBooks([a, b, c], serverBooks)
+  assert.deepEqual(rebaseShelfBooks([a, b], local, remote), [a, c])
+})
+
+test("rebasing retries the same offline intent without treating remote additions as local edits", () => {
+  const base = [a]
+  const local = [a, b]
+  assert.deepEqual(rebaseShelfBooks(base, local, [a, c]), [a, c, b])
+  assert.deepEqual(rebaseShelfBooks(base, local, [a]), [a, b])
+})
+
+test("acknowledgment rebasing preserves an edit made while a push was in flight", () => {
+  const snapshot = [a, b]
+  const latest = [b, server]
+  const saved = [a, c, b]
+  assert.deepEqual(rebaseShelfBooks(snapshot, latest, saved), [c, b, server])
+})
+
+test("acknowledgment rebasing accepts the server result unchanged when there were no in-flight edits", () => {
+  const snapshot = [a, b]
+  const saved = [a, c, b]
+  assert.deepEqual(rebaseShelfBooks(snapshot, snapshot, saved), saved)
+})
+
+test("rebasing deduplicates inputs and never mutates snapshots", () => {
+  const base = Object.freeze([a, a])
+  const local = Object.freeze([a, b, b])
+  const remote = Object.freeze([c, a, c, b])
+  assert.deepEqual(rebaseShelfBooks(base, local, remote), [c, a, b])
+  assert.deepEqual(base, [a, a])
+  assert.deepEqual(local, [a, b, b])
+  assert.deepEqual(remote, [c, a, c, b])
+})
+
+test("pruning preserves server-book order without mutating the cached list", () => {
+  const cached = Object.freeze([c, a, b, server])
+  assert.deepEqual(pruneShelfBooks(cached, new Set<UUID>([a, c])), [c, a])
+  assert.deepEqual(cached, [c, a, b, server])
+  assert.deepEqual(pruneShelfBooks(cached, new Set<UUID>()), [])
+})
+
+test("pruning retains fresh remote books that have not reached the local catalog", () => {
+  const remote = [a, c]
+  const knownServerBooks = new Set<UUID>([a, ...remote])
+  const local = pruneShelfBooks([a, b, c], knownServerBooks)
+  assert.deepEqual(local, [a, c])
+  assert.deepEqual(rebaseShelfBooks([a, c], local, remote), [a, c])
 })

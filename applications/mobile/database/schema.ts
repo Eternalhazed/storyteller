@@ -225,6 +225,8 @@ export interface Shelf {
   position: Generated<number>
   /** Ordered book uuids, stored as JSON. */
   bookUuids: Generated<UUID[]>
+  /** Last successfully synced membership, used to rebase offline edits. */
+  syncedBookUuids: Generated<UUID[]>
   dirty: Generated<"true" | "false">
   createdAt: Generated<string>
   updatedAt: Generated<string>

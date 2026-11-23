@@ -25,6 +25,7 @@ import {
 } from "@/database/servers"
 import { deepEquals } from "@/deepEquals"
 import { logger } from "@/logger"
+import { serverBooksSynced } from "@/store/actions"
 import { localApi } from "@/store/localApi"
 import {
   getLocalAudioBookCoverUrl,
@@ -377,6 +378,7 @@ startAppListening({
 
       await trimDeletedServerBooks(serverBooks, serverUuid)
       await setLastListBooksResponse(serverUuid, serverBooks)
+      listenerApi.dispatch(serverBooksSynced({ serverUuid }))
 
       listenerApi.dispatch(
         localApi.util.invalidateTags([

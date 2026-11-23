@@ -84,7 +84,7 @@ test("offers progress made on another device, flagged for download", () => {
   const elsewhere = {
     ...reading,
     ebook: { downloadStatus: "NONE" },
-    readaloud: { downloadStatus: "NONE" },
+    readaloud: { downloadStatus: "NONE", status: "ALIGNED" },
     audiobook: { downloadStatus: "NONE" },
   }
   assert.deepEqual(getContinueReading([elsewhere], null), {
@@ -94,15 +94,47 @@ test("offers progress made on another device, flagged for download", () => {
   })
 })
 
+test("falls back to the ebook while the read-along is still syncing", () => {
+  const syncing = {
+    ...reading,
+    ebook: { downloadStatus: "NONE" },
+    readaloud: { downloadStatus: "NONE", status: "PROCESSING" },
+  }
+  const result = getContinueReading([syncing], null)
+  assert.equal(result?.session.format, "ebook")
+  assert.equal(result?.needsDownload, true)
+})
+
+test("uses a downloaded read-along for audiobook progress", () => {
+  const covered = {
+    ...listening,
+    audiobook: { downloadStatus: "NONE" },
+    readaloud: downloaded,
+  }
+  const result = getContinueReading([covered], null)
+  assert.deepEqual(result?.session, {
+    bookUuid: b,
+    mode: "listening",
+    format: "readaloud",
+  })
+  assert.equal(result?.needsDownload, false)
+})
+
 test("prefers a downloaded format over one that still needs downloading", () => {
-  const ebookOnly = { ...reading, readaloud: { downloadStatus: "NONE" } }
+  const ebookOnly = {
+    ...reading,
+    readaloud: { downloadStatus: "NONE", status: "ALIGNED" },
+  }
   const result = getContinueReading([ebookOnly], null)
   assert.equal(result?.session.format, "ebook")
   assert.equal(result?.needsDownload, false)
 })
 
 test("keeps a remembered format that was removed from this device, for download", () => {
-  const removed = { ...reading, readaloud: { downloadStatus: "NONE" } }
+  const removed = {
+    ...reading,
+    readaloud: { downloadStatus: "NONE", status: "ALIGNED" },
+  }
   const result = getContinueReading([removed], {
     bookUuid: a,
     mode: "listening",

@@ -251,7 +251,14 @@ export default function BookDetailsScreen() {
                       shortlist.add(book.uuid)
                       return
                     }
-                    if (shortlisted) shortlist.remove(book.uuid)
+                    // Leaving "Shortlist" for plain "To read" unflags the book;
+                    // Reading and Read follow the Shortlist setting instead.
+                    const chosen = statuses?.find(
+                      (status) => status.uuid === option.value,
+                    )
+                    if (shortlisted && chosen?.name === "To read") {
+                      shortlist.remove(book.uuid)
+                    }
                     updateStatus({
                       bookUuid: book.uuid,
                       statusUuid: option.value as UUID,

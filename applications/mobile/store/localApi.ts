@@ -150,6 +150,7 @@ export const localApi = createApi({
                 position:
                   Math.max(-1, ...draft.map((shelf) => shelf.position)) + 1,
                 bookUuids: [bookUuid],
+                syncedBookUuids: [],
                 dirty: "true",
                 createdAt: now,
                 updatedAt: now,

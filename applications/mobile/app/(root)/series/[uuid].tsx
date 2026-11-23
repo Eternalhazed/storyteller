@@ -1,5 +1,5 @@
 import { Link, Stack as RouterStack, useLocalSearchParams } from "expo-router"
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { FlatList, View } from "react-native"
 
 import { BackButton } from "@/components/BackButton"
@@ -23,7 +23,6 @@ import { Button } from "@/components/ui/button"
 import { Text } from "@/components/ui/text"
 import type { BookWithRelations } from "@/database/books"
 import { describeError } from "@/describeError"
-import { useSeriesProgress } from "@/hooks/useSeriesProgress"
 import { usesSystemHeader } from "@/lib/nativeChrome"
 import { cn } from "@/lib/utils"
 import {
@@ -32,14 +31,19 @@ import {
   useListStatusesQuery,
   useUpdateStatusMutation,
 } from "@/store/localApi"
+import { getSeriesProgressByUuid } from "@/store/seriesProgress"
 import type { UUID } from "@/uuid"
+
+const EMPTY_BOOKS: BookWithRelations[] = []
 
 export default function SeriesScreen() {
   const { uuid } = useLocalSearchParams() as { uuid: UUID }
-  const allSeries = useSeriesProgress()
-  const series = allSeries.find((entry) => entry.uuid === uuid)
+  const { data: books = EMPTY_BOOKS, isLoading } = useListBooksQuery()
+  const series = useMemo(
+    () => getSeriesProgressByUuid(books, uuid),
+    [books, uuid],
+  )
   const { data: metadata } = useGetSeriesQuery({ uuid })
-  const { isLoading } = useListBooksQuery()
   const { data: statuses } = useListStatusesQuery()
   const [updateStatus] = useUpdateStatusMutation()
   const [confirmBooks, setConfirmBooks] = useState<BookWithRelations[]>([])

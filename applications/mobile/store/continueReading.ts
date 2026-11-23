@@ -15,7 +15,7 @@ type ContinueBook = {
   status: { name: string } | null
   position: { timestamp: number; locator: ReadiumLocator } | null
   ebook: Download
-  readaloud: Download
+  readaloud: (Download & { status?: string | null }) | null
   audiobook: Download
 }
 
@@ -28,6 +28,35 @@ export type ContinueCandidate<Book> = {
 
 function isDownloaded(download: Download) {
   return download?.downloadStatus === "DOWNLOADED"
+}
+
+/** A read-along can only be downloaded once it has finished syncing. */
+function canDownloadReadaloud(book: ContinueBook) {
+  return book.readaloud?.status === "ALIGNED"
+}
+
+/**
+ * The session that continues `wanted` on this device. A downloaded read-along
+ * holds both the text and the audio, so it stands in for a missing ebook or
+ * audiobook (which can't be downloaded alongside it). Null when nothing usable
+ * is on the device or downloadable.
+ */
+function resolve(
+  book: ContinueBook,
+  wanted: ReadingSession,
+): Omit<ContinueCandidate<ContinueBook>, "book"> | null {
+  if (isDownloaded(book[wanted.format])) {
+    return { session: wanted, needsDownload: false }
+  }
+  if (wanted.format !== "readaloud" && isDownloaded(book.readaloud)) {
+    return {
+      session: { ...wanted, format: "readaloud" } as ReadingSession,
+      needsDownload: false,
+    }
+  }
+  if (!book[wanted.format]) return null
+  if (wanted.format === "readaloud" && !canDownloadReadaloud(book)) return null
+  return { session: wanted, needsDownload: true }
 }
 
 /**
@@ -45,14 +74,8 @@ export function getContinueReading<Book extends ContinueBook>(
   for (const book of books) {
     if (book.status?.name === "Read") continue
     if (book.uuid === remembered?.bookUuid) {
-      const download = book[remembered.format]
-      if (download) {
-        return {
-          book,
-          session: remembered,
-          needsDownload: !isDownloaded(download),
-        }
-      }
+      const resolved = resolve(book, remembered)
+      if (resolved) return { book, ...resolved }
       // Do not silently replace a known reading or listening format.
       continue
     }
@@ -68,28 +91,32 @@ export function getContinueReading<Book extends ContinueBook>(
       continue
     }
 
-    let session: ReadingSession
-    let needsDownload: boolean
-    if (isStandaloneAudiobookLocator(locator)) {
-      if (!book.audiobook) continue
-      session = { bookUuid: book.uuid, mode: "listening", format: "audiobook" }
-      needsDownload = !isDownloaded(book.audiobook)
-    } else {
-      const format = isDownloaded(book.readaloud)
-        ? "readaloud"
-        : isDownloaded(book.ebook)
-          ? "ebook"
-          : book.readaloud
-            ? "readaloud"
-            : book.ebook
-              ? "ebook"
-              : null
-      if (!format) continue
-      session = { bookUuid: book.uuid, mode: "reading", format }
-      needsDownload = !isDownloaded(book[format])
-    }
+    const resolved = isStandaloneAudiobookLocator(locator)
+      ? resolve(book, {
+          bookUuid: book.uuid,
+          mode: "listening",
+          format: "audiobook",
+        })
+      : isDownloaded(book.readaloud) || isDownloaded(book.ebook)
+        ? resolve(book, {
+            bookUuid: book.uuid,
+            mode: "reading",
+            format: isDownloaded(book.readaloud) ? "readaloud" : "ebook",
+          })
+        : canDownloadReadaloud(book)
+          ? resolve(book, {
+              bookUuid: book.uuid,
+              mode: "reading",
+              format: "readaloud",
+            })
+          : resolve(book, {
+              bookUuid: book.uuid,
+              mode: "reading",
+              format: "ebook",
+            })
+    if (!resolved) continue
 
-    candidate = { book, session, needsDownload }
+    candidate = { book, ...resolved }
     latest = position.timestamp
   }
 

@@ -9,9 +9,11 @@ import {
   bindShelfToRemote,
   getShelf,
   getShelves,
+  prepareShelfPush,
 } from "@/database/shelves"
 import { getStatus } from "@/database/statuses"
 import { logger } from "@/logger"
+import { serverBooksSynced } from "@/store/actions"
 import { type AppDispatch } from "@/store/appState"
 import { localApi } from "@/store/localApi"
 import { type ServerShelf, serverApi } from "@/store/serverApi"
@@ -29,6 +31,9 @@ function cachedShelf(
   serverUuid: UUID,
   position: number,
 ): Shelf {
+  const bookUuids = [...remote.books]
+    .sort((a, b) => a.position - b.position)
+    .map((book) => book.bookUuid)
   return {
     uuid: randomUUID(),
     remoteUuid: remote.uuid,
@@ -39,9 +44,8 @@ function cachedShelf(
         ? "smart"
         : "manual",
     position,
-    bookUuids: [...remote.books]
-      .sort((a, b) => a.position - b.position)
-      .map((book) => book.bookUuid),
+    bookUuids,
+    syncedBookUuids: bookUuids,
     dirty: "false",
     createdAt: remote.createdAt,
     updatedAt: remote.updatedAt,
@@ -63,73 +67,107 @@ async function syncServerShelves(serverUuid: UUID, dispatch: AppDispatch) {
   for (const dirty of (await getShelves(serverUuid)).filter(
     (shelf) => shelf.dirty === "true",
   )) {
-    let snapshot = await getShelf(dirty.uuid)
-    if (!snapshot || snapshot.dirty !== "true") continue
-    const remoteUuid = snapshot.remoteUuid
-    let remoteIndex = remoteShelves.findIndex(
-      (remote) => remote.uuid === remoteUuid,
-    )
+    try {
+      let snapshot = await getShelf(dirty.uuid)
+      if (!snapshot || snapshot.dirty !== "true") continue
+      const remoteUuid = snapshot.remoteUuid
+      let remoteIndex = remoteShelves.findIndex(
+        (remote) => remote.uuid === remoteUuid,
+      )
 
-    if (isShortlistShelf(snapshot)) {
-      const existing = getShortlists(
-        remoteShelves.map((remote, index) =>
-          cachedShelf(remote, serverUuid, index),
-        ),
-      )[0]
-      if (existing) {
-        if (snapshot.remoteUuid !== existing.remoteUuid) {
-          snapshot = await bindShelfToRemote(snapshot.uuid, existing)
-          if (!snapshot) continue
+      if (isShortlistShelf(snapshot)) {
+        const existing = getShortlists(
+          remoteShelves.map((remote, index) =>
+            cachedShelf(remote, serverUuid, index),
+          ),
+        )[0]
+        if (existing) {
+          if (snapshot.remoteUuid !== existing.remoteUuid) {
+            snapshot = await bindShelfToRemote(snapshot.uuid, existing)
+            if (!snapshot) continue
+          }
+          remoteIndex = remoteShelves.findIndex(
+            (remote) => remote.uuid === existing.remoteUuid,
+          )
+        } else {
+          // A renamed/deleted shelf is no longer the account's Shortlist.
+          remoteIndex = -1
         }
-        remoteIndex = remoteShelves.findIndex(
-          (remote) => remote.uuid === existing.remoteUuid,
-        )
-      } else {
-        // A renamed/deleted shelf is no longer the account's Shortlist.
-        remoteIndex = -1
       }
-    }
 
-    let saved: ServerShelf
-    if (remoteIndex === -1) {
-      saved = await dispatch(
-        serverApi.endpoints.createShelf.initiate(
-          { serverUuid, name: snapshot.name, books: snapshot.bookUuids },
-          { track: false },
-        ),
-      ).unwrap()
-      remoteIndex = remoteShelves.length
-      remoteShelves.push(saved)
-    } else {
-      saved = await dispatch(
-        serverApi.endpoints.updateShelfBooks.initiate(
-          {
-            serverUuid,
-            shelfUuid: remoteShelves[remoteIndex]!.uuid,
-            books: snapshot.bookUuids,
-          },
-          { track: false },
-        ),
-      ).unwrap()
-      remoteShelves[remoteIndex] = saved
+      const remoteBookUuids =
+        remoteIndex === -1
+          ? null
+          : cachedShelf(remoteShelves[remoteIndex]!, serverUuid, remoteIndex)
+              .bookUuids
+      const prepared = await prepareShelfPush(snapshot.uuid, remoteBookUuids)
+      if (!prepared) continue
+      snapshot = prepared.snapshot
+
+      let saved: ServerShelf
+      if (remoteIndex === -1) {
+        saved = await dispatch(
+          serverApi.endpoints.createShelf.initiate(
+            { serverUuid, name: snapshot.name, books: prepared.bookUuids },
+            { track: false },
+          ),
+        ).unwrap()
+        remoteIndex = remoteShelves.length
+        remoteShelves.push(saved)
+      } else {
+        saved = await dispatch(
+          serverApi.endpoints.updateShelfBooks.initiate(
+            {
+              serverUuid,
+              shelfUuid: remoteShelves[remoteIndex]!.uuid,
+              books: prepared.bookUuids,
+            },
+            { track: false },
+          ),
+        ).unwrap()
+        remoteShelves[remoteIndex] = saved
+      }
+      await acknowledgeShelfPush(
+        snapshot,
+        cachedShelf(saved, serverUuid, remoteIndex),
+      )
+    } catch (error) {
+      logger.warn(`Could not push shelf ${dirty.uuid} for ${serverUuid}`, error)
     }
-    await acknowledgeShelfPush(
-      snapshot,
-      cachedShelf(saved, serverUuid, remoteIndex),
-    )
   }
 
+  const cached = new Map(
+    (await getShelves(serverUuid)).map((shelf) => [shelf.remoteUuid, shelf]),
+  )
   const pulled = await Promise.all(
     remoteShelves.map(async (remote, index) => {
       const shelf = cachedShelf(remote, serverUuid, index)
       if (shelf.kind === "smart") {
-        const books = await dispatch(
-          serverApi.endpoints.getShelfBooks.initiate(
-            { serverUuid, shelfUuid: remote.uuid, limit: 50 },
-            { subscribe: false, forceRefetch: true },
-          ),
-        ).unwrap()
-        shelf.bookUuids = books.slice(0, 50).map((book) => book.uuid)
+        const previous = cached.get(remote.uuid)
+        shelf.bookUuids = previous?.bookUuids ?? []
+        shelf.syncedBookUuids = previous?.syncedBookUuids ?? []
+        if (remote.filterIssues?.length) {
+          logger.warn(
+            `Skipping invalid smart shelf ${remote.uuid} for ${serverUuid}`,
+            remote.filterIssues,
+          )
+          return shelf
+        }
+        try {
+          const books = await dispatch(
+            serverApi.endpoints.getShelfBooks.initiate(
+              { serverUuid, shelfUuid: remote.uuid, limit: 50 },
+              { subscribe: false, forceRefetch: true },
+            ),
+          ).unwrap()
+          shelf.bookUuids = books.slice(0, 50).map((book) => book.uuid)
+          shelf.syncedBookUuids = shelf.bookUuids
+        } catch (error) {
+          logger.warn(
+            `Keeping cached smart shelf ${remote.uuid} for ${serverUuid}`,
+            error,
+          )
+        }
       }
       return shelf
     }),
@@ -157,9 +195,7 @@ async function requestShelfSync(serverUuid: UUID, dispatch: AppDispatch) {
       try {
         await syncServerShelves(serverUuid, dispatch)
       } catch (error) {
-        logger.debug(
-          `Keeping cached shelves for ${serverUuid}: ${String(error)}`,
-        )
+        logger.warn(`Keeping cached shelves for ${serverUuid}`, error)
       }
       dispatch(localApi.util.invalidateTags(["Shelves"]))
     } while (run.again)
@@ -170,14 +206,14 @@ async function requestShelfSync(serverUuid: UUID, dispatch: AppDispatch) {
 
 startAppListening({
   matcher: isAnyOf(
-    serverApi.endpoints.listBooks.matchFulfilled,
+    serverBooksSynced,
     localApi.endpoints.updateShortlist.matchFulfilled,
   ),
   effect: async (action, { dispatch }) => {
-    // listBooks fulfillment is the refresh signal shared by Home, grids and
-    // useListAllServerBooks. Shelf membership does not require imported books.
-    if (serverApi.endpoints.listBooks.matchFulfilled(action)) {
-      await requestShelfSync(action.meta.arg.originalArgs.serverUuid, dispatch)
+    // Wait for successful metadata persistence before pulling shelves, so the
+    // push path can prune against the refreshed account's local book rows.
+    if (serverBooksSynced.match(action)) {
+      await requestShelfSync(action.payload.serverUuid, dispatch)
     } else if (
       localApi.endpoints.updateShortlist.matchFulfilled(action) &&
       action.payload?.dirty === "true"

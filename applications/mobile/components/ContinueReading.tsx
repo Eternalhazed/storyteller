@@ -126,10 +126,11 @@ export function ContinueReading({
         )}
         <View className="flex-row flex-wrap gap-2">
           {needsDownload ? (
-            downloading ? (
+            downloadState?.action !== "download" &&
+            downloadState?.action !== "retry" ? (
               <Text className="text-muted-foreground py-2 text-sm">
-                {downloadState.label}
-                {openWhenReady ? " — opens when ready" : ""}
+                {downloadState?.label}
+                {downloading && openWhenReady ? " — opens when ready" : ""}
               </Text>
             ) : (
               <Button
