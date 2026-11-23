@@ -63,6 +63,7 @@ import {
   getServer,
   getServers,
 } from "@/database/servers"
+import { type Shelf, changeShortlist, getShelves } from "@/database/shelves"
 import { type Status, getStatus, getStatuses } from "@/database/statuses"
 import { type Tag, getTag } from "@/database/tags"
 import { deepEquals } from "@/deepEquals"
@@ -70,9 +71,14 @@ import {
   type ReadiumClip,
   type ReadiumLocator,
 } from "@/modules/readium/src/Readium.types"
-import { type UUID } from "@/uuid"
+import { type UUID, randomUUID } from "@/uuid"
 
 import { downloadLifecycle } from "./downloadLifecycle"
+import {
+  type ShortlistChange,
+  applyShortlistChange,
+  getShortlists,
+} from "./shortlist"
 import { deleteLocalBookFiles } from "./persistence/files"
 import {
   readLocalBookXray,
@@ -100,8 +106,62 @@ export const localApi = createApi({
     "Series",
     "Tags",
     "Xray",
+    "Shelves",
   ],
   endpoints: (build) => ({
+    listShelves: build.query<Shelf[], void>({
+      async queryFn() {
+        return { data: await getShelves() }
+      },
+      providesTags: ["Shelves"],
+    }),
+    updateShortlist: build.mutation<
+      Shelf | null,
+      { bookUuid: UUID; serverUuid: UUID; change: ShortlistChange }
+    >({
+      async queryFn(args) {
+        try {
+          return { data: await changeShortlist(args) }
+        } catch (error) {
+          return { error: String(error) }
+        }
+      },
+      onQueryStarted({ bookUuid, serverUuid, change }, { dispatch }) {
+        dispatch(
+          localApi.util.updateQueryData("listShelves", undefined, (draft) => {
+            const shortlist = getShortlists(draft).find(
+              (shelf) => shelf.serverUuid === serverUuid,
+            )
+            if (shortlist) {
+              shortlist.bookUuids = applyShortlistChange(
+                shortlist.bookUuids,
+                bookUuid,
+                change,
+              )
+              shortlist.dirty = "true"
+            } else if (change === "add" || change === "toggle") {
+              const now = new Date().toISOString()
+              draft.push({
+                uuid: randomUUID(),
+                remoteUuid: null,
+                serverUuid,
+                name: "Shortlist",
+                kind: "manual",
+                position:
+                  Math.max(-1, ...draft.map((shelf) => shelf.position)) + 1,
+                bookUuids: [bookUuid],
+                dirty: "true",
+                createdAt: now,
+                updatedAt: now,
+              })
+            }
+          }),
+        )
+      },
+      // Refetch persisted state on both success and failure. Unlike undoing an
+      // optimistic patch, this cannot roll back a newer overlapping edit.
+      invalidatesTags: ["Shelves"],
+    }),
     getServerAccessToken: build.query<string | null, { serverUuid: UUID }>({
       async queryFn({ serverUuid }) {
         return {
@@ -740,11 +800,13 @@ export const {
   useListCollectionsQuery,
   useListStatusesQuery,
   useListServersQuery,
+  useListShelvesQuery,
   useSetBookPreferencesAsDefaultsMutation,
   useUpdateBookPreferenceMutation,
   useUpdateGlobalPreferenceMutation,
   useUpdateHighlightMutation,
   useUpdateStatusMutation,
+  useUpdateShortlistMutation,
 } = localApi
 
 function compareLocators(a: ReadiumLocator, b: ReadiumLocator) {

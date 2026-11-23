@@ -43,6 +43,15 @@ export default function ModalLayout() {
           ...javaScriptBackButton(),
         }}
       />
+      <Stack.Screen
+        name="customize-home"
+        options={{
+          headerShown: true,
+          headerShadowVisible: false,
+          title: "Customize home",
+          ...javaScriptBackButton(),
+        }}
+      />
       <Stack.Screen name="read/[uuid]" options={{ gestureEnabled: false }} />
       <Stack.Screen
         name="navigation-menu"
@@ -85,7 +94,9 @@ export default function ModalLayout() {
         options={{ headerShown: usesSystemHeader, title: "" }}
       />
       <Stack.Screen name="shelf/[type]" />
+      <Stack.Screen name="shortlist" />
       <Stack.Screen name="author/[uuid]" />
+      <Stack.Screen name="series/index" />
       <Stack.Screen
         name="server"
         options={{

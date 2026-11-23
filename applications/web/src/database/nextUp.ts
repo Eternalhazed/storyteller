@@ -4,7 +4,7 @@ import { type UUID } from "@/uuid"
 
 import { type BookWithRelations, getBooks } from "./books"
 import { db } from "./connection"
-import { STATUS_READ, STATUS_READING, STATUS_TO_READ } from "./statusKinds"
+import { STATUS_READ, STATUS_READING } from "./statusKinds"
 
 export async function getNextUpInSeries(
   userId: UUID,
@@ -33,6 +33,16 @@ export async function getNextUpInSeries(
           "bookToSeries.seriesUuid",
           eb.fn.max("position.timestamp").as("lastReadAt"),
           eb.fn.max("bookToStatus.updatedAt").as("lastStatusAt"),
+          eb.fn
+            .max(
+              eb
+                .case()
+                .when("status.name", "=", STATUS_READ)
+                .then(eb.ref("bookToSeries.position"))
+                .else(null)
+                .end(),
+            )
+            .as("furthestRead"),
         ])
         .groupBy("bookToSeries.seriesUuid"),
     )
@@ -44,15 +54,30 @@ export async function getNextUpInSeries(
           "readingSeries.seriesUuid",
           "bookToSeries.seriesUuid",
         )
-        .innerJoin(
-          "bookToStatus",
-          "bookToStatus.bookUuid",
-          "bookToSeries.bookUuid",
+        .leftJoin("bookToStatus", (join) =>
+          join
+            .onRef("bookToStatus.bookUuid", "=", "bookToSeries.bookUuid")
+            .on("bookToStatus.userId", "=", userId),
         )
-        .innerJoin("status", "status.uuid", "bookToStatus.statusUuid")
+        .leftJoin("status", "status.uuid", "bookToStatus.statusUuid")
         .innerJoin("book", "book.uuid", "bookToSeries.bookUuid")
-        .where("bookToStatus.userId", "=", userId)
-        .where("status.name", "=", STATUS_TO_READ)
+        .where((eb) =>
+          eb.or([
+            eb("status.name", "is", null),
+            eb("status.name", "!=", STATUS_READ),
+          ]),
+        )
+        .where("bookToSeries.position", "is not", null)
+        .where((eb) =>
+          eb.or([
+            eb("readingSeries.furthestRead", "is", null),
+            eb(
+              "bookToSeries.position",
+              ">",
+              eb.ref("readingSeries.furthestRead"),
+            ),
+          ]),
+        )
         .select((eb) => [
           "bookToSeries.bookUuid",
           "readingSeries.lastReadAt",

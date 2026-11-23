@@ -215,6 +215,21 @@ export interface Preferences {
   value: string
 }
 
+export interface Shelf {
+  uuid: UUID
+  /** The shelf's uuid on the server; null until a local shelf is saved there. */
+  remoteUuid: UUID | null
+  serverUuid: UUID
+  name: string
+  kind: "manual" | "smart"
+  position: Generated<number>
+  /** Ordered book uuids, stored as JSON. */
+  bookUuids: Generated<UUID[]>
+  dirty: Generated<"true" | "false">
+  createdAt: Generated<string>
+  updatedAt: Generated<string>
+}
+
 export interface Status {
   createdAt: Generated<string>
   isDefault: Generated<"true" | "false">
@@ -250,6 +265,7 @@ export interface DB {
   readaloud: Readaloud
   series: Series
   server: Server
+  shelf: Shelf
   status: Status
   tag: Tag
 }

@@ -14,6 +14,8 @@ import BookDescription from "@/components/BookDescription"
 import { BookThumbnailImage } from "@/components/BookThumbnail"
 import { LoadingView } from "@/components/LoadingView"
 import { MiniPlayerWidget } from "@/components/MiniPlayerWidget"
+import { SeriesProgressSection } from "@/components/SeriesProgressSection"
+import { ShortlistToggle } from "@/components/ShortlistToggle"
 import { ScreenBackButton } from "@/components/ScreenBackButton"
 import {
   DOWNLOAD_FORMAT_LABEL,
@@ -45,6 +47,7 @@ import { useAvailableFormats } from "@/hooks/useAvailableFormats"
 import { useColorTheme } from "@/hooks/useColorTheme"
 import { useListAllServerBooks } from "@/hooks/useListAllServerBooks"
 import { usesSystemHeader } from "@/lib/nativeChrome"
+import { useShortlist } from "@/hooks/useShortlist"
 import { useAppSelector } from "@/store/appState"
 import {
   useCancelDownloadMutation,
@@ -56,6 +59,9 @@ import {
 } from "@/store/localApi"
 import { useLazyGetBookQuery as useLazyGetServerBookQuery } from "@/store/serverApi"
 import type { UUID } from "@/uuid"
+
+/** The status picker's extra choice: "To read", and on the Shortlist. */
+const SHORTLIST_OPTION = "shortlist"
 
 export default function BookDetailsScreen() {
   const router = useRouter()
@@ -70,6 +76,8 @@ export default function BookDetailsScreen() {
   const { data: statuses } = useListStatusesQuery()
 
   const [updateStatus] = useUpdateStatusMutation()
+  const shortlist = useShortlist()
+  const shortlisted = shortlist.isShortlisted(uuid)
 
   const [getServerBook, { isLoading: isServerLoading }] =
     useLazyGetServerBookQuery()
@@ -222,12 +230,28 @@ export default function BookDetailsScreen() {
             <Group className="mb-4 flex-col items-stretch gap-3 self-stretch">
               {book.status && (
                 <Select
-                  value={{
-                    value: book.status.uuid,
-                    label: book.status.name,
-                  }}
+                  value={
+                    shortlisted && book.status.name === "To read"
+                      ? { value: SHORTLIST_OPTION, label: "Shortlist" }
+                      : { value: book.status.uuid, label: book.status.name }
+                  }
                   onValueChange={(option) => {
                     if (!option) return
+                    if (option.value === SHORTLIST_OPTION) {
+                      // Shortlisted books stay "To read" until they're started.
+                      const toRead = statuses?.find(
+                        (status) => status.name === "To read",
+                      )
+                      if (toRead && book.status?.uuid !== toRead.uuid) {
+                        updateStatus({
+                          bookUuid: book.uuid,
+                          statusUuid: toRead.uuid,
+                        })
+                      }
+                      shortlist.add(book.uuid)
+                      return
+                    }
+                    if (shortlisted) shortlist.remove(book.uuid)
                     updateStatus({
                       bookUuid: book.uuid,
                       statusUuid: option.value as UUID,
@@ -235,19 +259,34 @@ export default function BookDetailsScreen() {
                   }}
                 >
                   <SelectTrigger
-                    accessibilityLabel={`Reading status, ${book.status.name}`}
+                    accessibilityLabel={`Reading status, ${
+                      shortlisted && book.status.name === "To read"
+                        ? "Shortlist"
+                        : book.status.name
+                    }`}
                   >
                     <SelectValue placeholder="" />
                   </SelectTrigger>
-                  {statuses?.map((status) => (
+                  {statuses?.flatMap((status) => [
                     <SelectItem
                       key={status.uuid}
                       label={status.name}
                       value={status.uuid}
-                    />
-                  ))}
+                    />,
+                    ...(status.name === "To read" &&
+                    shortlist.canShortlist(book)
+                      ? [
+                          <SelectItem
+                            key={SHORTLIST_OPTION}
+                            label="Shortlist"
+                            value={SHORTLIST_OPTION}
+                          />,
+                        ]
+                      : []),
+                  ])}
                 </Select>
               )}
+              <ShortlistToggle book={book} />
               <Stack className="gap-3">
                 {availableFormats.map((format) => {
                   const state = getBookDownloadState(
@@ -364,6 +403,7 @@ export default function BookDetailsScreen() {
                 </Group>
               </>
             )}
+            <SeriesProgressSection book={book} />
             {!!book.tags.length && (
               <>
                 <Group className="mb-2 flex-row items-center gap-1">

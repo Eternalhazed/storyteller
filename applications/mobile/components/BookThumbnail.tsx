@@ -1,10 +1,12 @@
 import { Link, useRouter } from "expo-router"
-import { BookOpen, Headphones } from "lucide-react-native"
+import { BookOpen, Flag, Headphones } from "lucide-react-native"
 import { Pressable, View, type ViewStyle } from "react-native"
 
 import { type BookWithRelations } from "@/database/books"
 import { useAvailableFormats } from "@/hooks/useAvailableFormats"
 import { useDownloadedFormats } from "@/hooks/useDownloadedFormats"
+import { useSeriesCoverLabel } from "@/hooks/useSeriesCoverLabel"
+import { useShortlist } from "@/hooks/useShortlist"
 import { cn } from "@/lib/utils"
 import { useAppSelector } from "@/store/appState"
 import {
@@ -34,11 +36,14 @@ const THUMBNAIL_HEIGHT_RATIO = 176 / 116
 interface Props {
   book: BookWithRelations
   width?: number
+  /** One line under the title saying why the book is shown here. */
+  caption?: string | null | undefined
 }
 
 export function BookThumbnail({
   book,
   width = DEFAULT_THUMBNAIL_WIDTH,
+  caption,
 }: Props) {
   const router = useRouter()
   const height = Math.round(width * THUMBNAIL_HEIGHT_RATIO)
@@ -61,6 +66,9 @@ export function BookThumbnail({
   const { data: statuses } = useListStatusesQuery()
 
   const [updateStatus] = useUpdateStatusMutation()
+  const shortlist = useShortlist()
+  const shortlisted = shortlist.isShortlisted(book.uuid)
+  const seriesLabel = useSeriesCoverLabel(book)
   function openBookDetails() {
     router.push({
       pathname: "/book/[uuid]",
@@ -106,6 +114,15 @@ export function BookThumbnail({
                 },
               })
             },
+          },
+        ]
+      : []),
+    ...(shortlist.canShortlist(book) && book.status?.name !== "Read"
+      ? [
+          {
+            id: "shortlist",
+            title: shortlisted ? "Remove from Shortlist" : "Add to Shortlist",
+            onPress: () => shortlist.toggle(book.uuid),
           },
         ]
       : []),
@@ -177,6 +194,18 @@ export function BookThumbnail({
           showActions={false}
           width={width}
         />
+        {shortlisted && (
+          <View
+            className="bg-primary absolute top-1 left-1 z-50 rounded-full p-1"
+            accessibilityLabel="On your Shortlist"
+          >
+            <Icon
+              as={Flag}
+              size={Math.max(12, Math.round(width / 10))}
+              className="text-primary-foreground"
+            />
+          </View>
+        )}
       </View>
     </Stack>
   )
@@ -198,6 +227,24 @@ export function BookThumbnail({
       >
         {book.title}
       </Text>
+      {!!seriesLabel && (
+        <Text
+          className="text-muted-foreground"
+          numberOfLines={1}
+          style={{ maxWidth, fontSize: authorFontSize }}
+        >
+          {seriesLabel}
+        </Text>
+      )}
+      {!!caption && (
+        <Text
+          className="text-primary"
+          numberOfLines={2}
+          style={{ maxWidth, fontSize: authorFontSize }}
+        >
+          {caption}
+        </Text>
+      )}
       {availableFormats.map((format) => {
         const state = getBookDownloadState(book, format, downloadActivity)
         if (state.status === "download") return null

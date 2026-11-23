@@ -19,6 +19,17 @@ interface FetchArgs extends BaseFetchArgs {
   serverUuid: UUID
 }
 
+/** Account-scoped shelf metadata and ordered manual membership from /shelves. */
+export interface ServerShelf {
+  uuid: UUID
+  name: string
+  filter: unknown | null
+  filterIssues?: unknown[]
+  books: { bookUuid: UUID; position: number }[]
+  createdAt: string
+  updatedAt: string
+}
+
 export const serverApi = createApi({
   reducerPath: "serverApi",
   async baseQuery(
@@ -63,6 +74,43 @@ export const serverApi = createApi({
     return makeRequest(args, baseQueryApi, extraOptions ?? {})
   },
   endpoints: (build) => ({
+    listShelves: build.query<ServerShelf[], { serverUuid: UUID }>({
+      query: ({ serverUuid }) => ({ url: "/shelves", serverUuid }),
+    }),
+    getShelfBooks: build.query<
+      BookWithRelations[],
+      { serverUuid: UUID; shelfUuid: UUID; limit?: number }
+    >({
+      query: ({ serverUuid, shelfUuid, limit = 50 }) => ({
+        url: `/shelves/${shelfUuid}/books`,
+        serverUuid,
+        params: { limit },
+      }),
+    }),
+    createShelf: build.mutation<
+      ServerShelf,
+      { serverUuid: UUID; name: string; books: UUID[] }
+    >({
+      query: ({ serverUuid, name, books }) => ({
+        url: "/shelves",
+        serverUuid,
+        method: "POST",
+        body: { name, filter: null, books },
+      }),
+    }),
+    updateShelfBooks: build.mutation<
+      ServerShelf,
+      { serverUuid: UUID; shelfUuid: UUID; books: UUID[] }
+    >({
+      query: ({ serverUuid, shelfUuid, books }) => ({
+        url: `/shelves/${shelfUuid}`,
+        serverUuid,
+        method: "PUT",
+        // PUT is partial: omitting name/filter preserves both. `books`
+        // replaces all membership and assigns positions in array order.
+        body: { books },
+      }),
+    }),
     listBooks: build.query<BookWithRelations[], { serverUuid: UUID }>({
       query: ({ serverUuid }) => ({ url: "/books", serverUuid }),
     }),

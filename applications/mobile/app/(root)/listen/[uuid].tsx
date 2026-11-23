@@ -13,6 +13,7 @@ import { TouchableOpacity, View } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 
 import { AudiobookCover } from "@/components/AudiobookCover"
+import { FinishPrompt } from "@/components/FinishPrompt"
 import { LoadingView } from "@/components/LoadingView"
 import { PlayPause } from "@/components/PlayPause"
 import { ProgressBar } from "@/components/ProgressBar"
@@ -337,6 +338,7 @@ export default function PlayerScreen() {
             </Text>
             <NavigationReturnControl {...passageContext} placement="player" />
           </View>
+          <FinishPrompt bookUuid={uuid} placement="player" />
           <View className="my-4 w-full px-6">
             <ProgressBar
               accessibilityLabel="Playback position"

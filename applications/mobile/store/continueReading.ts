@@ -19,19 +19,39 @@ type ContinueBook = {
   audiobook: Download
 }
 
-/** Prefer the last surface actually opened here; otherwise use saved progress. */
+export type ContinueCandidate<Book> = {
+  book: Book
+  session: ReadingSession
+  /** The format to continue in isn't on this device yet. */
+  needsDownload: boolean
+}
+
+function isDownloaded(download: Download) {
+  return download?.downloadStatus === "DOWNLOADED"
+}
+
+/**
+ * Prefer the last surface actually opened here; otherwise use saved progress,
+ * which may come from another device. A book whose format isn't on this device
+ * is still offered, flagged `needsDownload`, so it can be downloaded in place.
+ */
 export function getContinueReading<Book extends ContinueBook>(
   books: readonly Book[],
   remembered: ReadingSession | null,
-): { book: Book; session: ReadingSession } | null {
-  let candidate: { book: Book; session: ReadingSession } | null = null
+): ContinueCandidate<Book> | null {
+  let candidate: ContinueCandidate<Book> | null = null
   let latest = -Infinity
 
   for (const book of books) {
     if (book.status?.name === "Read") continue
     if (book.uuid === remembered?.bookUuid) {
-      if (book[remembered.format]?.downloadStatus === "DOWNLOADED") {
-        return { book, session: remembered }
+      const download = book[remembered.format]
+      if (download) {
+        return {
+          book,
+          session: remembered,
+          needsDownload: !isDownloaded(download),
+        }
       }
       // Do not silently replace a known reading or listening format.
       continue
@@ -49,21 +69,27 @@ export function getContinueReading<Book extends ContinueBook>(
     }
 
     let session: ReadingSession
+    let needsDownload: boolean
     if (isStandaloneAudiobookLocator(locator)) {
-      if (book.audiobook?.downloadStatus !== "DOWNLOADED") continue
+      if (!book.audiobook) continue
       session = { bookUuid: book.uuid, mode: "listening", format: "audiobook" }
+      needsDownload = !isDownloaded(book.audiobook)
     } else {
-      const format =
-        book.readaloud?.downloadStatus === "DOWNLOADED"
-          ? "readaloud"
-          : book.ebook?.downloadStatus === "DOWNLOADED"
-            ? "ebook"
-            : null
+      const format = isDownloaded(book.readaloud)
+        ? "readaloud"
+        : isDownloaded(book.ebook)
+          ? "ebook"
+          : book.readaloud
+            ? "readaloud"
+            : book.ebook
+              ? "ebook"
+              : null
       if (!format) continue
       session = { bookUuid: book.uuid, mode: "reading", format }
+      needsDownload = !isDownloaded(book[format])
     }
 
-    candidate = { book, session }
+    candidate = { book, session, needsDownload }
     latest = position.timestamp
   }
 

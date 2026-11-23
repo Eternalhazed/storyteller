@@ -1,7 +1,12 @@
 import * as DocumentPicker from "expo-document-picker"
 import { Link, useRouter } from "expo-router"
 import { StatusBar } from "expo-status-bar"
-import { EllipsisVertical } from "lucide-react-native"
+import {
+  ChevronRight,
+  EllipsisVertical,
+  Flag,
+  Library,
+} from "lucide-react-native"
 import { useEffect, useMemo, useRef } from "react"
 import {
   Image,
@@ -14,6 +19,7 @@ import {
 } from "react-native"
 
 import { ContinueReading } from "@/components/ContinueReading"
+import { LooksFinishedCard } from "@/components/LooksFinishedCard"
 import { MiniPlayerWidget } from "@/components/MiniPlayerWidget"
 import { Shelf } from "@/components/Shelf"
 import { Group } from "@/components/ui/Group"
@@ -24,24 +30,22 @@ import { Menu } from "@/components/ui/menu"
 import { Text } from "@/components/ui/text"
 import { type BookWithRelations } from "@/database/books"
 import { type Collection } from "@/database/collections"
+import { defaultPreferences } from "@/database/preferencesTypes"
+import { useHomeSeriesInputs } from "@/hooks/useHomeSeriesInputs"
 import { useIsFocused } from "@/hooks/useIsFocused"
 import { useListAllServerBooks } from "@/hooks/useListAllServerBooks"
 import { useLastReadingSession } from "@/hooks/useReadingSession"
+import { useServerShelves } from "@/hooks/useServerShelves"
+import { useShortlist } from "@/hooks/useShortlist"
 import { bookImported } from "@/store/actions"
 import { useAppDispatch } from "@/store/appState"
 import { getContinueReading } from "@/store/continueReading"
+import { buildHomeSections } from "@/store/homeSections"
 import {
+  useGetGlobalPreferencesQuery,
   useListBooksQuery as useListLocalBooksQuery,
   useListCollectionsQuery,
 } from "@/store/localApi"
-import { filterNextUp } from "@/store/nextUp"
-import { periodicalsLast } from "@/store/periodicals"
-
-import {
-  filterCurrentlyReading,
-  filterRecentlyAdded,
-  filterStartReading,
-} from "./shelf/[type]"
 
 const EMPTY_BOOKS: BookWithRelations[] = []
 const EMPTY_COLLECTIONS: Collection[] = []
@@ -63,12 +67,9 @@ export default function Home() {
 
   const { isLoading, refetch } = useListAllServerBooks()
   const { data: liveBooks = EMPTY_BOOKS } = useListLocalBooksQuery()
-  const { data: listedCollections = EMPTY_COLLECTIONS } =
-    useListCollectionsQuery()
-  const collections = useMemo(
-    () => periodicalsLast(listedCollections),
-    [listedCollections],
-  )
+  const { data: collections = EMPTY_COLLECTIONS } = useListCollectionsQuery()
+  const { data: preferences } = useGetGlobalPreferencesQuery()
+  const home = preferences?.home ?? defaultPreferences.home
 
   const staleBooksRef = useRef<BookWithRelations[]>(liveBooks)
 
@@ -90,47 +91,36 @@ export default function Home() {
     [books, lastReadingSession],
   )
 
-  const onDevice = useMemo(() => {
-    return books
-      .filter(
-        (book) =>
-          book.audiobook?.downloadStatus === "DOWNLOADED" ||
-          book.ebook?.downloadStatus === "DOWNLOADED" ||
-          book.readaloud?.downloadStatus === "DOWNLOADED",
-      )
-      .sort(
-        (a, b) =>
-          new Date(b.createdAt).valueOf() - new Date(a.createdAt).valueOf(),
-      )
-  }, [books])
+  const { bookUuids: shortlist } = useShortlist()
+  const shelves = useServerShelves()
+  const { seriesNext, seriesStarts, coverLabel } = useHomeSeriesInputs(books)
 
-  const currentlyReading = useMemo(() => {
-    return filterCurrentlyReading(books)
-  }, [books])
-
-  const nextUp = useMemo(() => filterNextUp(books), [books])
-
-  const startReading = useMemo(() => filterStartReading(books), [books])
-
-  const recentlyAdded = useMemo(() => filterRecentlyAdded(books), [books])
-
-  const booksByCollection = useMemo(
+  const sections = useMemo(
     () =>
-      Object.fromEntries(
-        collections.map((collection) => [
-          collection.uuid,
-          books
-            .filter((book) =>
-              book.collections.some((c) => c.uuid === collection.uuid),
-            )
-            .sort(
-              (a, b) =>
-                new Date(b.createdAt).valueOf() -
-                new Date(a.createdAt).valueOf(),
-            ),
-        ]),
-      ),
-    [books, collections],
+      buildHomeSections({
+        books,
+        now: Date.now(),
+        continueBookUuid: continueReading?.book.uuid ?? null,
+        shortlist,
+        seriesNext,
+        seriesStarts,
+        shelves,
+        collections,
+        order: home.order,
+        hidden: home.hidden,
+        dedupe: true,
+      }),
+    [
+      books,
+      continueReading,
+      shortlist,
+      seriesNext,
+      seriesStarts,
+      shelves,
+      collections,
+      home.order,
+      home.hidden,
+    ],
   )
 
   const scrollViewRef = useRef<ScrollViewInstance>(null)
@@ -163,8 +153,25 @@ export default function Home() {
             />
           </Pressable>
         </Link>
+        <Link href="/series" asChild>
+          <Button variant="ghost" accessibilityLabel="Series">
+            <Icon as={Library} size={22} className="text-primary" />
+            <Text className="text-primary">Series</Text>
+          </Button>
+        </Link>
+        <Link href="/shortlist" asChild>
+          <Button variant="ghost" accessibilityLabel="Shortlist">
+            <Icon as={Flag} size={22} className="text-primary" />
+            <Text className="text-primary">Shortlist</Text>
+          </Button>
+        </Link>
         <Menu
           actions={[
+            {
+              id: "customize-home",
+              title: "Customize home",
+              onPress: () => router.push("/customize-home"),
+            },
             {
               id: "import-book",
               title: "Import book",
@@ -191,7 +198,7 @@ export default function Home() {
       </Group>
       <ScrollView
         className="pl-safe-or-6 pr-safe w-full"
-        contentContainerClassName="gap-4"
+        contentContainerClassName="gap-6"
         ref={scrollViewRef}
         refreshControl={
           <RefreshControl
@@ -202,54 +209,52 @@ export default function Home() {
           />
         }
       >
-        {continueReading && <ContinueReading {...continueReading} />}
-        <Shelf
-          label="On this device"
-          books={onDevice}
-          href={{ pathname: "/shelf/[type]", params: { type: "on-device" } }}
-        />
-        <Shelf
-          label="Currently reading"
-          books={currentlyReading}
-          href={{
-            pathname: "/shelf/[type]",
-            params: { type: "currently-reading" },
-          }}
-        />
-        <Shelf
-          label="Next up"
-          books={nextUp}
-          href={{ pathname: "/shelf/[type]", params: { type: "next-up" } }}
-        />
-        <Shelf
-          label="Start reading"
-          books={startReading}
-          href={{
-            pathname: "/shelf/[type]",
-            params: { type: "start-reading" },
-          }}
-        />
-        <Shelf
-          label="Recently added"
-          books={recentlyAdded}
-          href={{
-            pathname: "/shelf/[type]",
-            params: { type: "recently-added" },
-          }}
-        />
-        {collections.map((collection) => (
-          <Shelf
-            key={collection.uuid}
-            label={collection.name}
-            books={booksByCollection[collection.uuid] ?? []}
-            href={{
-              pathname: "/collection/[uuid]",
-              params: {
-                uuid: collection.uuid,
-              },
-            }}
-          />
-        ))}
+        {sections.map((section) => {
+          if (section.id === "continue") {
+            return continueReading && section.items.length ? (
+              <View key="continue" className="gap-6">
+                <ContinueReading
+                  {...continueReading}
+                  seriesLabel={coverLabel(continueReading.book)}
+                />
+                <LooksFinishedCard />
+              </View>
+            ) : (
+              <LooksFinishedCard key="continue" />
+            )
+          }
+          if (section.id === "paused") {
+            if (!section.items.length || !section.viewAll) return null
+            const viewAll = section.viewAll
+            return (
+              <Pressable
+                key="paused"
+                accessibilityRole="link"
+                accessibilityLabel={`Paused books, ${section.items.length}`}
+                onPress={() => router.push(viewAll)}
+                className="border-border mr-safe-or-4 flex-row items-center gap-2 self-start rounded-full border px-4 py-2"
+              >
+                <Text className="text-muted-foreground">
+                  Paused · {section.items.length}
+                </Text>
+                <Icon
+                  as={ChevronRight}
+                  size={16}
+                  className="text-muted-foreground"
+                />
+              </Pressable>
+            )
+          }
+          return (
+            <Shelf
+              key={section.id}
+              label={section.title}
+              items={section.items}
+              coverSize={home.coverSize}
+              href={section.viewAll ?? undefined}
+            />
+          )
+        })}
         {books.length === 0 && (
           <View className="bg-border mr-5 gap-4 rounded p-4">
             <Text>You don’t have any books available, yet!</Text>

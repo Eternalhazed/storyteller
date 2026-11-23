@@ -15,12 +15,17 @@ import { LoginButton } from "@/components/LoginButton"
 import { MiniPlayerWidget } from "@/components/MiniPlayerWidget"
 import { ReadingSettings } from "@/components/ReadingSettings"
 import { ScreenBackButton } from "@/components/ScreenBackButton"
+import { ButtonGroup, ButtonGroupButton } from "@/components/ui/ButtonGroup"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Text } from "@/components/ui/text"
 import { DiscordIcon } from "@/icons/DiscordIcon"
+import {
+  type FinishPromptPreferences,
+  type ShortlistPreferences,
+} from "@/database/preferencesTypes"
 import { usesSystemHeader } from "@/lib/nativeChrome"
 import {
   useDeleteServerMutation,
@@ -185,6 +190,110 @@ export default function Settings() {
               }}
             />
           </View>
+        </View>
+        <View className="mt-8 gap-3">
+          <Text variant="h2">Finishing books</Text>
+          <Text className="text-lg">When a book looks finished</Text>
+          <ButtonGroup
+            value={preferences.finishPrompt.mode}
+            onChange={(mode: FinishPromptPreferences["mode"]) =>
+              updatePreference({
+                name: "finishPrompt",
+                value: { ...preferences.finishPrompt, mode },
+              })
+            }
+          >
+            <ButtonGroupButton
+              accessibilityLabel="Ask before marking a book as read"
+              value="ask"
+              size="flex"
+            >
+              <Text>Ask</Text>
+            </ButtonGroupButton>
+            <ButtonGroupButton
+              accessibilityLabel="Automatically mark books as read"
+              value="automatic"
+              size="flex"
+            >
+              <Text>Automatically</Text>
+            </ButtonGroupButton>
+            <ButtonGroupButton
+              accessibilityLabel="Turn off finish detection"
+              value="off"
+              size="flex"
+            >
+              <Text>Off</Text>
+            </ButtonGroupButton>
+          </ButtonGroup>
+          <Text className="mt-2 text-lg">Finish threshold</Text>
+          <ButtonGroup
+            value={preferences.finishPrompt.threshold}
+            onChange={(threshold: number) =>
+              updatePreference({
+                name: "finishPrompt",
+                value: { ...preferences.finishPrompt, threshold },
+              })
+            }
+          >
+            {[0.9, 0.95, 0.98].map((threshold) => (
+              <ButtonGroupButton
+                key={threshold}
+                accessibilityLabel={`Finish at ${Math.round(threshold * 100)} percent`}
+                value={threshold}
+                size="flex"
+              >
+                <Text>{Math.round(threshold * 100)}%</Text>
+              </ButtonGroupButton>
+            ))}
+          </ButtonGroup>
+          <Text className="text-muted-foreground text-sm">
+            Audio can also count as finished in the last 10 minutes.
+          </Text>
+          <View className="my-3 w-full flex-row items-center justify-between gap-4">
+            <Text className="min-w-0 flex-1 text-lg">
+              Mark books as Reading when I start them
+            </Text>
+            <Switch
+              accessibilityLabel="Mark books as Reading when I start them"
+              checked={preferences.finishPrompt.autoStartReading}
+              onCheckedChange={(autoStartReading) =>
+                updatePreference({
+                  name: "finishPrompt",
+                  value: { ...preferences.finishPrompt, autoStartReading },
+                })
+              }
+            />
+          </View>
+        </View>
+        <View className="mt-8 gap-3">
+          <Text variant="h2">Shortlist</Text>
+          <Text className="text-lg">
+            Remove a book from the Shortlist when I
+          </Text>
+          <ButtonGroup
+            value={preferences.shortlist.removeWhen}
+            onChange={(removeWhen: ShortlistPreferences["removeWhen"]) =>
+              updatePreference({
+                name: "shortlist",
+                value: { ...preferences.shortlist, removeWhen },
+              })
+            }
+          >
+            <ButtonGroupButton
+              accessibilityLabel="Remove from Shortlist when I start it"
+              value="started"
+              size="flex"
+            >
+              <Text>Start it</Text>
+            </ButtonGroupButton>
+            <ButtonGroupButton
+              accessibilityLabel="Remove from Shortlist when I finish it"
+              value="finished"
+              size="flex"
+            >
+              <Text>Finish it</Text>
+            </ButtonGroupButton>
+          </ButtonGroup>
         </View>
         <ReadingSettings />
         <View className="mt-8 gap-4">

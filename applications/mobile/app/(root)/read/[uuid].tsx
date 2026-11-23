@@ -3,6 +3,7 @@ import { StatusBar } from "expo-status-bar"
 import { useEffect } from "react"
 
 import { Epub } from "@/components/Epub"
+import { FinishPrompt } from "@/components/FinishPrompt"
 import { LoadingView } from "@/components/LoadingView"
 import { useIsFocused } from "@/hooks/useIsFocused"
 import { useIsNotBackground } from "@/hooks/useIsNotBackground"
@@ -90,6 +91,7 @@ export default function BookScreen() {
       ) : (
         <Epub key={book.uuid} format={format} book={book} locator={locator} />
       )}
+      {showEpub && isFocused && <FinishPrompt bookUuid={uuid} />}
     </>
   )
 }

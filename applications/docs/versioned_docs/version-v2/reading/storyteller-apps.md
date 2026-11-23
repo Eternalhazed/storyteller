@@ -49,18 +49,61 @@ device**. If a transfer was interrupted by closing the app, choose **Resume
 queue** to restart pending transfers. For a failed download, choose **Try
 again**.
 
-## Continue reading or listening
+## Home
 
-Home shows one **Continue reading** or **Continue listening** card above the
-shelves. It remembers the last reader or full player you opened on that device
-and uses the same downloaded format. The card shows the saved chapter title and
-book progress when available. Tapping it opens the reader or player at your
-saved place; it doesn't start narration automatically.
+Home is built from sections, each shown only when it has books. A book appears
+in one section at most, and suggested books carry a short line saying why
+they're there.
 
-If there's no eligible last session, Home looks for other downloaded books with
-unfinished progress. Finished books aren't promoted. After you mark a numbered
-book **Read**, **Next up** shows the earliest unread volume after the last
-completed volume in that series.
+- **Continue reading** or **Continue listening** — the book you last had open,
+  in the same format, with your chapter and progress. A read-along offers both
+  **Listen** and **Read along**. If you were reading it on another device and it
+  isn't downloaded here, tap **Download & continue**; it opens once the download
+  finishes.
+- **Jump back in** — other books you've opened in the last two weeks.
+- **Shortlist** — books you've flagged to read soon, in your order.
+- **Next in your series** — for each series you've started, the next book after
+  the furthest one you've finished.
+- **Nearly done** — books more than half read that you haven't opened for two
+  weeks.
+- **Start a new series** — the first book you own of each series you haven't
+  started.
+- **New read-alongs** — books that finished syncing in the last month.
+- **To read** — unstarted books that aren't part of a series.
+- **Recently added**, then **Magazines**.
+
+Books you haven't touched for two months move to **Paused**, a link at the end
+of Home. To hide, show or reorder sections, change the cover size, or show a row
+for each of your collections, open the Home menu and choose **Customize home**.
+Shelves you build in the web app appear as Home sections too.
+
+## Shortlist
+
+Flag a book for your Shortlist from its long-press menu, the **Shortlist**
+button on its page, or by choosing **Shortlist** in its status picker. Flagged
+books show a small flag on their cover. Open the Shortlist from the top of Home
+to see it in full and use **Edit order** to rearrange it.
+
+A book leaves the Shortlist when you start it, or when you finish it if you
+change that in **Settings → Shortlist**. The Shortlist belongs to your account,
+so it's the same on every device and in the web app.
+
+## Series
+
+Open **Series** from the top of Home to see every series you own. Each one shows
+where you stand: **3 ahead** counts the books after the furthest one you've
+finished, so earlier books you may have read elsewhere aren't counted. You'll
+also see **1 left**, **Caught up**, **Not started**, or **#2 not in library**
+when the next number is missing. A series page lists its books in order,
+highlights the next one, and can mark earlier books as read in one step.
+
+## Finishing a book
+
+Near the end of a book (95% by default), the reader asks **Finished?** You can
+mark it read, mark it read and start the next book in its series (or the top of
+your Shortlist), or choose **Not yet**. A book you start moves from **To read**
+to **Reading** on its own. Change the threshold, switch to marking books read
+automatically, or turn this off in **Settings → Finishing books**.
 
 ## Returning after looking up a passage
 
@@ -79,11 +122,9 @@ you return.
 
 ## Magazines on the home screen
 
-Books in a collection named **Magazines** are kept off the home screen's **Start
-reading** and **Recently added** shelves, so a batch of issues doesn't push your
-books out of view. They appear on their own Magazines shelf at the end of the
-home screen, newest first, and an issue you're reading still shows under
-**Currently reading**.
+Books in a collection named **Magazines** are kept off the home screen's reading
+sections, so a batch of issues doesn't push your books out of view. They appear
+on their own Magazines row near the end of the home screen, newest first.
 
 ## Highlighting and looking up selected text
 

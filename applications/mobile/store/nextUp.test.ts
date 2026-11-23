@@ -57,7 +57,7 @@ test("Next up is strictly after the highest completed volume", () => {
   assert.deepEqual(filterNextUp([third, second, samePosition, first]), [])
 })
 
-test("unnumbered books are neither Next up candidates nor completed anchors", () => {
+test("unnumbered books are not candidates but finished ones can start a series", () => {
   const first = book("First", "Read", 1)
   const unnumbered = book("Article", "Reading", null)
   const second = book("Second", "To read", 2)
@@ -65,14 +65,14 @@ test("unnumbered books are neither Next up candidates nor completed anchors", ()
 
   assert.deepEqual(filterNextUp([unnumbered, first, second]), [second])
   assert.deepEqual(filterNextUp([first, unnumbered]), [])
-  assert.deepEqual(filterNextUp([unnumberedRead, second]), [])
+  assert.deepEqual(filterNextUp([unnumberedRead, second]), [second])
 })
 
-test("a series without a completed volume has no Next up book", () => {
-  assert.deepEqual(
-    filterNextUp([book("First", "Reading", 1), book("Second", "To read", 2)]),
-    [],
-  )
+test("a started series without a finished volume starts at its earliest unfinished book", () => {
+  const first = book("First", "To read", 1)
+  const second = book("Second", "Reading", 2)
+  assert.deepEqual(filterNextUp([second, first]), [first])
+  assert.deepEqual(filterNextUp([first]), [])
   assert.deepEqual(filterNextUp([]), [])
 })
 
@@ -99,4 +99,25 @@ test("Next up is selected per series and shared candidates appear only once", ()
     ]),
     [second, otherSecond],
   )
+})
+
+test("progress-only activity starts a series and orders Next up by latest activity", () => {
+  const olderFirst = {
+    ...book("Older first", "To read", 1, "older"),
+    position: {
+      timestamp: 100,
+      locator: { locations: { totalProgression: 0.2 } },
+    },
+  }
+  const newerFirst = {
+    ...book("Newer first", "Reading", 1, "newer"),
+    position: {
+      timestamp: 200,
+      locator: { locations: { totalProgression: 0 } },
+    },
+  }
+  assert.deepEqual(filterNextUp([olderFirst, newerFirst]), [
+    newerFirst,
+    olderFirst,
+  ])
 })

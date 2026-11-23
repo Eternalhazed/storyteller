@@ -1,6 +1,24 @@
 import { type HighlightTint } from "@/colors"
 import { colors } from "@/components/ui/tokens/colors"
 
+/** Built-in Home sections; server shelves use the id `shelf:<uuid>`. */
+export const DEFAULT_HOME_SECTION_ORDER = [
+  "continue",
+  "jumpBackIn",
+  "shortlist",
+  "nextInSeries",
+  "nearlyDone",
+  "startSeries",
+  "newReadalouds",
+  "toRead",
+  "recentlyAdded",
+  "magazines",
+  "collections",
+  "paused",
+] as const
+
+export type HomeSectionId = (typeof DEFAULT_HOME_SECTION_ORDER)[number]
+
 export const defaultPreferences: Preferences = {
   darkMode: "auto",
   showReaderUi: false,
@@ -63,6 +81,19 @@ export const defaultPreferences: Preferences = {
     enabled: true,
   },
   logLevel: "info",
+  finishPrompt: {
+    mode: "ask",
+    threshold: 0.95,
+    autoStartReading: true,
+  },
+  shortlist: {
+    removeWhen: "started",
+  },
+  home: {
+    order: [...DEFAULT_HOME_SECTION_ORDER],
+    hidden: ["collections"],
+    coverSize: "medium",
+  },
 }
 
 export type ColorTheme = {
@@ -126,6 +157,31 @@ export type HideStatusbarPreferences = {
   enabled: boolean
 }
 
+/**
+ * When a book counts as finished, and what happens then. `threshold` is the
+ * share of the book (0–1) after which the app treats it as finished.
+ */
+export type FinishPromptPreferences = {
+  /** "ask" offers to mark it read, "automatic" marks it read with an undo. */
+  mode: "ask" | "automatic" | "off"
+  threshold: number
+  /** Move a "To read" book to "Reading" once it has properly been started. */
+  autoStartReading: boolean
+}
+
+export type ShortlistPreferences = {
+  /** When a book leaves the Shortlist on its own. */
+  removeWhen: "started" | "finished"
+}
+
+export type HomePreferences = {
+  /** Section order; may also hold `shelf:<uuid>` ids for server shelves. */
+  order: string[]
+  /** Section ids the reader has hidden. */
+  hidden: string[]
+  coverSize: "small" | "medium" | "large"
+}
+
 export interface Preferences {
   darkMode: boolean | "auto"
   colorThemes: ColorTheme[]
@@ -142,4 +198,7 @@ export interface Preferences {
   automaticRewind: AutomaticRewindPreferences
   logLevel: "debug" | "info" | "error"
   floatingToolbar: boolean
+  finishPrompt: FinishPromptPreferences
+  shortlist: ShortlistPreferences
+  home: HomePreferences
 }
