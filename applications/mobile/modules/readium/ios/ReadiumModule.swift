@@ -211,6 +211,11 @@ public class ReadiumModule: Module {
                 await view.navigator?.goBackward(options: .animated)
             }
 
+            AsyncFunction("navigateToReference") { (view: EPUBView, locatorJson: [String: Any]) async throws -> Bool in
+                guard let locator = try Locator(json: locatorJson) else { return false }
+                return await view.navigateToReference(locator: locator)
+            }
+
             AsyncFunction("getFragmentPageProportion") { (view: EPUBView, fragmentId: String) -> [String: Any]? in
                 return await view.getFragmentPageProportion(fragmentId: fragmentId)
             }

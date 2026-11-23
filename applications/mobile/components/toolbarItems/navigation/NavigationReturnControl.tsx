@@ -1,65 +1,139 @@
-import { Undo2Icon, X } from "lucide-react-native"
+import { Undo2Icon } from "lucide-react-native"
 import { View } from "react-native"
 
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { Text } from "@/components/ui/text"
-import { clearReturnPosition, returnToPreviousPosition } from "@/store/actions"
 import { useAppDispatch, useAppSelector } from "@/store/appState"
-import { getReturnToPosition } from "@/store/selectors/bookshelfSelectors"
-import { type UUID } from "@/uuid"
+import {
+  type PassageContext,
+  isMoving,
+  passageSlice,
+  samePassageContext,
+} from "@/store/slices/passageSlice"
+
+type Props = PassageContext & {
+  placement: "reader" | "player" | "menu"
+  onContinue?: () => void
+}
 
 export function NavigationReturnControl({
   bookUuid,
-  onReturn,
-}: {
-  bookUuid?: UUID | undefined
-  onReturn?: (() => void) | undefined
-}) {
+  format,
+  surface,
+  placement,
+  onContinue,
+}: Props) {
   const dispatch = useAppDispatch()
-  const returnPosition = useAppSelector((state) =>
-    bookUuid ? getReturnToPosition(state, bookUuid) : null,
-  )
+  const context = { bookUuid, format, surface }
+  const nav = useAppSelector((state) => {
+    const active = state.passage.navigation
+    return active && samePassageContext(active.context, context) ? active : null
+  })
 
-  if (!bookUuid || !returnPosition) return null
+  if (!nav || (placement === "menu" && (!nav.preview || nav.move))) return null
+  const busy = isMoving(nav.move)
+  const failed = nav.move?.state === "failed"
+  const remote = !!nav.remote && !nav.preview && !busy
 
   return (
-    <View className="border-border bg-background h-10 flex-row items-center gap-1 border-b px-2">
-      <Button
-        accessibilityLabel="Back to previous position"
-        className="h-9 flex-1 justify-start px-2"
-        onPress={() => {
-          dispatch(
-            returnToPreviousPosition({
-              bookUuid,
-              timestamp: Date.now(),
-            }),
-          )
-          onReturn?.()
-        }}
-        variant="ghost"
-      >
-        <Icon
-          as={Undo2Icon}
-          size={16}
-          className="text-blue-700 dark:text-blue-300"
-        />
-        <Text className="text-sm font-bold text-blue-700 dark:text-blue-300">
-          Back to previous position
-        </Text>
-      </Button>
-      <Button
-        accessibilityLabel="Dismiss return to previous position"
-        className="h-9 w-9"
-        hitSlop={12}
-        onPress={() => {
-          dispatch(clearReturnPosition({ bookUuid }))
-        }}
-        size="icon"
-        variant="ghost"
-      >
-        <Icon as={X} size={16} className="text-blue-700 dark:text-blue-300" />
-      </Button>
+    <View className="bg-background border-border max-w-full self-end rounded-lg border px-1">
+      {placement === "menu" ? (
+        <Button
+          className="h-auto min-h-12"
+          variant="ghost"
+          onPress={() => {
+            dispatch(passageSlice.actions.command(context, "continue"))
+            onContinue?.()
+          }}
+        >
+          <Text className="text-sm font-semibold">Continue here</Text>
+        </Button>
+      ) : (
+        <>
+          {busy ? (
+            <Text
+              accessibilityLiveRegion="polite"
+              className="px-3 py-3 text-sm"
+            >
+              {nav.move?.purpose === "continue"
+                ? "Saving your place…"
+                : "Moving to passage…"}
+            </Text>
+          ) : (
+            <>
+              {failed && (
+                <View className="px-3 pt-2">
+                  <Text accessibilityLiveRegion="polite" className="text-sm">
+                    Couldn’t open or save that passage.
+                  </Text>
+                  <Button
+                    variant="ghost"
+                    className="h-auto min-h-12"
+                    onPress={() =>
+                      dispatch(passageSlice.actions.command(context, "retry"))
+                    }
+                  >
+                    <Text>Try again</Text>
+                  </Button>
+                </View>
+              )}
+              {remote && (
+                <View className="px-2">
+                  <Text
+                    accessibilityLiveRegion="polite"
+                    className="px-1 pt-2 text-sm"
+                  >
+                    Other device has a newer position.
+                  </Text>
+                  <View className="flex-row flex-wrap">
+                    <Button
+                      variant="ghost"
+                      className="h-auto min-h-12"
+                      onPress={() =>
+                        dispatch(
+                          passageSlice.actions.command(context, "remote"),
+                        )
+                      }
+                    >
+                      <Text>Use synced position</Text>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="h-auto min-h-12"
+                      onPress={() =>
+                        dispatch(passageSlice.actions.command(context, "keep"))
+                      }
+                    >
+                      <Text>Stay here</Text>
+                    </Button>
+                  </View>
+                </View>
+              )}
+              {!remote && (
+                <Button
+                  accessibilityLabel="Back to where I was"
+                  variant="ghost"
+                  className="h-auto min-h-12 max-w-full px-3"
+                  onPress={() =>
+                    dispatch(passageSlice.actions.command(context, "return"))
+                  }
+                >
+                  <Icon as={Undo2Icon} size={18} />
+                  <Text className="flex-shrink text-sm font-semibold">
+                    Back to where I was
+                  </Text>
+                </Button>
+              )}
+              {nav.preview && surface === "audio" && !failed && (
+                <Text className="text-muted-foreground px-3 pb-2 text-xs">
+                  Playback paused for preview
+                </Text>
+              )}
+            </>
+          )}
+        </>
+      )}
     </View>
   )
 }

@@ -283,6 +283,13 @@ class ReadiumModule : Module(), Listener {
                 navigator.goBackward(animated = true)
             }
 
+            AsyncFunction("navigateToReference") Coroutine { view: EpubView, locatorMap: Map<String, Any> ->
+                val locator = Locator.fromJSON(JSONObject(locatorMap)) ?: return@Coroutine false
+                withContext(Dispatchers.Main) {
+                    view.navigateToReference(locator)
+                }
+            }
+
             AsyncFunction("getFragmentPageProportion") Coroutine { view: EpubView, fragmentId: String ->
                 return@Coroutine view.getFragmentPageProportion(fragmentId)
             }

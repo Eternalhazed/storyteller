@@ -587,6 +587,19 @@ export async function addBookToDownloadQueue(
   format: "ebook" | "audiobook" | "readaloud",
 ) {
   await db.transaction().execute(async (tr) => {
+    const existing = await tr
+      .selectFrom(format)
+      .select("downloadStatus")
+      .where("bookUuid", "=", bookUuid)
+      .executeTakeFirst()
+    if (
+      !existing ||
+      ["DOWNLOADED", "DOWNLOADING", "QUEUED", "PAUSED"].includes(
+        existing.downloadStatus,
+      )
+    )
+      return
+
     const downloading = await tr
       .selectFrom("audiobook")
       .select("uuid")

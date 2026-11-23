@@ -8,7 +8,7 @@ import {
 } from "@storyteller/xray/view"
 
 import { type ReadiumLocator } from "@/modules/readium/src/Readium.types"
-import { type ReturnToPosition } from "@/store/slices/bookshelfSlice"
+import { type Passage } from "@/store/slices/passageSlice"
 
 // A conservative fallback for sentence-fragment locators, in non-whitespace
 // characters. A measured page bottom and layout progression need no extension.
@@ -26,7 +26,7 @@ export function getXrayBoundary({
   locator: ReadiumLocator | null | undefined
   mode: "text" | "audio"
   isPlaying?: boolean | undefined
-  returnPosition?: ReturnToPosition | null | undefined
+  returnPosition?: Passage | null | undefined
 }): number {
   if (!xray) return -1
   const pageCharacters =
@@ -48,7 +48,7 @@ export function getXrayBoundary({
 export function getFurthestReadLocator(
   xray: Xray,
   locator: ReadiumLocator | null | undefined,
-  returnPosition: ReturnToPosition | null | undefined,
+  returnPosition: Passage | null | undefined,
 ): ReadiumLocator | undefined {
   const saved = returnPosition?.locator
   if (!saved || !locator) return saved ?? locator ?? undefined

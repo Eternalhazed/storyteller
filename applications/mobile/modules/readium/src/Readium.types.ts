@@ -303,6 +303,12 @@ export type FragmentPageProportion = {
 export type EPUBViewRef = {
   goForward: () => Promise<void>
   goBackward: () => Promise<void>
+  /**
+   * Resolves true only after the target is visible, including an already-visible
+   * target. Returns false if unavailable, superseded, or unconfirmed after 8s.
+   * Does not update the controlled locator prop or move audio playback.
+   */
+  navigateToReference: (locator: ReadiumLocator) => Promise<boolean>
   getFragmentPageProportion: (
     fragmentId: string,
   ) => Promise<FragmentPageProportion | null>

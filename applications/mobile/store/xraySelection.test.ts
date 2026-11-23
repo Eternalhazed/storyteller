@@ -78,6 +78,18 @@ test("a selection reveals its own sentence without extending a text page beyond 
   )
 })
 
+test("selecting a name during a detour cannot reveal a future alias", () => {
+  assert.equal(
+    getSelectionXray({
+      xray,
+      readerBoundary: 2,
+      freezeBoundary: true,
+      selection: selection("Captain Grey", 0.9),
+    }),
+    null,
+  )
+})
+
 test("a lookup keeps a later reader boundary when selecting earlier text", () => {
   const result = getSelectionXray({
     xray,

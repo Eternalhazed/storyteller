@@ -299,6 +299,12 @@ class EPUBView: ExpoView {
     private let pagedLayoutBehavior = PagedEPUBLayoutBehavior()
     private let scrollLayoutBehavior = ScrollEPUBLayoutBehavior()
     private var initialLocatorEmissionInProgress = false
+    private var displayedLocator: Locator?
+    private var displayedLocatorRevision = 0
+    private var referenceNavigationID: UUID?
+    private var referenceNavigationTask: Task<Void, Never>?
+    private var referenceNavigationTimeout: Task<Void, Never>?
+    private var referenceNavigationCompletion: ((Bool) -> Void)?
 
     private func javascriptStringLiteral(_ value: String) -> String {
         guard let data = try? JSONEncoder().encode(value),
@@ -428,6 +434,7 @@ class EPUBView: ExpoView {
 
         props = finalProps
         let scrollModeChanged = oldProps.map { finalProps.scrollMode != $0.scrollMode } ?? false
+        if scrollModeChanged { cancelReferenceNavigation() }
         let enteredPageLayout = oldProps?.scrollMode == true && !finalProps.scrollMode
         let locatorChangedFromExternalUpdate = finalProps.locator != nil &&
             !isSameLocatorPosition(finalProps.locator, oldProps?.locator) &&
@@ -596,6 +603,8 @@ class EPUBView: ExpoView {
     }
 
     public func destroyNavigator() {
+        cancelReferenceNavigation()
+        displayedLocator = nil
         initialLocatorEmissionInProgress = false
         self.navigator?.view.removeFromSuperview()
 
@@ -702,6 +711,224 @@ class EPUBView: ExpoView {
             return
         }
         emitLocatorChange(merged ?? currentLocator)
+    }
+
+    private func referenceResourceHref(_ href: AnyURL) -> AnyURL? {
+        guard var components = URLComponents(string: href.string) else { return nil }
+        components.fragment = nil
+        guard let url = components.url else { return nil }
+        return AnyURL(url: url)
+    }
+
+    private func finishReferenceNavigation(id: UUID, success: Bool) {
+        guard referenceNavigationID == id else { return }
+        let completion = referenceNavigationCompletion
+        referenceNavigationID = nil
+        referenceNavigationCompletion = nil
+        referenceNavigationTask?.cancel()
+        referenceNavigationTask = nil
+        referenceNavigationTimeout?.cancel()
+        referenceNavigationTimeout = nil
+        completion?(success)
+    }
+
+    private func cancelReferenceNavigation() {
+        if let id = referenceNavigationID {
+            finishReferenceNavigation(id: id, success: false)
+        }
+    }
+
+    @MainActor
+    func navigateToReference(locator: Locator) async -> Bool {
+        cancelReferenceNavigation()
+        guard let nav = navigator,
+              nav.view.superview === self,
+              window != nil,
+              let requestedHref = referenceResourceHref(locator.href),
+              let resource = nav.publication.readingOrder.first(where: {
+                  referenceResourceHref($0.url())?.isEquivalentTo(requestedHref) == true
+              }),
+              let resourceHref = referenceResourceHref(resource.url()) else {
+            return false
+        }
+
+        var target = locator
+        target.href = resourceHref
+        if target.locations.fragments.isEmpty,
+           let fragment = URLComponents(string: locator.href.string)?.fragment,
+           !fragment.isEmpty {
+            target.locations.fragments = [fragment]
+        }
+        // A bare TOC resource means its beginning, not any page in that chapter.
+        let isChapterStart = target.locations.fragments.isEmpty &&
+            target.locations.position == nil &&
+            target.locations.totalProgression == nil &&
+            target.locations.otherLocations.isEmpty &&
+            (target.text.highlight?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        let progression = target.locations.progression ?? (isChapterStart ? 0.0 : nil)
+        guard let script = referenceVisibilityScript(
+            target: target,
+            resources: nav.publication.readingOrder.map { $0.url().string },
+            progression: progression
+        ) else { return false }
+
+        let id = UUID()
+        return await withCheckedContinuation { continuation in
+            referenceNavigationID = id
+            referenceNavigationCompletion = { continuation.resume(returning: $0) }
+            // Do not use a task-group race here: a WebKit await may ignore
+            // cancellation, and a group would then keep its caller pending.
+            referenceNavigationTimeout = Task { @MainActor [weak self] in
+                do { try await Task.sleep(nanoseconds: 8_000_000_000) } catch { return }
+                self?.finishReferenceNavigation(id: id, success: false)
+            }
+            referenceNavigationTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                if await isReferenceVisible(nav: nav, target: target, script: script, progression: progression) {
+                    finishReferenceNavigation(id: id, success: true)
+                    return
+                }
+                guard !Task.isCancelled, referenceNavigationID == id, navigator === nav else { return }
+                let previousRevision = displayedLocatorRevision
+                guard await nav.go(to: target, options: NavigatorGoOptions(animated: false)) else {
+                    finishReferenceNavigation(id: id, success: false)
+                    return
+                }
+                while !Task.isCancelled && referenceNavigationID == id && navigator === nav {
+                    if await isReferenceVisible(
+                        nav: nav, target: target, script: script,
+                        progression: progression, afterRevision: previousRevision
+                    ) {
+                        finishReferenceNavigation(id: id, success: true)
+                        return
+                    }
+                    do { try await Task.sleep(nanoseconds: 50_000_000) } catch { return }
+                }
+                finishReferenceNavigation(id: id, success: false)
+            }
+        }
+    }
+
+    private func isReferenceVisible(
+        nav: EPUBNavigatorViewController,
+        target: Locator,
+        script: String,
+        progression: Double?,
+        afterRevision: Int? = nil
+    ) async -> Bool {
+        guard let displayed = displayedLocator,
+              referenceResourceHref(displayed.href)?.isEquivalentTo(target.href) == true else { return false }
+        let revision = displayedLocatorRevision
+        let result = await nav.evaluateJavaScript(script)
+        guard window != nil, navigator === nav, displayedLocatorRevision == revision,
+              case .success(let value) = result,
+              let measurement = value as? [String: Any] else { return false }
+        if let visible = measurement["visible"] as? Bool { return visible }
+        // Only actual location-change callbacks supply the displayed progression.
+        // Readium can expose the requested locator as current while loading it.
+        if let afterRevision, revision <= afterRevision { return false }
+        guard let start = displayed.locations.progression,
+              let expected = progression, expected.isFinite, (0.0...1.0).contains(expected),
+              let extent = measurement["extent"] as? Double else { return false }
+        let end = start + extent
+        return expected >= start && (expected < end || expected == 1.0 && end >= 1.0)
+    }
+
+    private func referenceVisibilityScript(
+        target: Locator,
+        resources: [String],
+        progression: Double?
+    ) -> String? {
+        guard let targetJSON = target.jsonString else { return nil }
+        return #"""
+            (function() {
+                const target = \#(targetJSON);
+                const resources = \#(javascriptStringArrayLiteral(resources));
+                const progression = \#(progression.map { String($0) } ?? "null");
+                const width = window.innerWidth, height = window.innerHeight;
+                if (!document.body || document.readyState !== "complete" || width <= 0 || height <= 0) return null;
+                const path = (href) => decodeURIComponent(new URL(href, "https://reference.invalid/").pathname);
+                const current = path(window.location.href);
+                // Disambiguate nested reading-order paths under the server root.
+                let resource = null;
+                for (const href of resources) {
+                    const candidate = path(href);
+                    if ((current === candidate || current.endsWith(candidate)) &&
+                        (!resource || candidate.length > resource.length)) resource = candidate;
+                }
+                if (resource !== path(target.href)) return null;
+                const visible = (rect) => !!rect && rect.width > 0 && rect.height > 0 &&
+                    rect.right > 0 && rect.left < width && rect.bottom > 0 && rect.top < height;
+                const isRendered = (element) => {
+                    if (!element) return false;
+                    for (let node = element; node; node = node.parentElement) {
+                        const style = getComputedStyle(node);
+                        if (style.display === "none" || style.visibility === "hidden" ||
+                            style.visibility === "collapse" || Number(style.opacity) === 0) return false;
+                    }
+                    return true;
+                };
+                const characterVisible = (node, offset) => {
+                    if (node && !isRendered(node.parentElement)) return false;
+                    if (!node || offset < 0 || offset >= node.length) return false;
+                    const range = document.createRange();
+                    range.setStart(node, offset);
+                    range.setEnd(node, offset + 1);
+                    return visible(range.getClientRects()[0]);
+                };
+                const elementVisible = (element) => {
+                    if (!isRendered(element)) return false;
+                    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+                    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                        if (!isRendered(node.parentElement)) continue;
+                        const offset = node.textContent.search(/\S/);
+                        if (offset < 0) continue;
+                        const range = document.createRange();
+                        range.setStart(node, offset);
+                        range.setEnd(node, offset + 1);
+                        const rect = range.getClientRects()[0];
+                        if (rect) return visible(rect);
+                    }
+                    const rect = element.getClientRects()[0] || { left: -1, top: -1 };
+                    return rect.left >= 0 && rect.left < width && rect.top >= 0 && rect.top < height;
+                };
+                const locations = target.locations || {};
+                const fragment = (locations.fragments || [])[0];
+                if (fragment) {
+                    const element = document.getElementById(fragment) ||
+                        document.getElementsByName(fragment)[0];
+                    return { visible: elementVisible(element) };
+                }
+                if (locations.domRange) {
+                    const start = locations.domRange.start;
+                    const element = start && document.querySelector(start.cssSelector);
+                    if (!element) return { visible: false };
+                    if (start.textNodeIndex === -1) return { visible: elementVisible(element) };
+                    const nodes = Array.from(element.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE);
+                    return { visible: characterVisible(nodes[start.textNodeIndex], start.charOffset || 0) };
+                }
+                if (Number.isInteger(locations.textStart) && locations.textStart >= 0) {
+                    let offset = locations.textStart;
+                    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                        for (let index = 0; index < node.length; index++) {
+                            if (/\s/.test(node.textContent[index])) continue;
+                            if (offset-- === 0) return { visible: characterVisible(node, index) };
+                        }
+                    }
+                    return { visible: false };
+                }
+                if (progression !== null) {
+                    const scroller = document.scrollingElement || document.documentElement;
+                    return { visible: null, extent: \#(props?.scrollMode == true)
+                        ? height / scroller.scrollHeight : width / scroller.scrollWidth };
+                }
+                if (locations.cssSelector) {
+                    return { visible: elementVisible(document.querySelector(locations.cssSelector)) };
+                }
+                return { visible: false };
+            })();
+        """#
     }
 
     func go(locator: Locator, scrollAfterNavigation: Bool = false) {
@@ -1440,6 +1667,8 @@ extension EPUBView: EPUBNavigatorDelegate {
     }
 
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
+        displayedLocator = locator
+        displayedLocatorRevision += 1
         let navigator = (navigator as! EPUBNavigatorViewController)
         let shouldSkipLocatorEmission = initialLocatorEmissionInProgress
 

@@ -18,11 +18,15 @@ import androidx.lifecycle.lifecycleScope
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import org.readium.r2.navigator.DecorableNavigator
 import org.readium.r2.navigator.Decoration
@@ -39,6 +43,8 @@ import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.InternalReadiumApi
 import org.readium.r2.shared.extensions.toMap
 import org.readium.r2.shared.publication.Locator
+import org.readium.r2.shared.publication.epub.EpubLayout
+import org.readium.r2.shared.publication.presentation.presentation
 import org.readium.r2.shared.util.AbsoluteUrl
 import org.json.JSONArray
 import org.json.JSONObject
@@ -183,6 +189,11 @@ class EpubView(context: Context, appContext: AppContext) : ExpoView(context, app
     private var lastEmittedLocator: Locator? = null
     private var firstPageLoaded = CompletableDeferred<Unit>()
     private val scrollModeChapterNavigator = ScrollModeChapterNavigator()
+    private var displayedLocator: Locator? = null
+    private var displayedLocatorRevision = 0L
+    private var referenceNavigationGeneration = 0L
+    private var referenceNavigationJob: Job? = null
+    private var referenceNavigationResult: CompletableDeferred<Boolean>? = null
 
     private val activity: FragmentActivity?
         get() = appContext.currentActivity as FragmentActivity?
@@ -566,6 +577,7 @@ class EpubView(context: Context, appContext: AppContext) : ExpoView(context, app
 
         props = finalProps
         val scrollModeChanged = oldProps?.let { finalProps.scrollMode != it.scrollMode } ?: false
+        if (scrollModeChanged) cancelReferenceNavigation()
         val customFontsChanged = finalProps.customFonts != oldProps?.customFonts
         val fontFamilyChanged = finalProps.fontFamily != oldProps?.fontFamily
         val enteredPageLayout = oldProps?.scrollMode == true && !finalProps.scrollMode
@@ -719,6 +731,8 @@ class EpubView(context: Context, appContext: AppContext) : ExpoView(context, app
     }
 
     fun destroyNavigator() {
+        cancelReferenceNavigation()
+        displayedLocator = null
         locationEmitter?.cancel()
         locationEmitter = null
 
@@ -810,6 +824,211 @@ class EpubView(context: Context, appContext: AppContext) : ExpoView(context, app
 
         emitLocatorChange(merged)
     }
+
+    private fun cancelReferenceNavigation() {
+        referenceNavigationGeneration += 1
+        referenceNavigationJob?.cancel()
+        referenceNavigationJob = null
+        referenceNavigationResult?.complete(false)
+        referenceNavigationResult = null
+    }
+
+    suspend fun navigateToReference(locator: Locator): Boolean {
+        cancelReferenceNavigation()
+        val nav = navigator ?: return false
+        val scope = activity?.lifecycleScope ?: return false
+        val publication = BookService.getPublication(props?.bookUuid ?: return false) ?: return false
+        val resource = publication.readingOrder.firstOrNull {
+            it.url().removeFragment().isEquivalent(locator.href.removeFragment())
+        } ?: return false
+        if (!isAttachedToWindow || !nav.isAdded || nav.view?.parent == null) return false
+
+        val fragments = locator.locations.fragments.ifEmpty {
+            locator.href.fragment?.let { listOf(it) } ?: emptyList()
+        }
+        val target = locator.copy(
+            href = resource.url().removeFragment(),
+            locations = locator.locations.copy(fragments = fragments),
+        )
+        // A bare TOC resource means its beginning, not any page in that chapter.
+        val progression = target.locations.progression ?: if (
+            fragments.isEmpty() &&
+            target.locations.position == null &&
+            target.locations.totalProgression == null &&
+            target.locations.otherLocations.isEmpty() &&
+            target.text.highlight.isNullOrBlank()
+        ) 0.0 else null
+        // Fixed-layout resources are single pages; Readium doesn't expose their
+        // web view to evaluateJavascript. Confirm the page via pagination instead.
+        val script = if (publication.metadata.presentation.layout == EpubLayout.FIXED) null
+        else referenceVisibilityScript(
+            target,
+            publication.readingOrder.map { it.url().removeFragment().toString() },
+            progression,
+        )
+        val generation = referenceNavigationGeneration
+        val result = CompletableDeferred<Boolean>()
+        referenceNavigationResult = result
+        // Readium's JavaScript suspension is not necessarily cancellable. Keep
+        // it outside the awaiting coroutine so the timeout can always settle.
+        referenceNavigationJob = scope.launch {
+            try {
+                firstPageLoaded.await()
+                if (generation != referenceNavigationGeneration || navigator !== nav) return@launch
+                if (isReferenceVisible(nav, target, script, progression)) {
+                    result.complete(true)
+                    return@launch
+                }
+                if (!isActive || generation != referenceNavigationGeneration || navigator !== nav) return@launch
+                val previousRevision = displayedLocatorRevision
+                if (!nav.go(target, animated = false)) return@launch
+                while (isActive && generation == referenceNavigationGeneration && navigator === nav) {
+                    if (isReferenceVisible(nav, target, script, progression, previousRevision)) {
+                        result.complete(true)
+                        return@launch
+                    }
+                    delay(50)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("StorytellerReference", "Could not confirm reference navigation", e)
+            } finally {
+                result.complete(false)
+            }
+        }
+        return try {
+            withTimeoutOrNull(8_000) { result.await() } ?: false
+        } finally {
+            if (generation == referenceNavigationGeneration) cancelReferenceNavigation()
+        }
+    }
+
+    private suspend fun isReferenceVisible(
+        nav: EpubNavigatorFragment,
+        target: Locator,
+        script: String?,
+        progression: Double?,
+        afterRevision: Long? = null,
+    ): Boolean {
+        val displayed = displayedLocator ?: return false
+        val revision = displayedLocatorRevision
+        if (!displayed.href.removeFragment().isEquivalent(target.href)) return false
+        if (script == null) {
+            // Don't claim a precise text reference when only its page is known.
+            return target.text.highlight.isNullOrBlank() &&
+                (afterRevision == null || revision > afterRevision)
+        }
+        val raw = nav.evaluateJavascript(script) ?: return false
+        if (!isAttachedToWindow || navigator !== nav ||
+            displayedLocatorRevision != revision || raw == "null") return false
+        val measurement = JSONObject(raw)
+        if (!measurement.isNull("visible")) return measurement.getBoolean("visible")
+        // Progression is taken only from Readium's actual page-change callback,
+        // never from a requested/current locator while the page is loading.
+        if (afterRevision != null && revision <= afterRevision) return false
+        val start = displayed.locations.progression ?: return false
+        val expected = progression ?: return false
+        val end = start + measurement.getDouble("extent")
+        return expected.isFinite() && expected in 0.0..1.0 &&
+            expected >= start && (expected < end || expected == 1.0 && end >= 1.0)
+    }
+
+    private fun referenceVisibilityScript(
+        target: Locator,
+        resources: List<String>,
+        progression: Double?,
+    ): String = """
+        (function() {
+            const target = ${target.toJSON()};
+            const resources = ${JSONArray(resources)};
+            const progression = ${progression ?: "null"};
+            const width = window.innerWidth, height = window.innerHeight;
+            if (!document.body || document.readyState !== "complete" || width <= 0 || height <= 0) return null;
+            const path = (href) => decodeURIComponent(new URL(href, "https://reference.invalid/").pathname);
+            const current = path(window.location.href);
+            // Longest matching reading-order path disambiguates resources such
+            // as chapter.xhtml and appendix/chapter.xhtml under the server root.
+            let resource = null;
+            for (const href of resources) {
+                const candidate = path(href);
+                if ((current === candidate || current.endsWith(candidate)) &&
+                    (!resource || candidate.length > resource.length)) resource = candidate;
+            }
+            if (resource !== path(target.href)) return null;
+            const visible = (rect) => !!rect && rect.width > 0 && rect.height > 0 &&
+                rect.right > 0 && rect.left < width && rect.bottom > 0 && rect.top < height;
+            const isRendered = (element) => {
+                if (!element) return false;
+                for (let node = element; node; node = node.parentElement) {
+                    const style = getComputedStyle(node);
+                    if (style.display === "none" || style.visibility === "hidden" ||
+                        style.visibility === "collapse" || Number(style.opacity) === 0) return false;
+                }
+                return true;
+            };
+            const characterVisible = (node, offset) => {
+                if (node && !isRendered(node.parentElement)) return false;
+                if (!node || offset < 0 || offset >= node.length) return false;
+                const range = document.createRange();
+                range.setStart(node, offset);
+                range.setEnd(node, offset + 1);
+                return visible(range.getClientRects()[0]);
+            };
+            const elementVisible = (element) => {
+                if (!isRendered(element)) return false;
+                const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+                for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                    if (!isRendered(node.parentElement)) continue;
+                    const offset = node.textContent.search(/\S/);
+                    if (offset < 0) continue;
+                    const range = document.createRange();
+                    range.setStart(node, offset);
+                    range.setEnd(node, offset + 1);
+                    const rect = range.getClientRects()[0];
+                    if (rect) return visible(rect);
+                }
+                // Empty named anchors still have a meaningful start position.
+                const rect = element.getClientRects()[0] || { left: -1, top: -1 };
+                return rect.left >= 0 && rect.left < width && rect.top >= 0 && rect.top < height;
+            };
+            const locations = target.locations || {};
+            const fragment = (locations.fragments || [])[0];
+            if (fragment) {
+                const element = document.getElementById(fragment) ||
+                    document.getElementsByName(fragment)[0];
+                return { visible: elementVisible(element) };
+            }
+            if (locations.domRange) {
+                const start = locations.domRange.start;
+                const element = start && document.querySelector(start.cssSelector);
+                if (!element) return { visible: false };
+                if (start.textNodeIndex === -1) return { visible: elementVisible(element) };
+                const nodes = Array.from(element.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE);
+                return { visible: characterVisible(nodes[start.textNodeIndex], start.charOffset || 0) };
+            }
+            if (Number.isInteger(locations.textStart) && locations.textStart >= 0) {
+                let offset = locations.textStart;
+                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                    for (let index = 0; index < node.length; index++) {
+                        if (/\s/.test(node.textContent[index])) continue;
+                        if (offset-- === 0) return { visible: characterVisible(node, index) };
+                    }
+                }
+                return { visible: false };
+            }
+            if (progression !== null) {
+                const scroller = document.scrollingElement || document.documentElement;
+                return { visible: null, extent: ${props?.scrollMode == true}
+                    ? height / scroller.scrollHeight : width / scroller.scrollWidth };
+            }
+            if (locations.cssSelector) {
+                return { visible: elementVisible(document.querySelector(locations.cssSelector)) };
+            }
+            return { visible: false };
+        })();
+    """.trimIndent()
 
     fun go(locator: Locator, scrollAfterNavigation: Boolean = false) {
         if (locator.href != navigator?.currentLocator?.value?.href) {
@@ -1518,7 +1737,10 @@ class EpubView(context: Context, appContext: AppContext) : ExpoView(context, app
         }
     }
 
-    override fun onPageChanged(pageIndex: Int, totalPages: Int, locator: Locator) = Unit
+    override fun onPageChanged(pageIndex: Int, totalPages: Int, locator: Locator) {
+        displayedLocator = locator
+        displayedLocatorRevision += 1
+    }
 
     override fun shouldFollowInternalLink(
         link: Link,

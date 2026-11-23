@@ -10,6 +10,7 @@ import { Icon } from "./ui/icon"
 
 type Props = {
   className?: string | undefined
+  accessibilityLabel?: string
   progress: number
   size: number
   style: ViewStyle
@@ -18,16 +19,24 @@ type Props = {
 
 export function DownloadingIndicator({
   className,
+  accessibilityLabel = "Progress",
   progress,
   size,
   style,
   icon: IconComponent = ArrowDown,
 }: Props) {
   const { foreground, background } = useColorTheme()
-  const deferredProgress = useDeferredValue(progress)
+  const normalizedProgress = Number.isFinite(progress)
+    ? Math.max(0, Math.min(100, Math.round(progress)))
+    : 0
+  const deferredProgress = useDeferredValue(normalizedProgress)
 
   return (
     <View
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityValue={{ min: 0, max: 100, now: normalizedProgress }}
       className={cn("bg-background rounded-full p-[1px]", className)}
       style={[
         {

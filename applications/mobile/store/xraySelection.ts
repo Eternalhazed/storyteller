@@ -18,22 +18,26 @@ export type XraySelection = {
 export function getSelectionXray({
   xray,
   readerBoundary,
+  freezeBoundary = false,
   readerLocator,
   selection,
 }: {
   xray: Xray | null | undefined
   readerBoundary: number
+  freezeBoundary?: boolean
   readerLocator?: ReadiumLocator | null | undefined
   selection: ReadiumLocator | null | undefined
 }): XraySelection | null {
   const text = selection?.text?.highlight
   if (!xray?.entities.length || !selection || !text?.trim()) return null
-  const boundary = getXraySelectionBoundary({
-    xray,
-    readerBoundary,
-    readerLocator,
-    selection,
-  })
+  const boundary = freezeBoundary
+    ? readerBoundary
+    : getXraySelectionBoundary({
+        xray,
+        readerBoundary,
+        readerLocator,
+        selection,
+      })
   const entity = findEntity(viewXray(xray, boundary), text)
   return entity ? { boundary, entity } : null
 }

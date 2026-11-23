@@ -29,8 +29,8 @@ import { Icon } from "@/components/ui/icon"
 import { Text } from "@/components/ui/text"
 import { useIsFocused } from "@/hooks/useIsFocused"
 import { cn } from "@/lib/utils"
-import { bookmarkPressed } from "@/store/actions"
 import { useAppDispatch, useAppSelector } from "@/store/appState"
+import { passageSlice } from "@/store/slices/passageSlice"
 import { useGetBookQuery, useGetBookXrayQuery } from "@/store/localApi"
 import {
   getCurrentlyPlayingFormat,
@@ -141,7 +141,8 @@ function XrayContent({
           isPlaying,
           returnPosition,
         }),
-        xray &&
+        !returnPosition &&
+          xray &&
           selectionBoundary !== undefined &&
           chapterIndexOf(xray, selectionBoundary) !== -1
           ? selectionBoundary
@@ -177,8 +178,17 @@ function XrayContent({
       currentLocator,
       returnPosition,
     })
-    if (!jump) return
-    dispatch(bookmarkPressed({ bookUuid, ...jump, timestamp: Date.now() }))
+    if (!jump || !currentLocator) return
+    dispatch(
+      passageSlice.actions.jump({
+        bookUuid,
+        format,
+        surface: mode,
+        purpose: "reference",
+        origin: jump.currentLocator ?? currentLocator,
+        target: { locator: jump.locator },
+      }),
+    )
     onClose?.()
   }
 

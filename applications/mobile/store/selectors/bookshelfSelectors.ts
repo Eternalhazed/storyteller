@@ -164,5 +164,6 @@ export const getPercentComplete = createSelector(
  * Get the saved return position for a book.
  */
 export function getReturnToPosition(state: RootState, bookUuid: UUID) {
-  return state.bookshelf.returnToPositions[bookUuid] ?? null
+  const nav = state.passage.navigation
+  return nav?.context.bookUuid === bookUuid && nav.preview ? nav.anchor : null
 }

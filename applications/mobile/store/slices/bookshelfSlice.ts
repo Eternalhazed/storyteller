@@ -1,22 +1,9 @@
-import { type PayloadAction, createSlice, isAnyOf } from "@reduxjs/toolkit"
+import { type PayloadAction, createSlice } from "@reduxjs/toolkit"
 
 import { logger } from "@/logger"
-import {
-  type ReadiumLocator,
-  type StorytellerTrack,
-} from "@/modules/readium/src/Readium.types"
-import {
-  bookmarkPressed,
-  clearReturnPosition,
-  navItemPressed,
-  returnToPreviousPosition,
-} from "@/store/actions"
+import { type StorytellerTrack } from "@/modules/readium/src/Readium.types"
 import { localApi } from "@/store/localApi"
 import { type UUID } from "@/uuid"
-
-export type ReturnToPosition = {
-  locator: ReadiumLocator
-}
 
 export type BookshelfState = {
   currentlyPlayingBookUuid: UUID | null
@@ -29,7 +16,6 @@ export type BookshelfState = {
   currentTrack: StorytellerTrack | null
   currentTrackIndex: number
   currentSearchQuery: string | null
-  returnToPositions: Record<UUID, ReturnToPosition>
   footnoteContent: string | null
 }
 
@@ -44,7 +30,6 @@ const initialState: BookshelfState = {
   currentTrack: null,
   currentTrackIndex: 0,
   currentSearchQuery: null,
-  returnToPositions: {},
   footnoteContent: null,
 }
 
@@ -159,9 +144,6 @@ export const bookshelfSlice = createSlice({
         state.currentTrack = null
         state.currentTrackIndex = 0
       }
-
-      // Clean up return position for deleted book
-      delete state.returnToPositions[bookUuid]
     },
     miniPlayerWidgetSwiped(state) {
       state.isAudioLoading = false
@@ -202,21 +184,6 @@ export const bookshelfSlice = createSlice({
           state.currentTrack = null
           state.currentTrackIndex = 0
         }
-      },
-    )
-    builder.addMatcher(
-      isAnyOf(bookmarkPressed, navItemPressed),
-      (state, action) => {
-        const { bookUuid, currentLocator } = action.payload
-        if (!currentLocator) return
-        state.returnToPositions[bookUuid] = { locator: currentLocator }
-      },
-    )
-    builder.addMatcher(
-      isAnyOf(clearReturnPosition, returnToPreviousPosition),
-      (state, action) => {
-        const { bookUuid } = action.payload
-        delete state.returnToPositions[bookUuid]
       },
     )
   },

@@ -113,13 +113,21 @@ export function SelectionMenu({
   const hasSelection = !!selectedText.trim()
   const selectionBoundary = useMemo(
     () =>
-      getXraySelectionBoundary({
-        xray,
-        readerBoundary,
-        readerLocator: book?.position?.locator,
-        selection: selectionLocator,
-      }),
-    [xray, readerBoundary, book?.position?.locator, selectionLocator],
+      returnPosition
+        ? readerBoundary
+        : getXraySelectionBoundary({
+            xray,
+            readerBoundary,
+            readerLocator: book?.position?.locator,
+            selection: selectionLocator,
+          }),
+    [
+      xray,
+      readerBoundary,
+      book?.position?.locator,
+      selectionLocator,
+      returnPosition,
+    ],
   )
   const selectionViews = useMemo(
     () => (xray && hasSelection ? viewXray(xray, selectionBoundary) : []),
@@ -288,6 +296,7 @@ export function SelectionMenu({
                       const latest = getSelectionXray({
                         xray,
                         readerBoundary,
+                        freezeBoundary: !!returnPosition,
                         readerLocator: book?.position?.locator,
                         selection,
                       })

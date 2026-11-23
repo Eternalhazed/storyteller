@@ -1,9 +1,7 @@
 import { Link, useLocalSearchParams, useRouter } from "expo-router"
 import {
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  CircleX,
   LibraryBig,
   LibrarySquare,
   Tag,
@@ -17,6 +15,10 @@ import { BookThumbnailImage } from "@/components/BookThumbnail"
 import { LoadingView } from "@/components/LoadingView"
 import { MiniPlayerWidget } from "@/components/MiniPlayerWidget"
 import { ScreenBackButton } from "@/components/ScreenBackButton"
+import {
+  DOWNLOAD_FORMAT_LABEL,
+  getBookDownloadState,
+} from "@/components/bookDownloadState"
 import { Group } from "@/components/ui/Group"
 import { Stack } from "@/components/ui/Stack"
 import {
@@ -31,7 +33,6 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
-import { Menu } from "@/components/ui/menu"
 import {
   Select,
   SelectItem,
@@ -39,11 +40,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Text } from "@/components/ui/text"
+import { describeError } from "@/describeError"
 import { useAvailableFormats } from "@/hooks/useAvailableFormats"
 import { useColorTheme } from "@/hooks/useColorTheme"
-import { useDownloadedFormats } from "@/hooks/useDownloadedFormats"
 import { useListAllServerBooks } from "@/hooks/useListAllServerBooks"
 import { usesSystemHeader } from "@/lib/nativeChrome"
+import { useAppSelector } from "@/store/appState"
 import {
   useCancelDownloadMutation,
   useDeleteBookMutation,
@@ -77,11 +79,12 @@ export default function BookDetailsScreen() {
   const [pendingDeleteFormat, setPendingDeleteFormat] = useState<
     "readaloud" | "ebook" | "audiobook" | null
   >(null)
+  const [removeError, setRemoveError] = useState<string | null>(null)
 
-  const downloadedFormats = useDownloadedFormats(book)
-
+  const downloadActivity = useAppSelector(
+    (state) => state.transferFeedback.download,
+  )
   const availableFormats = useAvailableFormats(book)
-  const onlyFormat = availableFormats[0]
 
   const { refetch } = useListAllServerBooks()
 
@@ -216,7 +219,7 @@ export default function BookDetailsScreen() {
                 </Text>
               )}
             </Stack>
-            <Group className="mb-4 items-center justify-between self-stretch">
+            <Group className="mb-4 flex-col items-stretch gap-3 self-stretch">
               {book.status && (
                 <Select
                   value={{
@@ -245,147 +248,84 @@ export default function BookDetailsScreen() {
                   ))}
                 </Select>
               )}
-              <Stack className="gap-1">
-                <Group className="self-end rounded-md px-2 py-[0.05rem]">
-                  {availableFormats.length > 1 ? (
-                    <Menu
-                      actions={availableFormats.map((format) => {
-                        const status = book[format]?.downloadStatus
-                        const isActiveDownload =
-                          status === "DOWNLOADING" || status === "QUEUED"
-                        const isDownloaded = downloadedFormats.includes(format)
-                        const unavailable =
-                          format !== "readaloud" &&
-                          downloadedFormats.includes("readaloud")
-                        const label = isDownloaded
-                          ? `Remove ${format}`
-                          : isActiveDownload
-                            ? `Cancel ${format} download`
-                            : `Download ${format}`
-
-                        return {
-                          id: `download-${format}`,
-                          title: label,
-                          ...(isDownloaded
-                            ? { attributes: { destructive: true } }
-                            : unavailable
-                              ? { attributes: { disabled: true } }
-                              : {}),
-                          onPress: () => {
-                            if (unavailable) return
-
-                            if (isActiveDownload) {
-                              cancelDownload({
-                                bookUuid: book.uuid,
-                                format,
-                              })
-                              return
-                            }
-
-                            if (isDownloaded) {
-                              setPendingDeleteFormat(format)
-                              return
-                            }
-                            downloadBook({
-                              bookUuid: book.uuid,
-                              format,
-                            })
-                          },
-                        }
-                      })}
+              <Stack className="gap-3">
+                {availableFormats.map((format) => {
+                  const state = getBookDownloadState(
+                    book,
+                    format,
+                    downloadActivity,
+                  )
+                  const formatLabel = DOWNLOAD_FORMAT_LABEL[format]
+                  const progress = state.progress
+                  const progressValue =
+                    progress === null
+                      ? undefined
+                      : { min: 0, max: 100, now: progress }
+                  return (
+                    <Group
+                      key={format}
+                      className="flex-wrap items-center justify-between gap-3"
                     >
-                      <Button
-                        variant="outline"
-                        className="border-primary dark:border-primary"
-                        accessibilityLabel="Open download options"
-                      >
-                        <Text className="text-primary">Downloads</Text>
-                        <Icon
-                          as={ChevronDown}
-                          size={16}
-                          className="text-primary"
-                        />
-                      </Button>
-                    </Menu>
-                  ) : (
-                    onlyFormat && (
-                      <>
+                      <Stack className="min-w-24 flex-1 gap-1">
+                        <Text className="font-semibold">{formatLabel}</Text>
+                        <Text
+                          className="text-muted-foreground text-sm"
+                          accessibilityLabel={`${formatLabel}: ${state.label}`}
+                          accessibilityLiveRegion={
+                            state.progress === null ? "polite" : "none"
+                          }
+                          accessibilityRole={
+                            state.progress === null ? "text" : "progressbar"
+                          }
+                          accessibilityValue={progressValue}
+                        >
+                          {state.label}
+                        </Text>
+                      </Stack>
+                      {state.canResume && (
                         <Button
                           variant="outline"
-                          accessibilityLabel={
-                            book[onlyFormat]?.downloadStatus === "DOWNLOADED"
-                              ? `Remove ${onlyFormat}`
-                              : book[onlyFormat]?.downloadStatus ===
-                                    "DOWNLOADING" ||
-                                  book[onlyFormat]?.downloadStatus === "QUEUED"
-                                ? `Cancel ${onlyFormat} download`
-                                : `Download ${onlyFormat}`
-                          }
-                          className={
-                            book[onlyFormat]?.downloadStatus === "DOWNLOADED" ||
-                            book[onlyFormat]?.downloadStatus ===
-                              "DOWNLOADING" ||
-                            book[onlyFormat]?.downloadStatus === "QUEUED"
-                              ? "border-destructive dark:border-destructive"
-                              : "border-primary dark:border-primary"
-                          }
+                          accessibilityLabel="Resume download queue"
                           onPress={() => {
-                            const status = book[onlyFormat]?.downloadStatus
-                            if (
-                              status === "DOWNLOADING" ||
-                              status === "QUEUED"
-                            ) {
-                              cancelDownload({
-                                bookUuid: book.uuid,
-                                format: onlyFormat,
-                              })
-                              return
-                            }
-
-                            if (status === "DOWNLOADED") {
-                              setPendingDeleteFormat(onlyFormat)
-                              return
-                            }
-
-                            downloadBook({
-                              bookUuid: book.uuid,
-                              format: onlyFormat,
-                            })
+                            downloadBook({ bookUuid: book.uuid, format })
                           }}
                         >
-                          <Text
-                            className={
-                              book[onlyFormat]?.downloadStatus ===
-                                "DOWNLOADED" ||
-                              book[onlyFormat]?.downloadStatus ===
-                                "DOWNLOADING" ||
-                              book[onlyFormat]?.downloadStatus === "QUEUED"
-                                ? "text-destructive"
-                                : "text-primary"
-                            }
-                          >
-                            {book[onlyFormat]?.downloadStatus === "DOWNLOADED"
-                              ? `Remove ${onlyFormat}`
-                              : book[onlyFormat]?.downloadStatus ===
-                                    "DOWNLOADING" ||
-                                  book[onlyFormat]?.downloadStatus === "QUEUED"
-                                ? "Cancel download"
-                                : `Download ${onlyFormat}`}
-                          </Text>
-                          {(book[onlyFormat]?.downloadStatus ===
-                            "DOWNLOADING" ||
-                            book[onlyFormat]?.downloadStatus === "QUEUED") && (
-                            <Icon
-                              as={CircleX}
-                              size={16}
-                              className="text-destructive"
-                            />
-                          )}
+                          <Text>Resume queue</Text>
                         </Button>
-                      </>
-                    )
-                  )}
-                </Group>
+                      )}
+                      {state.action && (
+                        <Button
+                          variant="outline"
+                          accessibilityLabel={`${state.actionLabel}: ${formatLabel}`}
+                          onPress={() => {
+                            if (state.action === "cancel") {
+                              cancelDownload({ bookUuid: book.uuid, format })
+                            } else if (state.action === "remove") {
+                              setRemoveError(null)
+                              setPendingDeleteFormat(format)
+                            } else {
+                              downloadBook({ bookUuid: book.uuid, format })
+                            }
+                          }}
+                        >
+                          <Text>
+                            {state.action === "cancel"
+                              ? "Cancel"
+                              : state.actionLabel}
+                          </Text>
+                        </Button>
+                      )}
+                    </Group>
+                  )
+                })}
+                {removeError && (
+                  <Text
+                    className="text-destructive text-sm"
+                    accessibilityLiveRegion="polite"
+                  >
+                    {removeError}
+                  </Text>
+                )}
               </Stack>
             </Group>
             {!!book.series.length && (
@@ -560,11 +500,14 @@ export default function BookDetailsScreen() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Remove {pendingDeleteFormat} from device
+              {book.serverUuid
+                ? `Remove ${pendingDeleteFormat} from device`
+                : "Delete local book"}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This will remove the downloaded {pendingDeleteFormat} files from
-              your local device.
+              {book.serverUuid
+                ? `This will remove the downloaded ${pendingDeleteFormat} files from your device. The book will remain in your server library.`
+                : "This will delete this locally imported book from your library, not just remove its download. Keep your original file if you want to import it again."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -574,23 +517,30 @@ export default function BookDetailsScreen() {
             <AlertDialogAction asChild>
               <Button
                 variant="destructive"
-                accessibilityLabel={`Remove ${pendingDeleteFormat} from device`}
+                accessibilityLabel={
+                  book.serverUuid
+                    ? `Remove ${pendingDeleteFormat} from device`
+                    : "Delete local book"
+                }
                 onPress={() => {
                   if (!pendingDeleteFormat) return
                   deleteBook({
                     bookUuid: book.uuid,
                     format: pendingDeleteFormat,
                     deleteRecord: book.serverUuid === null,
-                  }).then(() => {
-                    // move back to main screen
-                    router.replace("/")
-
-                    refetch()
                   })
+                    .unwrap()
+                    .then(
+                      () => {
+                        router.replace("/")
+                        refetch()
+                      },
+                      (error) => setRemoveError(describeError(error)),
+                    )
                   setPendingDeleteFormat(null)
                 }}
               >
-                <Text>Remove</Text>
+                <Text>{book.serverUuid ? "Remove" : "Delete book"}</Text>
               </Button>
             </AlertDialogAction>
           </AlertDialogFooter>

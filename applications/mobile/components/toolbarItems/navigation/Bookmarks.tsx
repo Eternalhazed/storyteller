@@ -12,7 +12,6 @@ import { Icon } from "@/components/ui/icon"
 import { Text } from "@/components/ui/text"
 import { getHrefChapterTitle, positionToPageCount } from "@/links"
 import { getAudiobookLocatorDetails } from "@/modules/readium"
-import { bookmarkPressed } from "@/store/actions"
 import { useAppDispatch, useAppSelector } from "@/store/appState"
 import {
   useDeleteBookmarksMutation,
@@ -24,9 +23,11 @@ import {
   formatTime,
   getCurrentlyPlayingFormat,
 } from "@/store/selectors/bookshelfSelectors"
+import { passageSlice } from "@/store/slices/passageSlice"
 import { type UUID } from "@/uuid"
 
 interface Props {
+  surface?: "text" | "audio" | undefined
   bookUuid?: UUID | undefined
   format?: "readaloud" | "ebook" | "audiobook" | undefined
   onClose?: () => void
@@ -36,6 +37,7 @@ export function Bookmarks({
   bookUuid: bookUuidProp,
   format: formatProp,
   onClose,
+  surface = "text",
 }: Props) {
   const selectedFormat = useAppSelector(getCurrentlyPlayingFormat)
   const bookUuid = bookUuidProp
@@ -156,12 +158,15 @@ export function Bookmarks({
           <View className="bg-background py-0.5">
             <Button
               onPress={() => {
+                if (!format || !book?.position) return
                 dispatch(
-                  bookmarkPressed({
+                  passageSlice.actions.jump({
                     bookUuid,
-                    locator: bookmark.locator,
-                    timestamp: Date.now(),
-                    currentLocator: book?.position?.locator,
+                    format,
+                    surface,
+                    purpose: "reference",
+                    origin: book.position.locator,
+                    target: { locator: bookmark.locator },
                   }),
                 )
                 onClose?.()

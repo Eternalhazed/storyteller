@@ -12,7 +12,6 @@ import {
   getAudiobookTocItemAtPosition,
 } from "@/modules/readium"
 import { type ReadiumLink } from "@/modules/readium/src/Readium.types"
-import { playerTrackChanged } from "@/store/actions"
 import { useAppDispatch, useAppSelector } from "@/store/appState"
 import { useGetBookQuery } from "@/store/localApi"
 import {
@@ -21,6 +20,7 @@ import {
   getPosition,
   getTracks,
 } from "@/store/selectors/bookshelfSelectors"
+import { passageSlice } from "@/store/slices/passageSlice"
 import { type UUID } from "@/uuid"
 
 interface Props {
@@ -34,6 +34,7 @@ export function TrackLisk({
   format: formatProp,
   onClose,
 }: Props) {
+  const dispatch = useAppDispatch()
   const ref = useRef<null | ScrollViewInstance>(null)
   const currentItemRef = useRef<null | ViewInstance>(null)
 
@@ -75,7 +76,26 @@ export function TrackLisk({
       )
     : listing[currentTrackIndex]
 
-  if (!book) return null
+  if (!book?.position || format === "ebook") return null
+  const origin = book.position.locator
+
+  function openChapter(link: ReadiumLink) {
+    if (currentTocItem === link || !bookUuid) return
+    const [relativeUri, start] = link.href.split("#t=")
+    const seconds = Number.parseFloat(start ?? "0")
+    if (!relativeUri || !Number.isFinite(seconds) || seconds < 0) return
+    dispatch(
+      passageSlice.actions.jump({
+        bookUuid,
+        format,
+        surface: "audio",
+        purpose: "chapter",
+        origin,
+        target: { audio: { relativeUri, seconds } },
+      }),
+    )
+    onClose?.()
+  }
 
   return (
     <ScrollView
@@ -97,7 +117,7 @@ export function TrackLisk({
         listing={listing}
         currentTocItem={currentTocItem ?? undefined}
         currentItemRef={currentItemRef}
-        onClose={onClose}
+        onChapter={openChapter}
       />
     </ScrollView>
   )
@@ -107,15 +127,13 @@ function Sublist({
   listing,
   currentTocItem,
   currentItemRef,
-  onClose,
+  onChapter,
 }: {
   listing: ReadiumLink[]
   currentTocItem: ReadiumLink | undefined
   currentItemRef: RefObject<ViewInstance | null>
-  onClose?: (() => void) | undefined
+  onChapter: (link: ReadiumLink) => void
 }) {
-  const dispatch = useAppDispatch()
-
   return (
     <>
       {listing.map((link) => (
@@ -135,18 +153,7 @@ function Sublist({
                 "border-border bg-secondary": link === currentTocItem,
               },
             )}
-            onPress={async () => {
-              if (currentTocItem === link) return
-              const [relativeUri, startPositionString] = link.href.split("#t=")
-              const startPosition = parseFloat(startPositionString ?? "0")
-              dispatch(
-                playerTrackChanged({
-                  relativeUri: relativeUri!,
-                  position: startPosition,
-                }),
-              )
-              onClose?.()
-            }}
+            onPress={() => onChapter(link)}
           >
             <Text className="text-sm font-bold">{link.title}</Text>
           </Button>
@@ -154,7 +161,7 @@ function Sublist({
             listing={link.children ?? []}
             currentTocItem={currentTocItem}
             currentItemRef={currentItemRef}
-            onClose={onClose}
+            onChapter={onChapter}
           />
         </View>
       ))}

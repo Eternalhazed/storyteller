@@ -72,6 +72,7 @@ import {
 } from "@/modules/readium/src/Readium.types"
 import { type UUID } from "@/uuid"
 
+import { downloadLifecycle } from "./downloadLifecycle"
 import { deleteLocalBookFiles } from "./persistence/files"
 import {
   readLocalBookXray,
@@ -79,6 +80,7 @@ import {
   writeLocalBookXray,
 } from "./persistence/xray"
 import { shouldDeleteBookXray } from "./persistence/xrayCache"
+import { transferFeedbackSlice } from "./slices/transferFeedbackSlice"
 
 export const localApi = createApi({
   reducerPath: "localApi",
@@ -274,6 +276,20 @@ export const localApi = createApi({
       { bookUuid: UUID; format: "ebook" | "audiobook" | "readaloud" }
     >({
       async queryFn({ bookUuid, format }) {
+        const book = await getBook(bookUuid)
+        if (
+          !book?.serverUuid ||
+          !book[format] ||
+          book[format]!.downloadStatus === "DOWNLOADED" ||
+          downloadLifecycle.isCancelling({ bookUuid, format }) ||
+          (downloadLifecycle.active?.bookUuid === bookUuid &&
+            downloadLifecycle.active.format === format) ||
+          (format === "readaloud" && book.readaloud?.status !== "ALIGNED") ||
+          (format !== "readaloud" &&
+            book.readaloud?.downloadStatus === "DOWNLOADED")
+        ) {
+          return { data: null }
+        }
         await addBookToDownloadQueue(bookUuid, format)
 
         return { data: null }
@@ -285,13 +301,49 @@ export const localApi = createApi({
       { bookUuid: UUID; format: "ebook" | "audiobook" | "readaloud" }
     >({
       async queryFn({ bookUuid, format }, { dispatch }) {
-        await removeBookDownloads(bookUuid, format)
-        const removeXray = shouldDeleteBookXray(format, await getBook(bookUuid))
-        await deleteLocalBookFiles(bookUuid, format, removeXray)
-        if (removeXray) {
-          dispatch(
-            localApi.util.invalidateTags([{ type: "Xray", id: bookUuid }]),
+        const book = await getBook(bookUuid)
+        if (
+          !book?.[format] ||
+          !["DOWNLOADING", "QUEUED", "PAUSED"].includes(
+            book[format]!.downloadStatus,
           )
+        ) {
+          return { data: null }
+        }
+        const cancelled = await downloadLifecycle.cancel(
+          { bookUuid, format },
+          async () => {
+            await removeBookDownloads(bookUuid, format)
+            const removeXray = shouldDeleteBookXray(
+              format,
+              await getBook(bookUuid),
+            )
+            await deleteLocalBookFiles(bookUuid, format, removeXray)
+            if (removeXray) {
+              dispatch(
+                localApi.util.invalidateTags([{ type: "Xray", id: bookUuid }]),
+              )
+            }
+          },
+          () => {
+            if (
+              downloadLifecycle.active?.bookUuid === bookUuid &&
+              downloadLifecycle.active.format === format
+            ) {
+              dispatch(
+                transferFeedbackSlice.actions.bookDownloadChanged({
+                  bookUuid,
+                  format,
+                  phase: "cancelling",
+                }),
+              )
+            }
+          },
+        )
+        if (!cancelled) {
+          return {
+            error: "This download is being prepared and cannot be cancelled.",
+          }
         }
         return { data: null }
       },
@@ -306,6 +358,15 @@ export const localApi = createApi({
       }
     >({
       async queryFn({ bookUuid, format, deleteRecord = false }, { dispatch }) {
+        const active = downloadLifecycle.active
+        if (
+          active?.bookUuid === bookUuid &&
+          (!format || active.format === format)
+        ) {
+          return {
+            error: "Wait for the download to finish before removing it.",
+          }
+        }
         if (deleteRecord) {
           await deleteBook(bookUuid)
         } else {

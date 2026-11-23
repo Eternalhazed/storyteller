@@ -17,10 +17,16 @@ import { LoadingView } from "@/components/LoadingView"
 import { PlayPause } from "@/components/PlayPause"
 import { ProgressBar } from "@/components/ProgressBar"
 import { Toolbar } from "@/components/Toolbar"
+import { NavigationReturnControl } from "@/components/toolbarItems/navigation/NavigationReturnControl"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { PortalHost } from "@/components/ui/portal-context"
 import { Text } from "@/components/ui/text"
+import {
+  useClosePassageOnUnmount,
+  usePassageNavigation,
+} from "@/hooks/usePassageSurface"
+import { useRememberReadingSession } from "@/hooks/useReadingSession"
 import { useSpansFold } from "@/lib/pose"
 import { cn } from "@/lib/utils"
 import {
@@ -47,6 +53,7 @@ import {
   getTracks,
 } from "@/store/selectors/bookshelfSelectors"
 import { bookshelfSlice } from "@/store/slices/bookshelfSlice"
+import { isMoving } from "@/store/slices/passageSlice"
 import { type UUID } from "@/uuid"
 
 const ACTIVE_AUDIO_BOOKMARK_WINDOW_SECONDS = 2
@@ -71,6 +78,10 @@ export default function PlayerScreen() {
     uuid: UUID
     format?: "readaloud" | "ebook" | "audiobook"
   }
+  const passageContext = { bookUuid: uuid, format, surface: "audio" as const }
+  const navigation = usePassageNavigation(passageContext)
+  const moving = isMoving(navigation?.move)
+  useClosePassageOnUnmount(passageContext)
 
   const { data: book } = useGetBookQuery(uuid ? { uuid } : skipToken)
   const { data: bookmarks } = useGetBookBookmarksQuery(
@@ -80,6 +91,20 @@ export default function PlayerScreen() {
 
   const dispatch = useAppDispatch()
   const isLoading = useAppSelector(getIsAudioLoading)
+  const playerReadyForBook = useAppSelector(
+    ({ bookshelf }) =>
+      bookshelf.currentlyPlayingBookUuid === uuid &&
+      bookshelf.currentlyPlayingFormat === format &&
+      bookshelf.tracks.length > 0,
+  )
+  useRememberReadingSession(
+    !isLoading &&
+      playerReadyForBook &&
+      (format === "audiobook" || format === "readaloud") &&
+      book?.[format]?.downloadStatus === "DOWNLOADED"
+      ? { bookUuid: uuid, mode: "listening", format }
+      : null,
+  )
   const duration = useAppSelector(getCurrentTrackDuration)
   const position = useAppSelector(getPosition)
   const remainingTime = useAppSelector(getHumanFormattedRemainingTime)
@@ -310,6 +335,7 @@ export default function PlayerScreen() {
             <Text numberOfLines={1} className="mb-4">
               {chapterTitle}
             </Text>
+            <NavigationReturnControl {...passageContext} placement="player" />
           </View>
           <View className="my-4 w-full px-6">
             <ProgressBar
@@ -318,6 +344,7 @@ export default function PlayerScreen() {
               stop={duration}
               progress={eagerProgress}
               onProgressChange={(newProgress) => {
+                if (moving) return
                 setEagerProgress(newProgress)
                 dispatch(playerPositionSeeked({ progress: newProgress }))
               }}
@@ -343,6 +370,7 @@ export default function PlayerScreen() {
               accessibilityLabel="Previous track"
               variant="ghost"
               size="icon"
+              disabled={moving}
               onPress={() => {
                 if (singleTrack && currentChapterIndex >= 0) {
                   const current = chapters[currentChapterIndex]!
@@ -367,6 +395,7 @@ export default function PlayerScreen() {
               accessibilityLabel="Rewind 15 seconds"
               variant="ghost"
               size="icon"
+              disabled={moving}
               onPress={() => {
                 Storyteller.seekBy(-15)
               }}
@@ -377,6 +406,7 @@ export default function PlayerScreen() {
             <Button
               accessibilityLabel="Forward 30 seconds"
               variant="ghost"
+              disabled={moving}
               size="icon"
               onPress={() => {
                 Storyteller.seekBy(30)
@@ -388,6 +418,7 @@ export default function PlayerScreen() {
               accessibilityLabel="Next track"
               variant="ghost"
               size="icon"
+              disabled={moving}
               onPress={() => {
                 if (
                   singleTrack &&

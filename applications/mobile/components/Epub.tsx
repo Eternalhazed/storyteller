@@ -15,6 +15,7 @@ import { type Bookmark } from "@/database/bookmarks"
 import { type BookWithRelations } from "@/database/books"
 import { deepEquals } from "@/deepEquals"
 import { useColorTheme } from "@/hooks/useColorTheme"
+import { usePassageNavigation } from "@/hooks/usePassageSurface"
 import { useSpansFold } from "@/lib/pose"
 import { cn } from "@/lib/utils"
 import { logger } from "@/logger"
@@ -23,7 +24,11 @@ import {
   type EPUBViewRef,
   type ReadiumLocator,
 } from "@/modules/readium/src/Readium.types"
-import { bookDoubleTapped, bookLocatorChanged } from "@/store/actions"
+import {
+  bookDoubleTapped,
+  bookLocatorChanged,
+  readerArrivalReported,
+} from "@/store/actions"
 import { useAppDispatch, useAppSelector } from "@/store/appState"
 import {
   useGetBookBookmarksQuery,
@@ -36,6 +41,7 @@ import { getCustomFontUrl } from "@/store/persistence/fonts"
 import { getIsPlaying } from "@/store/selectors/bookshelfSelectors"
 import { getShouldKeepReaderAwake } from "@/store/selectors/sleepTimerSelectors"
 import { bookshelfSlice } from "@/store/slices/bookshelfSlice"
+import { isMoving } from "@/store/slices/passageSlice"
 import { type XraySelection } from "@/store/xraySelection"
 import { type UUID } from "@/uuid"
 
@@ -48,6 +54,7 @@ import { Toolbar } from "./Toolbar"
 import { XrayPopover } from "./XrayPopover"
 import { Group } from "./ui/Group"
 import { HideableView } from "./ui/HideableView"
+import { NavigationReturnControl } from "./toolbarItems/navigation/NavigationReturnControl"
 
 type Props = {
   book: BookWithRelations
@@ -154,6 +161,34 @@ export function Epub({ book, format, locator }: Props) {
   }, [hideStatusbar?.enabled, preferences?.showReaderUi])
 
   const epubViewRef = useRef<EPUBViewRef | null>(null)
+
+  const navigation = usePassageNavigation({
+    bookUuid: book.uuid,
+    format,
+    surface: "text",
+  })
+  const move = navigation?.move
+  const preview = navigation?.preview ?? false
+  const viewportLocator =
+    navigation && (preview || isMoving(move))
+      ? navigation.viewport.locator
+      : locator
+
+  useEffect(() => {
+    const viewer = epubViewRef.current
+    if (move?.state !== "display" || !("locator" in move.target) || !viewer)
+      return
+    let active = true
+    const report = (arrived: boolean) => {
+      if (active) dispatch(readerArrivalReported({ id: move.id, arrived }))
+    }
+    void viewer
+      .navigateToReference(move.target.locator)
+      .then(report, () => report(false))
+    return () => {
+      active = false
+    }
+  }, [dispatch, move, isLoadingPreferences, isPreferencesUninitialized])
 
   const getCurrentSelection =
     useCallback(async (): Promise<ReadiumLocator | null> => {
@@ -329,7 +364,7 @@ export function Epub({ book, format, locator }: Props) {
           ref={epubViewRef}
           style={{ flex: 1 }}
           bookUuid={book.uuid}
-          locator={locator}
+          locator={viewportLocator}
           highlights={highlights ?? []}
           bookmarks={bookmarks?.map((bookmark) => bookmark.locator) ?? []}
           fontScale={preferences?.typography?.scale}
@@ -384,6 +419,7 @@ export function Epub({ book, format, locator }: Props) {
             })
           }}
           onDoubleTouch={(event) => {
+            if (preview || isMoving(move)) return
             dispatch(
               bookDoubleTapped({
                 bookUuid: book.uuid,
@@ -409,8 +445,27 @@ export function Epub({ book, format, locator }: Props) {
               }),
             )
           }}
-          isPlaying={isPlaying}
+          isPlaying={isPlaying && !preview}
         />
+        <View
+          pointerEvents="box-none"
+          className="absolute right-4 left-4 z-4 items-end"
+          style={{
+            left: insets.left + 12,
+            right: insets.right + 12,
+            bottom:
+              (floatingToolbar || !preferences?.showReaderUi
+                ? insets.bottom
+                : 0) + (floatingToolbar && preferences?.showReaderUi ? 76 : 8),
+          }}
+        >
+          <NavigationReturnControl
+            bookUuid={book.uuid}
+            format={format}
+            surface="text"
+            placement="reader"
+          />
+        </View>
       </View>
       <MiniPlayer
         floatingToolbar={floatingToolbar ?? false}

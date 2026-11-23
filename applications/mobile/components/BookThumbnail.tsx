@@ -6,8 +6,9 @@ import { type BookWithRelations } from "@/database/books"
 import { useAvailableFormats } from "@/hooks/useAvailableFormats"
 import { useDownloadedFormats } from "@/hooks/useDownloadedFormats"
 import { cn } from "@/lib/utils"
+import { useAppSelector } from "@/store/appState"
 import {
-  useDeleteBookMutation,
+  useCancelDownloadMutation,
   useDownloadBookMutation,
   useListStatusesQuery,
   useUpdateStatusMutation,
@@ -16,6 +17,10 @@ import {
 import { AudiobookCover } from "./AudiobookCover"
 import { DownloadingIndicator } from "./DownloadingIndicator"
 import { EbookCover } from "./EbookCover"
+import {
+  DOWNLOAD_FORMAT_LABEL,
+  getBookDownloadState,
+} from "./bookDownloadState"
 import { Stack } from "./ui/Stack"
 import { Button } from "./ui/button"
 import { Icon } from "./ui/icon"
@@ -42,13 +47,16 @@ export function BookThumbnail({
 
   const downloadedFormats = useDownloadedFormats(book)
   const availableFormats = useAvailableFormats(book)
+  const downloadActivity = useAppSelector(
+    (state) => state.transferFeedback.download,
+  )
 
   const audioOnly =
     !downloadedFormats.includes("ebook") &&
     !downloadedFormats.includes("readaloud")
 
   const [downloadBook] = useDownloadBookMutation()
-  const [deleteBook] = useDeleteBookMutation()
+  const [cancelDownload] = useCancelDownloadMutation()
 
   const { data: statuses } = useListStatusesQuery()
 
@@ -115,39 +123,41 @@ export function BookThumbnail({
           {
             id: "downloads",
             title: "Downloads",
-            subactions: availableFormats.map((format) => {
-              const isDownloaded = downloadedFormats.includes(format)
-              const unavailable =
-                format !== "readaloud" &&
-                downloadedFormats.includes("readaloud")
+            subactions: availableFormats.flatMap((format) => {
+              const state = getBookDownloadState(book, format, downloadActivity)
+              const actionLabel =
+                state.action === "remove"
+                  ? book.serverUuid
+                    ? "Manage download"
+                    : "Manage local book"
+                  : state.actionLabel
 
-              return {
+              const action: MenuAction = {
                 id: `download-${format}`,
-                title: isDownloaded
-                  ? `Remove ${format}`
-                  : `${format[0]?.toUpperCase()}${format.slice(1)}`,
-                ...(isDownloaded
-                  ? { attributes: { destructive: true } }
-                  : unavailable
-                    ? { attributes: { disabled: true } }
-                    : {}),
+                title: `${DOWNLOAD_FORMAT_LABEL[format]}: ${state.label}${actionLabel && state.status !== "download" ? ` — ${actionLabel}` : ""}`,
+                ...(!state.action ? { attributes: { disabled: true } } : {}),
                 onPress: () => {
-                  if (unavailable) return
-
-                  if (isDownloaded) {
-                    deleteBook({
-                      bookUuid: book.uuid,
-                      format,
-                      deleteRecord: book.serverUuid === null,
-                    })
-                    return
+                  if (state.action === "remove") {
+                    openBookDetails()
+                  } else if (state.action === "cancel") {
+                    cancelDownload({ bookUuid: book.uuid, format })
+                  } else if (state.action) {
+                    downloadBook({ bookUuid: book.uuid, format })
                   }
-                  downloadBook({
-                    bookUuid: book.uuid,
-                    format,
-                  })
                 },
               }
+              return state.canResume
+                ? [
+                    action,
+                    {
+                      id: `resume-${format}`,
+                      title: `${DOWNLOAD_FORMAT_LABEL[format]}: Resume queue`,
+                      onPress: () => {
+                        downloadBook({ bookUuid: book.uuid, format })
+                      },
+                    },
+                  ]
+                : [action]
             }),
           },
         ]
@@ -188,6 +198,22 @@ export function BookThumbnail({
       >
         {book.title}
       </Text>
+      {availableFormats.map((format) => {
+        const state = getBookDownloadState(book, format, downloadActivity)
+        if (state.status === "download") return null
+        const label = `${state.label} · ${DOWNLOAD_FORMAT_LABEL[format]}`
+        return (
+          <Text
+            key={format}
+            className="text-muted-foreground"
+            numberOfLines={2}
+            accessibilityLabel={label}
+            style={{ maxWidth, fontSize: authorFontSize }}
+          >
+            {label}
+          </Text>
+        )
+      })}
     </>
   )
 
@@ -225,9 +251,22 @@ export function BookThumbnailImage({
   showActions?: boolean
   width: number
 }) {
-  const downloadingFormat = [book.readaloud, book.ebook, book.audiobook].find(
-    (format) => format?.downloadStatus === "DOWNLOADING",
+  const downloadActivity = useAppSelector(
+    (state) => state.transferFeedback.download,
   )
+  const availableFormats = useAvailableFormats(book)
+  const indicatorFormat =
+    (downloadActivity?.bookUuid === book.uuid
+      ? downloadActivity.format
+      : null) ??
+    availableFormats.find((format) =>
+      ["QUEUED", "DOWNLOADING", "PAUSED", "ERROR"].includes(
+        book[format]!.downloadStatus,
+      ),
+    )
+  const downloadState = indicatorFormat
+    ? getBookDownloadState(book, indicatorFormat, downloadActivity)
+    : null
 
   const downloadedFormats = useDownloadedFormats(book)
 
@@ -245,16 +284,27 @@ export function BookThumbnailImage({
         width,
       }}
     >
-      {downloadingFormat && (
+      {downloadState?.progress !== null &&
+      downloadState?.progress !== undefined ? (
         <DownloadingIndicator
-          className={"absolute z-50"}
-          progress={downloadingFormat.downloadProgress}
+          className="absolute z-50"
+          progress={downloadState.progress}
+          accessibilityLabel={`${DOWNLOAD_FORMAT_LABEL[indicatorFormat!]}: ${downloadState.label}`}
           size={Math.ceil(height / 10)}
           style={{
             left: 0.98 * width - Math.ceil(height / 10),
             bottom: hasBothCovers ? 0.1 * height : 0.02 * height,
           }}
         />
+      ) : (
+        downloadState && (
+          <Text
+            className="bg-background text-foreground absolute bottom-0 left-0 z-50 rounded px-1 text-xs"
+            accessibilityLabel={`${DOWNLOAD_FORMAT_LABEL[indicatorFormat!]}: ${downloadState.label}`}
+          >
+            {downloadState.label}
+          </Text>
+        )
       )}
       {(book.readaloud?.status === "ALIGNED" ||
         downloadedFormats.includes("readaloud")) && (

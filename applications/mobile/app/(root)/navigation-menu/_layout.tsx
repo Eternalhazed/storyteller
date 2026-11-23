@@ -76,10 +76,15 @@ export default function NavigationMenuLayout() {
       >
         <View className="bg-muted-foreground/40 h-1 w-12 rounded-full" />
       </View>
-      <NavigationReturnControl
-        bookUuid={params.uuid}
-        onReturn={() => router.dismiss()}
-      />
+      {params.uuid && params.format && (
+        <NavigationReturnControl
+          bookUuid={params.uuid}
+          format={params.format}
+          surface={params.mode ?? "text"}
+          placement="menu"
+          onContinue={() => router.dismiss()}
+        />
+      )}
       <View className="flex-1">
         <Tabs
           safeAreaInsets={{ bottom: 0 }}

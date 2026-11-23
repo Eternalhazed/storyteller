@@ -4,9 +4,11 @@ import { useEffect } from "react"
 
 import { Epub } from "@/components/Epub"
 import { LoadingView } from "@/components/LoadingView"
-import { useSpansFold } from "@/lib/pose"
 import { useIsFocused } from "@/hooks/useIsFocused"
 import { useIsNotBackground } from "@/hooks/useIsNotBackground"
+import { useClosePassageOnUnmount } from "@/hooks/usePassageSurface"
+import { useRememberReadingSession } from "@/hooks/useReadingSession"
+import { useSpansFold } from "@/lib/pose"
 import { useAppDispatch, useAppSelector } from "@/store/appState"
 import { useGetBookQuery } from "@/store/localApi"
 import { bookshelfSlice } from "@/store/slices/bookshelfSlice"
@@ -19,6 +21,7 @@ export default function BookScreen() {
   }
 
   const dispatch = useAppDispatch()
+  useClosePassageOnUnmount({ bookUuid: uuid, format, surface: "text" })
 
   const { data: book } = useGetBookQuery({ uuid })
   const locator = book?.position?.locator
@@ -35,12 +38,25 @@ export default function BookScreen() {
   const isAudioLoading = useAppSelector(
     (state) => state.bookshelf.isAudioLoading,
   )
+  const readerReadyForBook = useAppSelector(
+    ({ bookshelf }) =>
+      bookshelf.currentlyPlayingBookUuid === uuid &&
+      bookshelf.currentlyPlayingFormat === format,
+  )
   const showEpub =
     !!book &&
     !!locator &&
     (isFocused || isReaderSheetOpen) &&
     isNotBackground &&
     !isAudioLoading
+
+  useRememberReadingSession(
+    showEpub &&
+      readerReadyForBook &&
+      book[format]?.downloadStatus === "DOWNLOADED"
+      ? { bookUuid: uuid, mode: "reading", format }
+      : null,
+  )
 
   useEffect(() => {
     dispatch(bookshelfSlice.actions.bookOpened({ bookUuid: uuid, format }))

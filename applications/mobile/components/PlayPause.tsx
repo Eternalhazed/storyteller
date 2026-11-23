@@ -25,6 +25,11 @@ export function PlayPause({
 }: Props) {
   const isPlaying = useAppSelector(getIsPlaying)
   const isLoading = useAppSelector(getIsAudioLoading)
+  const preview = useAppSelector(
+    ({ bookshelf, passage }) =>
+      passage.navigation?.context.bookUuid ===
+        bookshelf.currentlyPlayingBookUuid && passage.navigation.preview,
+  )
   const { foreground } = useColorTheme()
 
   if (isLoading) {
@@ -51,6 +56,12 @@ export function PlayPause({
   ) : (
     <Button
       accessibilityLabel="Play"
+      accessibilityHint={
+        preview
+          ? "Return to your saved place or choose Continue here before playing."
+          : undefined
+      }
+      disabled={preview}
       variant="ghost"
       size={buttonSize}
       onPress={() => {

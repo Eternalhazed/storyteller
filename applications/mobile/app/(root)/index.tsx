@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native"
 
+import { ContinueReading } from "@/components/ContinueReading"
 import { MiniPlayerWidget } from "@/components/MiniPlayerWidget"
 import { Shelf } from "@/components/Shelf"
 import { Group } from "@/components/ui/Group"
@@ -25,17 +26,19 @@ import { type BookWithRelations } from "@/database/books"
 import { type Collection } from "@/database/collections"
 import { useIsFocused } from "@/hooks/useIsFocused"
 import { useListAllServerBooks } from "@/hooks/useListAllServerBooks"
+import { useLastReadingSession } from "@/hooks/useReadingSession"
 import { bookImported } from "@/store/actions"
 import { useAppDispatch } from "@/store/appState"
+import { getContinueReading } from "@/store/continueReading"
 import {
   useListBooksQuery as useListLocalBooksQuery,
   useListCollectionsQuery,
 } from "@/store/localApi"
+import { filterNextUp } from "@/store/nextUp"
 import { periodicalsLast } from "@/store/periodicals"
 
 import {
   filterCurrentlyReading,
-  filterNextUp,
   filterRecentlyAdded,
   filterStartReading,
 } from "./shelf/[type]"
@@ -77,6 +80,15 @@ export default function Home() {
       staleBooksRef.current = liveBooks
     }
   }, [isFocused, liveBooks])
+
+  const lastReadingSession = useLastReadingSession()
+  const continueReading = useMemo(
+    () =>
+      lastReadingSession === undefined
+        ? null
+        : getContinueReading(books, lastReadingSession),
+    [books, lastReadingSession],
+  )
 
   const onDevice = useMemo(() => {
     return books
@@ -190,6 +202,7 @@ export default function Home() {
           />
         }
       >
+        {continueReading && <ContinueReading {...continueReading} />}
         <Shelf
           label="On this device"
           books={onDevice}

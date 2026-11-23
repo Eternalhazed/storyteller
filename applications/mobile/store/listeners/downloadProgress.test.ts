@@ -1,7 +1,10 @@
 import assert from "node:assert/strict"
 import { test } from "vitest"
 
-import { createDownloadProgressHandler } from "./downloadProgress"
+import {
+  createDownloadProgressHandler,
+  getDownloadProgress,
+} from "./downloadProgress"
 
 Object.defineProperty(globalThis, "window", {
   configurable: true,
@@ -53,4 +56,14 @@ test("prevents an in-flight progress update from replacing final state", async (
   await inFlightUpdate
 
   assert.equal(cachedStatus, "DOWNLOADED")
+})
+
+test("keeps transfer percentages finite when a response has no content length", () => {
+  assert.equal(getDownloadProgress(0, 0), 0)
+  assert.equal(getDownloadProgress(512, -1), 0)
+  assert.equal(getDownloadProgress(512, Infinity), 0)
+  assert.equal(getDownloadProgress(NaN, 1024), 0)
+  assert.equal(getDownloadProgress(-1, 1024), 0)
+  assert.equal(getDownloadProgress(2048, 1024), 100)
+  assert.equal(getDownloadProgress(128, 1024), 13)
 })

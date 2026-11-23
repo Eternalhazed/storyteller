@@ -13,16 +13,13 @@ import {
 import {
   bookDoubleTapped,
   bookLocatorChanged,
-  bookmarkPressed,
   miniPlayerSliderChapterPositionChanged,
-  navItemPressed,
   nextTrackPressed,
   playerClipChanged,
   playerPositionSeeked,
   playerTotalPositionSeeked,
   playerTrackChanged,
   prevTrackPressed,
-  returnToPreviousPosition,
   serverPositionUpdated,
 } from "@/store/actions"
 import { localApi } from "@/store/localApi"
@@ -30,44 +27,41 @@ import {
   getCurrentlyPlayingBookUuid,
   getCurrentlyPlayingFormat,
   getIsPlaying,
-  getReturnToPosition,
 } from "@/store/selectors/bookshelfSelectors"
+import { isMoving, passageSlice } from "@/store/slices/passageSlice"
 import { bookshelfSlice } from "@/store/slices/bookshelfSlice"
 import { type UUID } from "@/uuid"
 
 import { startAppListening } from "./listenerMiddleware"
+
+const { actions: passage } = passageSlice
+
+function positionIsHeld(nav: Parameters<typeof isMoving>[0], preview: boolean) {
+  return preview || isMoving(nav)
+}
 
 const matchReaderLocatorUpdate = isAnyOf(
   bookDoubleTapped,
   miniPlayerSliderChapterPositionChanged,
   bookLocatorChanged,
   serverPositionUpdated,
-  navItemPressed,
-  bookmarkPressed,
-  returnToPreviousPosition,
 )
 
 startAppListening({
   matcher: matchReaderLocatorUpdate,
   effect: async (action, listenerApi) => {
-    let bookUuid: UUID
-    let locator: ReadiumLocator
-    let timestamp: number
-
-    if (action.type === returnToPreviousPosition.type) {
-      const { bookUuid: uuid, timestamp: ts } = action.payload as ReturnType<
-        typeof returnToPreviousPosition
-      >["payload"]
-      bookUuid = uuid
-      timestamp = ts
-      const returnPos = getReturnToPosition(
-        listenerApi.getOriginalState(),
-        bookUuid,
-      )
-      if (!returnPos) return
-      locator = returnPos.locator
-    } else {
-      ;({ bookUuid, locator, timestamp } = action.payload)
+    const { bookUuid, locator, timestamp } = action.payload
+    const nav = listenerApi.getState().passage.navigation
+    if (nav?.context.bookUuid === bookUuid) {
+      if (action.type === serverPositionUpdated.type && nav.remote) return
+      if (positionIsHeld(nav.move, nav.preview)) {
+        if (action.type === bookLocatorChanged.type) {
+          listenerApi.dispatch(
+            passage.viewportChanged({ context: nav.context, locator }),
+          )
+        }
+        return
+      }
     }
 
     const updatePositionPromise = listenerApi.dispatch(
@@ -115,6 +109,14 @@ startAppListening({
     const clip = await getClip(book, format, locator, positions)
 
     if (!clip) return
+    const latest = listenerApi.getState()
+    if (getCurrentlyPlayingBookUuid(latest) !== bookUuid) return
+    const currentNav = latest.passage.navigation
+    if (
+      currentNav?.context.bookUuid === bookUuid &&
+      positionIsHeld(currentNav.move, currentNav.preview)
+    )
+      return
 
     if (action.type === bookDoubleTapped.type) {
       await Storyteller.seekTo(clip.relativeUrl, clip.start + 0.01, true)
@@ -187,7 +189,7 @@ startAppListening({
   },
 })
 
-async function getLocatorFromTrackPosition(
+export async function getLocatorFromTrackPosition(
   bookUuid: UUID,
   format: "ebook" | "readaloud" | "audiobook",
   track: StorytellerTrack,
@@ -205,6 +207,16 @@ async function getLocatorFromTrackPosition(
 startAppListening({
   actionCreator: bookshelfSlice.actions.isPlayingChanged,
   effect: async (action, listenerApi) => {
+    const original = listenerApi.getOriginalState()
+    const nav = listenerApi.getState().passage.navigation
+    const playingBook = getCurrentlyPlayingBookUuid(original)
+    if (
+      nav?.context.bookUuid === playingBook &&
+      positionIsHeld(nav.move, nav.preview)
+    ) {
+      if (action.payload.isPlaying && nav.preview) await Storyteller.pause()
+      return
+    }
     if (action.payload.isPlaying) return
     if (
       getIsPlaying(listenerApi.getOriginalState()) ===
@@ -222,7 +234,7 @@ startAppListening({
       const currentBookUuid = getCurrentlyPlayingBookUuid(
         listenerApi.getState(),
       )
-      if (!currentBookUuid) return
+      if (!currentBookUuid || currentBookUuid !== playingBook) return
 
       const format = getCurrentlyPlayingFormat(listenerApi.getState())
       if (!format) return
@@ -235,6 +247,12 @@ startAppListening({
       )
 
       if (!locator) return
+      const latest = listenerApi.getState().passage.navigation
+      if (
+        latest?.context.bookUuid === currentBookUuid &&
+        positionIsHeld(latest.move, latest.preview)
+      )
+        return
 
       const payload = {
         bookUuid: currentBookUuid,
@@ -263,6 +281,12 @@ startAppListening({
         listenerApi.getState(),
       )
       if (!currentBookUuid) return
+      const nav = listenerApi.getState().passage.navigation
+      if (
+        nav?.context.bookUuid === currentBookUuid &&
+        positionIsHeld(nav.move, nav.preview)
+      )
+        return
 
       const locator = clip.locator
 

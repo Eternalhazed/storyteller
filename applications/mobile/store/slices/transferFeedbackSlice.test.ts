@@ -7,6 +7,8 @@ import {
 } from "./transferFeedbackSlice"
 
 const {
+  bookDownloadChanged,
+  bookDownloadSettled,
   bookImportStageChanged,
   bookImportSettled,
   bookTransferFailed,
@@ -69,4 +71,40 @@ test("dismisses a failure without touching the import stage", () => {
 
   assert.equal(dismissed.failure, null)
   assert.equal(dismissed.importStage, "parsing")
+})
+
+test("tracks actual download preparation independently of import progress", () => {
+  const state = transferFeedbackSlice.reducer(
+    stateWith({ importStage: "copying" }),
+    bookDownloadChanged({
+      bookUuid: "book",
+      format: "ebook",
+      phase: "preparing",
+    }),
+  )
+  assert.equal(state.download?.phase, "preparing")
+  assert.equal(state.importStage, "copying")
+})
+
+test("settling one format cannot clear another active download", () => {
+  const state = transferFeedbackSlice.reducer(
+    initial,
+    bookDownloadChanged({
+      bookUuid: "book",
+      format: "readaloud",
+      phase: "downloading",
+    }),
+  )
+  const unrelated = transferFeedbackSlice.reducer(
+    state,
+    bookDownloadSettled({ bookUuid: "book", format: "ebook" }),
+  )
+  assert.equal(unrelated.download?.format, "readaloud")
+  assert.equal(
+    transferFeedbackSlice.reducer(
+      unrelated,
+      bookDownloadSettled({ bookUuid: "book", format: "readaloud" }),
+    ).download,
+    null,
+  )
 })

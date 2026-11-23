@@ -11,7 +11,7 @@ import {
   type ReadiumLocator,
   type ReadiumManifest,
 } from "@/modules/readium/src/Readium.types"
-import { type ReturnToPosition } from "@/store/slices/bookshelfSlice"
+import { type Passage } from "@/store/slices/passageSlice"
 import { getFurthestReadLocator } from "@/store/xrayBoundary"
 
 export type XrayScope = "now" | "chapter" | "book"
@@ -153,7 +153,7 @@ export function buildXrayJump({
   chapterLinks: readonly (XrayChapterLink | null)[]
   format: "readaloud" | "ebook" | "audiobook"
   currentLocator: ReadiumLocator | null | undefined
-  returnPosition?: ReturnToPosition | null | undefined
+  returnPosition?: Passage | null | undefined
 }): {
   locator: ReadiumLocator
   currentLocator: ReadiumLocator | undefined

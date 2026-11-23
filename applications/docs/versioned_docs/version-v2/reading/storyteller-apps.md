@@ -39,15 +39,45 @@ Storyteller server._
 
 ### Downloading books from the server
 
-After you've configured your server URL, you'll be asked to log in. You can then
-view all of the books in your chosen library in the Browse tab, and download any
-of them to your device.
+After you've configured your server URL and signed in, open a book from Home or
+search to see the formats you can download. The book card and its details use
+the same download states: **Queued**, **Downloading**, **Preparing**,
+**Available offline**, and **Failed**. You can cancel while a download is queued
+or transferring, but not while the app is preparing the book. Wait for
+**Available offline** before going offline. Downloaded books appear on **On this
+device**. If a transfer was interrupted by closing the app, choose **Resume
+queue** to restart pending transfers. For a failed download, choose **Try
+again**.
 
-Be sure to keep the app open and in the foreground during the download (support
-for background downloads is on the roadmap!). Once your book is downloaded,
-you'll find it on your Bookshelf, where you can start reading or listening!
+## Continue reading or listening
 
-### Magazines on the home screen
+Home shows one **Continue reading** or **Continue listening** card above the
+shelves. It remembers the last reader or full player you opened on that device
+and uses the same downloaded format. The card shows the saved chapter title and
+book progress when available. Tapping it opens the reader or player at your
+saved place; it doesn't start narration automatically.
+
+If there's no eligible last session, Home looks for other downloaded books with
+unfinished progress. Finished books aren't promoted. After you mark a numbered
+book **Read**, **Next up** shows the earliest unread volume after the last
+completed volume in that series.
+
+## Returning after looking up a passage
+
+Opening a passage from X-Ray, Bookmarks, or Highlights lets you look around
+without replacing your saved reading position. Tap **Back to where I was** in
+the reader or player to return to the original passage, even after visiting more
+than one reference. If you want to save the place you found instead, open the
+navigation sheet and tap **Continue here**.
+
+Contents jumps outside a preview still move your saved position and offer a
+one-tap undo. During a preview, reading or listening progress stays at the
+original location, and X-Ray does not reveal information beyond it. Narration
+pauses for a preview and does not restart automatically when you return. If
+another device reports a newer position during a preview, it is offered after
+you return.
+
+## Magazines on the home screen
 
 Books in a collection named **Magazines** are kept off the home screen's **Start
 reading** and **Recently added** shelves, so a batch of issues doesn't push your
@@ -90,8 +120,7 @@ of the visible page, or the sentence being spoken during synchronized readaloud
 listening. Select a known name and tap **X-Ray** for a compact card; **All
 mentions** opens that entity's detail view. A selection can reveal its own
 sentence, but not information from later in the book. Tapping a fact or mention
-opens its passage; **Back to previous position** keeps your original place while
-you explore.
+opens a preview of its passage without changing your saved place.
 
 The index downloads with the book and refreshes when you reopen it. Once cached,
 X-Ray works offline and selection lookups do not send text anywhere. Books

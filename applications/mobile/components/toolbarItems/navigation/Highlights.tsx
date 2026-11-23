@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button"
 import { Text } from "@/components/ui/text"
 import { useColorTheme } from "@/hooks/useColorTheme"
 import { getHrefChapterTitle, positionToPageCount } from "@/links"
-import { bookmarkPressed } from "@/store/actions"
 import { useAppDispatch, useAppSelector } from "@/store/appState"
 import {
   useGetBookHighlightsQuery,
@@ -21,17 +20,20 @@ import {
   useGetGlobalPreferencesQuery,
 } from "@/store/localApi"
 import { getCurrentlyPlayingFormat } from "@/store/selectors/bookshelfSelectors"
+import { passageSlice } from "@/store/slices/passageSlice"
 import { type UUID } from "@/uuid"
 
 interface Props {
   bookUuid?: UUID | undefined
   format?: "readaloud" | "ebook" | "audiobook" | undefined
+  surface?: "text" | "audio" | undefined
   onClose?: () => void
 }
 
 export function Highlights({
   bookUuid: bookUuidProp,
   format: formatProp,
+  surface = "text",
   onClose,
 }: Props) {
   const selectedFormat = useAppSelector(getCurrentlyPlayingFormat)
@@ -129,13 +131,16 @@ export function Highlights({
       {highlights.map((highlight, index) => (
         <View key={highlight.uuid} className="py-0.5">
           <Button
-            onPress={async () => {
+            onPress={() => {
+              if (!format || !book?.position) return
               dispatch(
-                bookmarkPressed({
+                passageSlice.actions.jump({
                   bookUuid,
-                  locator: highlight.locator,
-                  timestamp: Date.now(),
-                  currentLocator: book?.position?.locator,
+                  format,
+                  surface,
+                  purpose: "reference",
+                  origin: book.position.locator,
+                  target: { locator: highlight.locator },
                 }),
               )
               onClose?.()

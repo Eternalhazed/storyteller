@@ -54,48 +54,27 @@ export const miniPlayerSliderChapterPositionChanged = createAction(
   }),
 )
 
+export type RemoteBookPosition = {
+  bookUuid: UUID
+  locator: ReadiumLocator
+  timestamp: number
+}
+
 export const serverPositionUpdated = createAction(
   "serverPositionUpdated",
-  (payload: {
-    bookUuid: UUID
-    locator: ReadiumLocator
-    timestamp: number
-  }) => ({
-    payload,
-  }),
+  (payload: RemoteBookPosition) => ({ payload }),
 )
 
-export const navItemPressed = createAction(
-  "navitemPressed",
-  (payload: {
-    bookUuid: UUID
-    locator: ReadiumLocator
-    timestamp: number
-    currentLocator?: ReadiumLocator | undefined
-  }) => ({ payload }),
-)
+export const readerArrivalReported = createAction<{
+  id: string
+  arrived: boolean
+}>("readerArrivalReported")
 
-export const bookmarkPressed = createAction(
-  "bookmarkPressed",
-  (payload: {
-    bookUuid: UUID
-    locator: ReadiumLocator
-    timestamp: number
-    currentLocator?: ReadiumLocator | undefined
-  }) => ({ payload }),
-)
-
-export const clearReturnPosition = createAction(
-  "clearReturnPosition",
-  (payload: { bookUuid: UUID }) => ({ payload }),
-)
-
-export const returnToPreviousPosition = createAction(
-  "returnToPreviousPosition",
-  (payload: { bookUuid: UUID; timestamp: number }) => ({
-    payload,
-  }),
-)
+export const passageSurfaceEntered = createAction<{
+  bookUuid: UUID
+  format: "ebook" | "readaloud" | "audiobook"
+  surface: "text" | "audio"
+}>("passageSurfaceEntered")
 
 export const playerPositionUpdated = createAction("playerPositionUpdated")
 

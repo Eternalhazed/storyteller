@@ -11,9 +11,9 @@ import { cn } from "@/lib/utils"
 import { isSameChapter } from "@/links"
 import { locateLink } from "@/modules/readium"
 import { type ReadiumLink } from "@/modules/readium/src/Readium.types"
-import { navItemPressed } from "@/store/actions"
 import { useAppDispatch, useAppSelector } from "@/store/appState"
 import { useGetBookQuery } from "@/store/localApi"
+import { passageSlice } from "@/store/slices/passageSlice"
 import { getCurrentlyPlayingFormat } from "@/store/selectors/bookshelfSelectors"
 import { type UUID } from "@/uuid"
 
@@ -57,13 +57,22 @@ export function TableOfContents({
       ? book?.readaloud?.epubManifest?.toc
       : book?.[format]?.manifest?.toc)
 
-  const locator = book?.position?.locator
+  const locator = useAppSelector((state) => {
+    const nav = state.passage.navigation
+    if (
+      nav?.preview &&
+      nav.context.bookUuid === bookUuid &&
+      nav.context.format === format
+    )
+      return nav.viewport.locator
+    return book?.position?.locator
+  })
 
   const currentTocLink =
     locator && searchToc(toc, (link) => isSameChapter(link.href, locator.href))
 
   const paddingBottom = useReaderFormSheetScrollPaddingBottom()
-  if (!toc || !book) return
+  if (!toc || !book || !format || format === "audiobook") return
 
   return (
     <ScrollView
@@ -85,6 +94,7 @@ export function TableOfContents({
         <TableOfContentsLink
           key={link.href}
           book={book}
+          format={format}
           link={link}
           currentTocLink={currentTocLink}
           ref={currentItemRef}
@@ -97,12 +107,14 @@ export function TableOfContents({
 
 function TableOfContentsLink({
   book,
+  format,
   link,
   currentTocLink,
   ref,
   onPress,
 }: {
   book: BookWithRelations
+  format: "ebook" | "readaloud"
   link: ReadiumLink
   currentTocLink: { href: string; title?: string } | null | undefined
   ref?: Ref<ViewInstance> | undefined
@@ -121,14 +133,17 @@ function TableOfContentsLink({
       <Button
         variant="ghost"
         onPress={async () => {
+          if (!book.position) return
           const locator = await locateLink(book.uuid, link)
 
           dispatch(
-            navItemPressed({
+            passageSlice.actions.jump({
               bookUuid: book.uuid,
-              locator,
-              timestamp: Date.now(),
-              currentLocator: book.position?.locator,
+              format,
+              surface: "text",
+              purpose: "chapter",
+              origin: book.position.locator,
+              target: { locator },
             }),
           )
 
@@ -147,6 +162,7 @@ function TableOfContentsLink({
         <View key={child.href} className="pl-4">
           <TableOfContentsLink
             book={book}
+            format={format}
             link={child}
             currentTocLink={currentTocLink}
             ref={ref}

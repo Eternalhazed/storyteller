@@ -4,8 +4,8 @@ import { useMemo } from "react"
 import { BookGrid } from "@/components/BookGrid"
 import { type BookWithRelations } from "@/database/books"
 import { useListBooksQuery } from "@/store/localApi"
+import { filterNextUp } from "@/store/nextUp"
 import { withoutPeriodicals } from "@/store/periodicals"
-import { type UUID } from "@/uuid"
 
 const EMPTY_BOOKS: BookWithRelations[] = []
 
@@ -42,40 +42,6 @@ export function filterCurrentlyReading(books: BookWithRelations[]) {
   return books
     .filter((book) => book.status?.name === "Reading")
     .sort((a, b) => (b.position?.timestamp ?? 0) - (a.position?.timestamp ?? 0))
-}
-
-export function filterNextUp(books: BookWithRelations[]) {
-  const seriesToBooks = books.reduce((acc, book) => {
-    for (const s of book.series) {
-      acc.set(
-        s.uuid,
-        (acc.get(s.uuid) ?? [])
-          .concat({ position: s.position ?? 0, book })
-          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
-      )
-    }
-    return acc
-  }, new Map<UUID, { position: number; book: BookWithRelations }[]>())
-
-  const resultBooks = new Set<BookWithRelations>()
-  for (const seriesBooks of seriesToBooks.values()) {
-    const lastReadBook = seriesBooks.findLast(
-      (b) => b.book.status?.name === "Read",
-    )
-    const lastUnreadBook = seriesBooks.findLast(
-      (b) => b.book.status?.name !== "Read",
-    )
-
-    if (
-      lastReadBook &&
-      lastUnreadBook &&
-      lastReadBook.position < lastUnreadBook.position
-    ) {
-      resultBooks.add(lastUnreadBook.book)
-    }
-  }
-
-  return Array.from(resultBooks)
 }
 
 export function filterStartReading(books: BookWithRelations[]) {
