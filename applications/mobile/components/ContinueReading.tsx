@@ -26,6 +26,16 @@ type Props = {
   seriesLabel?: string | null
 }
 
+// Some ebooks ship without a cover image; show the audiobook art instead of an
+// empty frame.
+function hasTextCover(book: BookWithRelations) {
+  return Boolean(book.ebookCoverUrl ?? book.textCoverSha256)
+}
+
+function hasAudioCover(book: BookWithRelations) {
+  return Boolean(book.audiobookCoverUrl ?? book.audioCoverSha256)
+}
+
 export function ContinueReading({
   book,
   session,
@@ -91,7 +101,7 @@ export function ContinueReading({
           size={24}
           className="text-muted-foreground absolute"
         />
-        {listening ? (
+        {listening || (!hasTextCover(book) && hasAudioCover(book)) ? (
           <AudiobookCover book={book} />
         ) : (
           <EbookCover book={book} />
