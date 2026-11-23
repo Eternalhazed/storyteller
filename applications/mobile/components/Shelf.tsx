@@ -53,9 +53,12 @@ export function Shelf({
   return (
     <Stack>
       <View className="flex-row items-baseline justify-between gap-3 pr-3">
-        {/* YoungSerif has a single weight; asking for semibold makes Android
-            measure the text too narrow and cut it to its first word. */}
-        <Text variant="h3" className="font-youngserif shrink font-normal">
+        {/* YoungSerif has a single weight, and Android measures negative
+            letter spacing too narrow; either cuts or wraps the heading. */}
+        <Text
+          variant="h3"
+          className="font-youngserif shrink font-normal tracking-normal"
+        >
           {label}
         </Text>
 

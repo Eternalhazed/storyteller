@@ -1,6 +1,12 @@
 import { Link, Stack as RouterStack, useLocalSearchParams } from "expo-router"
 import { useMemo, useState } from "react"
-import { FlatList, ScrollView, View, useWindowDimensions } from "react-native"
+import {
+  FlatList,
+  Pressable,
+  ScrollView,
+  View,
+  useWindowDimensions,
+} from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 
 import { BackButton } from "@/components/BackButton"
@@ -75,7 +81,10 @@ export default function SeriesListScreen() {
       ) : (
         <View className="px-safe-or-2 flex-row items-center gap-2">
           <BackButton />
-          <Text className="font-youngserif my-2" variant="h3">
+          <Text
+            className="font-youngserif my-2 font-normal tracking-normal"
+            variant="h3"
+          >
             Series
           </Text>
         </View>
@@ -158,9 +167,9 @@ export default function SeriesListScreen() {
               href={{ pathname: "/series/[uuid]", params: { uuid: item.uuid } }}
               asChild
             >
-              <Button
-                variant="outline"
-                className="h-auto items-start justify-start gap-3 rounded-lg p-3"
+              <Pressable
+                accessibilityRole="link"
+                className="border-border bg-card active:bg-secondary flex-row items-start gap-3 rounded-lg border p-3"
                 style={{ width: cardWidth }}
                 accessibilityLabel={`${item.name}, ${item.owned} books, ${seriesCardLabel(item)}`}
               >
@@ -172,18 +181,18 @@ export default function SeriesListScreen() {
                     showActions={false}
                   />
                 )}
-                <View className="min-w-0 flex-1 gap-2">
+                <View className="min-w-0 flex-1 gap-1">
                   <Text numberOfLines={2} className="text-base font-semibold">
                     {item.name}
                   </Text>
                   <Text className="text-muted-foreground text-sm">
                     {item.owned} {item.owned === 1 ? "book" : "books"} owned
                   </Text>
-                  <Text className="text-primary text-sm">
+                  <Text className="text-primary text-sm font-semibold">
                     {seriesCardLabel(item)}
                   </Text>
                 </View>
-              </Button>
+              </Pressable>
             </Link>
           )
         }}

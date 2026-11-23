@@ -162,10 +162,17 @@ export function buildHomeSections<Book extends HomeBook>(
               now - lastOpened(book) <= JUMP_BACK_IN_DAYS * DAY,
           )
           .sort((a, b) => lastOpened(b) - lastOpened(a))
-          .map((book) => ({
-            book,
-            reason: `${timeAgo(lastOpened(book), now)} · ${percent(progressOf(book))}`,
-          })),
+          .map((book) => {
+            const opened = timeAgo(lastOpened(book), now)
+            const progress = progressOf(book)
+            return {
+              book,
+              reason:
+                progress > 0
+                  ? `${opened[0]!.toUpperCase()}${opened.slice(1)} · ${percent(progress)}`
+                  : `Opened ${opened}`,
+            }
+          }),
         viewAll: {
           pathname: "/shelf/[type]",
           params: { type: "jump-back-in" },

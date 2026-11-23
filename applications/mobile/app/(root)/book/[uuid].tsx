@@ -228,72 +228,74 @@ export default function BookDetailsScreen() {
               )}
             </Stack>
             <Group className="mb-4 flex-col items-stretch gap-3 self-stretch">
-              {book.status && (
-                <Select
-                  value={
-                    shortlisted && book.status.name === "To read"
-                      ? { value: SHORTLIST_OPTION, label: "Shortlist" }
-                      : { value: book.status.uuid, label: book.status.name }
-                  }
-                  onValueChange={(option) => {
-                    if (!option) return
-                    if (option.value === SHORTLIST_OPTION) {
-                      // Shortlisted books stay "To read" until they're started.
-                      const toRead = statuses?.find(
-                        (status) => status.name === "To read",
-                      )
-                      if (toRead && book.status?.uuid !== toRead.uuid) {
-                        updateStatus({
-                          bookUuid: book.uuid,
-                          statusUuid: toRead.uuid,
-                        })
-                      }
-                      shortlist.add(book.uuid)
-                      return
-                    }
-                    // Leaving "Shortlist" for plain "To read" unflags the book;
-                    // Reading and Read follow the Shortlist setting instead.
-                    const chosen = statuses?.find(
-                      (status) => status.uuid === option.value,
-                    )
-                    if (shortlisted && chosen?.name === "To read") {
-                      shortlist.remove(book.uuid)
-                    }
-                    updateStatus({
-                      bookUuid: book.uuid,
-                      statusUuid: option.value as UUID,
-                    })
-                  }}
-                >
-                  <SelectTrigger
-                    accessibilityLabel={`Reading status, ${
+              <View className="flex-row flex-wrap items-center gap-3">
+                {book.status && (
+                  <Select
+                    value={
                       shortlisted && book.status.name === "To read"
-                        ? "Shortlist"
-                        : book.status.name
-                    }`}
+                        ? { value: SHORTLIST_OPTION, label: "Shortlist" }
+                        : { value: book.status.uuid, label: book.status.name }
+                    }
+                    onValueChange={(option) => {
+                      if (!option) return
+                      if (option.value === SHORTLIST_OPTION) {
+                        // Shortlisted books stay "To read" until they're started.
+                        const toRead = statuses?.find(
+                          (status) => status.name === "To read",
+                        )
+                        if (toRead && book.status?.uuid !== toRead.uuid) {
+                          updateStatus({
+                            bookUuid: book.uuid,
+                            statusUuid: toRead.uuid,
+                          })
+                        }
+                        shortlist.add(book.uuid)
+                        return
+                      }
+                      // Leaving "Shortlist" for plain "To read" unflags the book;
+                      // Reading and Read follow the Shortlist setting instead.
+                      const chosen = statuses?.find(
+                        (status) => status.uuid === option.value,
+                      )
+                      if (shortlisted && chosen?.name === "To read") {
+                        shortlist.remove(book.uuid)
+                      }
+                      updateStatus({
+                        bookUuid: book.uuid,
+                        statusUuid: option.value as UUID,
+                      })
+                    }}
                   >
-                    <SelectValue placeholder="" />
-                  </SelectTrigger>
-                  {statuses?.flatMap((status) => [
-                    <SelectItem
-                      key={status.uuid}
-                      label={status.name}
-                      value={status.uuid}
-                    />,
-                    ...(status.name === "To read" &&
-                    shortlist.canShortlist(book)
-                      ? [
-                          <SelectItem
-                            key={SHORTLIST_OPTION}
-                            label="Shortlist"
-                            value={SHORTLIST_OPTION}
-                          />,
-                        ]
-                      : []),
-                  ])}
-                </Select>
-              )}
-              <ShortlistToggle book={book} />
+                    <SelectTrigger
+                      accessibilityLabel={`Reading status, ${
+                        shortlisted && book.status.name === "To read"
+                          ? "Shortlist"
+                          : book.status.name
+                      }`}
+                    >
+                      <SelectValue placeholder="" />
+                    </SelectTrigger>
+                    {statuses?.flatMap((status) => [
+                      <SelectItem
+                        key={status.uuid}
+                        label={status.name}
+                        value={status.uuid}
+                      />,
+                      ...(status.name === "To read" &&
+                      shortlist.canShortlist(book)
+                        ? [
+                            <SelectItem
+                              key={SHORTLIST_OPTION}
+                              label="Shortlist"
+                              value={SHORTLIST_OPTION}
+                            />,
+                          ]
+                        : []),
+                    ])}
+                  </Select>
+                )}
+                <ShortlistToggle book={book} />
+              </View>
               <Stack className="gap-3">
                 {availableFormats.map((format) => {
                   const state = getBookDownloadState(

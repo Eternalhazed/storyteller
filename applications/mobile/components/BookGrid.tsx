@@ -42,7 +42,9 @@ export function BookGrid({ title, books, header, refreshable = true }: Props) {
   )
 
   const bookCount = (className: string) => (
-    <Text className={className}>{books.length} books</Text>
+    <Text className={className}>
+      {books.length} {books.length === 1 ? "book" : "books"}
+    </Text>
   )
 
   return (
@@ -66,7 +68,7 @@ export function BookGrid({ title, books, header, refreshable = true }: Props) {
             <BackButton />
 
             <Text
-              className="font-youngserif my-2 shrink font-normal"
+              className="font-youngserif my-2 shrink font-normal tracking-normal"
               variant="h3"
             >
               {title}

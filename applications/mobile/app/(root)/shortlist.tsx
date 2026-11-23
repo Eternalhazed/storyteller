@@ -87,7 +87,10 @@ export default function ShortlistScreen() {
         {!usesSystemHeader && (
           <View className="px-safe-or-2 w-full flex-row items-center gap-2">
             <BackButton />
-            <Text className="font-youngserif my-2" variant="h3">
+            <Text
+              className="font-youngserif my-2 font-normal tracking-normal"
+              variant="h3"
+            >
               Shortlist
             </Text>
           </View>
@@ -123,7 +126,7 @@ export default function ShortlistScreen() {
             <View className="gap-3 px-1.5 pb-3">
               <View className="flex-row flex-wrap items-center justify-between gap-3">
                 <Text className="text-muted-foreground">
-                  {books.length} books
+                  {books.length} {books.length === 1 ? "book" : "books"}
                 </Text>
                 <Button
                   variant="outline"
