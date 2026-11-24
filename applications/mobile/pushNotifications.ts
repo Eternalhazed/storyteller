@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router"
+import { router } from "expo-router"
 import * as Notifications from "expo-notifications"
 import * as SecureStore from "expo-secure-store"
 import { useEffect } from "react"
@@ -27,6 +27,9 @@ async function getInstallId(): Promise<string> {
   return created
 }
 
+/** The push token last fetched or reported, to tell a real rotation apart. */
+let knownPushToken: string | null = null
+
 /**
  * The push token for this install, after asking for permission, or null
  * when push is unavailable: the build has no push configuration, the reader
@@ -43,7 +46,9 @@ async function getPushToken(): Promise<string | null> {
   if (!granted) return null
   try {
     const { data } = await Notifications.getDevicePushTokenAsync()
-    return typeof data === "string" ? data : null
+    if (typeof data !== "string") return null
+    knownPushToken = data
+    return data
   } catch (error) {
     logger.info(
       `Push notifications are unavailable in this build: ${describeError(error)}`,
@@ -140,28 +145,42 @@ Notifications.setNotificationHandler({
 })
 
 /**
+ * Opens the request a tapped notification is about. The request screen loads
+ * it as the current account, so a notification left over from another account
+ * shows nothing of that account's request.
+ */
+function openTappedRequest(
+  response: Notifications.NotificationResponse | null,
+) {
+  const uuid = requestUuidOf(response)
+  if (!uuid) return
+  // The last response outlives the tap; clear it so it opens once.
+  Notifications.clearLastNotificationResponse()
+  router.push({ pathname: "/request/[uuid]", params: { uuid } })
+}
+
+/**
  * Registers every signed-in server for push at start-up and whenever the
  * push token changes, and opens the request a tapped notification is about.
- * The request screen loads it as the current account, so a notification left
- * over from another account shows nothing of that account's request.
  */
 export function useRequestNotifications() {
-  const router = useRouter()
   useEffect(() => {
     void registerAllServersForPush()
-
-    const open = (response: Notifications.NotificationResponse | null) => {
-      const uuid = requestUuidOf(response)
-      if (uuid) router.push({ pathname: "/request/[uuid]", params: { uuid } })
-    }
-    void Notifications.getLastNotificationResponseAsync().then(open)
-    const tapped = Notifications.addNotificationResponseReceivedListener(open)
-    const rotated = Notifications.addPushTokenListener(() => {
+    void Notifications.getLastNotificationResponseAsync().then(
+      openTappedRequest,
+    )
+    const tapped =
+      Notifications.addNotificationResponseReceivedListener(openTappedRequest)
+    // Fetching the token reports it to this listener too, so only a token
+    // that differs from the last one is a rotation worth registering.
+    const rotated = Notifications.addPushTokenListener(({ data }) => {
+      if (typeof data !== "string" || data === knownPushToken) return
+      knownPushToken = data
       void registerAllServersForPush()
     })
     return () => {
       tapped.remove()
       rotated.remove()
     }
-  }, [router])
+  }, [])
 }

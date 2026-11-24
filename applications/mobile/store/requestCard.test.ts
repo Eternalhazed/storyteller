@@ -21,9 +21,12 @@ function card(
     progress = 0,
     stage = null,
     complete = false,
-  }: Partial<RequestView["sync"]> & { complete?: boolean } = {},
+    kind = "title",
+  }: Partial<RequestView["sync"]> &
+    Partial<Pick<RequestView, "complete" | "kind">> = {},
 ) {
   return getRequestCard({
+    kind,
     work: { title: "Book title", authors: [] },
     ebook,
     audio,
@@ -138,11 +141,26 @@ describe("request card", () => {
   })
 
   test("does not dismiss an add-format request that is waiting for sync", () => {
-    expect(card(none, ready, { status: "queued" })).toMatchObject({
-      primary: "Listen now",
+    expect(
+      card(none, ready, { status: "queued", kind: "add_format" }),
+    ).toMatchObject({
+      primary: "Read ebook now",
       status: "Syncing narration",
       dismissOnOpen: false,
     })
+  })
+
+  test("keeps the book's own format usable while adding the other", () => {
+    expect(
+      card(none, format("downloading", 0.4), { kind: "add_format" }),
+    ).toMatchObject({
+      primary: "Read ebook now",
+      status: "Audiobook 40%",
+      pick: [],
+    })
+    expect(
+      card(format("downloading", 0.4), none, { kind: "add_format" }),
+    ).toMatchObject({ primary: "Listen now", status: "Ebook 40%" })
   })
 
   test("reports paused narration without offering failed-sync retry", () => {

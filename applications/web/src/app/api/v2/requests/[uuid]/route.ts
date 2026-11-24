@@ -6,6 +6,7 @@ import {
   disabledResponse,
   requestErrorResponse,
   toRequestView,
+  utcTimestamp,
 } from "@/requests/http"
 import { getRequestRuntime } from "@/requests/runtime"
 import { getOwnRequest } from "@/requests/service"
@@ -34,7 +35,7 @@ export const GET = withHasPermission<Params>("bookRead")(async (
       events: events.map(({ kind, message, createdAt }) => ({
         kind,
         message,
-        createdAt,
+        createdAt: utcTimestamp(createdAt),
       })),
     })
   } catch (error) {

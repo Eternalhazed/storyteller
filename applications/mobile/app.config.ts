@@ -38,7 +38,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       "expo-image",
       "expo-sharing",
       "expo-web-browser",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          // Android draws the small icon as a white silhouette
+          icon: "./assets/notification-icon.png",
+          color: "#B84D0F",
+        },
+      ],
       "expo-router",
       [
         "expo-secure-store",

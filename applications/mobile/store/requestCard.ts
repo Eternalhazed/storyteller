@@ -34,13 +34,29 @@ function describeFormat(format: RequestFormat, view: FormatView) {
   }
 }
 
+const READY: FormatView = {
+  status: "ready",
+  progress: 1,
+  release: null,
+  error: null,
+}
+
 export function getRequestCard({
+  kind,
   work,
-  ebook,
-  audio,
+  ebook: requestedEbook,
+  audio: requestedAudio,
   sync,
   complete,
-}: Pick<RequestView, "work" | "ebook" | "audio" | "sync" | "complete">) {
+}: Pick<
+  RequestView,
+  "kind" | "work" | "ebook" | "audio" | "sync" | "complete"
+>) {
+  // Adding a format leaves the other one unrequested: the book already has it.
+  const owned = (view: FormatView) =>
+    kind === "add_format" && view.status === "none" ? READY : view
+  const ebook = owned(requestedEbook)
+  const audio = owned(requestedAudio)
   const bothDownloading =
     ebook.status === "downloading" && audio.status === "downloading"
   const primary =

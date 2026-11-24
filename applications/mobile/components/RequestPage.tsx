@@ -1,4 +1,3 @@
-import { Stack } from "expo-router"
 import { type ReactNode } from "react"
 import { ScrollView, View } from "react-native"
 
@@ -35,9 +34,8 @@ export function RequestError({ children }: { children: ReactNode }) {
 
 export function OtherRequestAccount() {
   return (
-    <View className="pt-safe px-safe-or-4 flex-1 justify-center">
-      <Stack.Screen options={{ headerShown: false }} />
-      <Text>This request belongs to another account</Text>
-    </View>
+    <RequestPage>
+      <Text>This request belongs to another account.</Text>
+    </RequestPage>
   )
 }

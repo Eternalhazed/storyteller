@@ -5,6 +5,7 @@ import { isPresent } from "@/assets/library/deliver"
 import { type BookRequest } from "@/database/bookRequests"
 import { getBook } from "@/database/books"
 import { getJob } from "@/database/jobs"
+import { toIsoDateTimeString } from "@/dates"
 import { logger } from "@/logging"
 import { type UUID } from "@/uuid"
 
@@ -86,6 +87,7 @@ export type RequestView = {
    * request off the Home card once the reader opens the book.
    */
   complete: boolean
+  /** ISO 8601, UTC. */
   createdAt: string
   closedAt: string | null
 }
@@ -129,9 +131,17 @@ export async function toRequestView(
       stage: job?.stage ?? null,
     },
     complete: await isComplete(request),
-    createdAt: request.createdAt,
-    closedAt: request.closedAt,
+    createdAt: utcTimestamp(request.createdAt),
+    closedAt: request.closedAt && utcTimestamp(request.closedAt),
   }
+}
+
+/**
+ * SQLite stores times as UTC text without a zone, which a client would read
+ * as its own local time; send them as ISO 8601 with the zone instead.
+ */
+export function utcTimestamp(value: string): string {
+  return toIsoDateTimeString(value) ?? value
 }
 
 /** Parse a JSON body, answering 400 with the reason when it does not fit. */
