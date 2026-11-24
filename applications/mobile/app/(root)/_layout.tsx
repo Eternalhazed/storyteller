@@ -98,6 +98,33 @@ export default function ModalLayout() {
       <Stack.Screen name="author/[uuid]" />
       <Stack.Screen name="series/index" />
       <Stack.Screen
+        name="request/index"
+        options={{
+          headerShown: true,
+          headerShadowVisible: false,
+          title: "Requests",
+          ...javaScriptBackButton(),
+        }}
+      />
+      <Stack.Screen
+        name="request/new"
+        options={{
+          headerShown: true,
+          headerShadowVisible: false,
+          title: "Request a book",
+          ...javaScriptBackButton(),
+        }}
+      />
+      <Stack.Screen
+        name="request/[uuid]"
+        options={{
+          headerShown: true,
+          headerShadowVisible: false,
+          title: "Request details",
+          ...javaScriptBackButton(),
+        }}
+      />
+      <Stack.Screen
         name="server"
         options={{
           headerShown: true,

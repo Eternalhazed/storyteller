@@ -19,6 +19,7 @@ import {
 } from "react-native"
 
 import { ContinueReading } from "@/components/ContinueReading"
+import { HomeRequests } from "@/components/HomeRequests"
 import { LooksFinishedCard } from "@/components/LooksFinishedCard"
 import { MiniPlayerWidget } from "@/components/MiniPlayerWidget"
 import { Shelf } from "@/components/Shelf"
@@ -209,6 +210,7 @@ export default function Home() {
           />
         }
       >
+        <HomeRequests focused={isFocused} />
         {sections.map((section) => {
           if (section.id === "continue") {
             return continueReading && section.items.length ? (

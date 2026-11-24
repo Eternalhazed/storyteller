@@ -12,6 +12,7 @@ import { useDownloadBookMutation } from "@/store/localApi"
 import { getFeaturedSeries } from "@/store/seriesProgress"
 
 import { BookThumbnailImage } from "./BookThumbnail"
+import { SeriesRequestActions } from "./RequestEntryActions"
 import { getBookDownloadState } from "./bookDownloadState"
 import { seriesCardLabel } from "./seriesLabel"
 import { Button } from "./ui/button"
@@ -191,6 +192,13 @@ export function SeriesProgressSection({ book }: { book: BookWithRelations }) {
             <SeriesBookAction book={next} />
           </View>
         </View>
+      )}
+      {series && (
+        <SeriesRequestActions
+          seriesUuid={membership.uuid}
+          series={series}
+          book={book}
+        />
       )}
     </View>
   )

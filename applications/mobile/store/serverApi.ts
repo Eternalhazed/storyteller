@@ -8,6 +8,19 @@ import * as SecureStore from "expo-secure-store"
 import { type BookWithRelations } from "@storyteller/web/src/database/books"
 import { type Position } from "@storyteller/web/src/database/positions"
 import { type Status } from "@storyteller/web/src/database/statuses"
+import { type RequestView } from "@storyteller/web/src/requests/http"
+import { type LibraryCopy } from "@storyteller/web/src/requests/library"
+import {
+  type RankedRelease,
+  type Recommendation,
+} from "@storyteller/web/src/requests/ranking"
+import {
+  type ChosenWork,
+  type Release,
+  type RequestFormat,
+  type RequestInput,
+  type RequestKind,
+} from "@storyteller/web/src/requests/types"
 
 import { upsertServerBooks } from "@/database/serverBooks"
 import { type ReadiumLocator } from "@/modules/readium/src/Readium.types"
@@ -30,8 +43,56 @@ export interface ServerShelf {
   updatedAt: string
 }
 
+type RequestServer = { serverUuid: UUID }
+type RequestKey = RequestServer & { requestUuid: UUID }
+type RequestSearch = RequestServer & { work: ChosenWork; seriesUuid?: UUID }
+type ReleaseRef = Pick<Release, "source" | "id" | "kind">
+
+export type RequestConfig = {
+  enabled: boolean
+  collection: UUID | null
+  collections: { uuid: UUID; name: string }[]
+}
+
+export type RequestSearchResult = {
+  library: { mine: LibraryCopy[]; elsewhere: LibraryCopy[] }
+  ebooks: RankedRelease[]
+  audios: RankedRelease[]
+  recommendation: Recommendation
+}
+
+type CreateRequest = RequestServer & {
+  kind: RequestKind
+  input: RequestInput
+  work: ChosenWork
+  ebook?: ReleaseRef | null
+  audio?: ReleaseRef | null
+  bookUuid?: UUID
+}
+
+type RequestDetail = RequestView & {
+  events: { kind: string; message: string; createdAt: string }[]
+}
+
+function requestTag(serverUuid: UUID, requestUuid?: UUID) {
+  return {
+    type: "Requests" as const,
+    id: requestUuid ? `${serverUuid}:${requestUuid}` : serverUuid,
+  }
+}
+
+function changedRequest(result: RequestView | undefined, args: RequestKey) {
+  return result
+    ? [
+        requestTag(args.serverUuid),
+        requestTag(args.serverUuid, args.requestUuid),
+      ]
+    : []
+}
+
 export const serverApi = createApi({
   reducerPath: "serverApi",
+  tagTypes: ["Requests", "RequestConfig"],
   async baseQuery(
     args: FetchArgs,
     baseQueryApi,
@@ -74,6 +135,101 @@ export const serverApi = createApi({
     return makeRequest(args, baseQueryApi, extraOptions ?? {})
   },
   endpoints: (build) => ({
+    getRequestConfig: build.query<RequestConfig, RequestServer>({
+      query: ({ serverUuid }) => ({ url: "/requests/config", serverUuid }),
+      providesTags: (_result, _error, { serverUuid }) => [
+        { type: "RequestConfig", id: serverUuid },
+      ],
+    }),
+    setRequestCollection: build.mutation<
+      void,
+      RequestServer & { collection: UUID }
+    >({
+      query: ({ serverUuid, collection }) => ({
+        url: "/requests/config",
+        serverUuid,
+        method: "PUT",
+        body: { collection },
+      }),
+      invalidatesTags: (_result, error, { serverUuid }) =>
+        error ? [] : [{ type: "RequestConfig", id: serverUuid }],
+    }),
+    listRequests: build.query<RequestView[], RequestServer & { open?: true }>({
+      query: ({ serverUuid, open }) => ({
+        url: "/requests",
+        serverUuid,
+        ...(open ? { params: { open: true } } : {}),
+      }),
+      providesTags: (_result, _error, { serverUuid }) => [
+        requestTag(serverUuid),
+      ],
+    }),
+    getRequest: build.query<RequestDetail, RequestKey>({
+      query: ({ serverUuid, requestUuid }) => ({
+        url: `/requests/${requestUuid}`,
+        serverUuid,
+      }),
+      providesTags: (_result, _error, { serverUuid, requestUuid }) => [
+        requestTag(serverUuid, requestUuid),
+      ],
+    }),
+    searchRequestReleases: build.mutation<RequestSearchResult, RequestSearch>({
+      query: ({ serverUuid, ...body }) => ({
+        url: "/requests/search",
+        serverUuid,
+        method: "POST",
+        body,
+      }),
+    }),
+    createRequest: build.mutation<RequestView, CreateRequest>({
+      query: ({ serverUuid, ...body }) => ({
+        url: "/requests",
+        serverUuid,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (result, _error, { serverUuid }) =>
+        result ? [requestTag(serverUuid)] : [],
+    }),
+    addRequestCopyToShelf: build.mutation<
+      void,
+      RequestServer & { work: ChosenWork; bookUuid: UUID }
+    >({
+      query: ({ serverUuid, ...body }) => ({
+        url: "/requests/add-to-shelf",
+        serverUuid,
+        method: "POST",
+        body,
+      }),
+    }),
+    replaceRequestRelease: build.mutation<
+      RequestView,
+      RequestKey & { format: RequestFormat; release: ReleaseRef }
+    >({
+      query: ({ serverUuid, requestUuid, ...body }) => ({
+        url: `/requests/${requestUuid}/release`,
+        serverUuid,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (result, _error, args) => changedRequest(result, args),
+    }),
+    retryRequestSync: build.mutation<RequestView, RequestKey>({
+      query: ({ serverUuid, requestUuid }) => ({
+        url: `/requests/${requestUuid}/retry-sync`,
+        serverUuid,
+        method: "POST",
+      }),
+      invalidatesTags: (result, _error, args) => changedRequest(result, args),
+    }),
+    dismissRequest: build.mutation<RequestView, RequestKey>({
+      query: ({ serverUuid, requestUuid }) => ({
+        url: `/requests/${requestUuid}/dismiss`,
+        serverUuid,
+        method: "POST",
+      }),
+      invalidatesTags: (result, _error, args) => changedRequest(result, args),
+    }),
     listShelves: build.query<ServerShelf[], { serverUuid: UUID }>({
       query: ({ serverUuid }) => ({ url: "/shelves", serverUuid }),
     }),
@@ -122,12 +278,19 @@ export const serverApi = createApi({
         url: `/books/${bookUuid}`,
         serverUuid,
       }),
-      async onCacheEntryAdded(
-        { bookUuid, serverUuid },
-        { cacheDataLoaded, dispatch },
+      async transformResponse(book: BookWithRelations, _meta, { serverUuid }) {
+        // Callers opening a just-delivered book need its formats in SQLite
+        // before the existing local book screen mounts.
+        await upsertServerBooks([book], serverUuid)
+        return book
+      },
+      async onQueryStarted(
+        { serverUuid, bookUuid },
+        { queryFulfilled, dispatch },
       ) {
-        const { data: book } = await cacheDataLoaded
-
+        const result = await queryFulfilled.catch(() => null)
+        if (!result) return
+        const { data: book } = result
         dispatch(
           serverApi.util.updateQueryData(
             "listBooks",
@@ -144,8 +307,7 @@ export const serverApi = createApi({
             },
           ),
         )
-
-        await upsertServerBooks([book], serverUuid)
+        dispatch(localApi.util.invalidateTags(["Books"]))
       },
     }),
     updatePosition: build.mutation<

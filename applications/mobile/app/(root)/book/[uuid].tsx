@@ -14,6 +14,7 @@ import BookDescription from "@/components/BookDescription"
 import { BookThumbnailImage } from "@/components/BookThumbnail"
 import { LoadingView } from "@/components/LoadingView"
 import { MiniPlayerWidget } from "@/components/MiniPlayerWidget"
+import { MissingFormatRequestAction } from "@/components/RequestEntryActions"
 import { SeriesProgressSection } from "@/components/SeriesProgressSection"
 import { ShortlistToggle } from "@/components/ShortlistToggle"
 import { ScreenBackButton } from "@/components/ScreenBackButton"
@@ -366,6 +367,7 @@ export default function BookDetailsScreen() {
                     </Group>
                   )
                 })}
+                <MissingFormatRequestAction book={book} />
                 {removeError && (
                   <Text
                     className="text-destructive text-sm"

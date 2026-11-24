@@ -14,6 +14,7 @@ import { LoadingView } from "@/components/LoadingView"
 import { LoginButton } from "@/components/LoginButton"
 import { MiniPlayerWidget } from "@/components/MiniPlayerWidget"
 import { ReadingSettings } from "@/components/ReadingSettings"
+import { RequestsSettingsLink } from "@/components/RequestEntryActions"
 import { ScreenBackButton } from "@/components/ScreenBackButton"
 import { ButtonGroup, ButtonGroupButton } from "@/components/ui/ButtonGroup"
 import { Button } from "@/components/ui/button"
@@ -77,6 +78,7 @@ export default function Settings() {
                           serverUuid={server.uuid}
                           switchAccount
                         />
+                        <RequestsSettingsLink serverUuid={server.uuid} />
                         <Button
                           accessibilityLabel={`Log out of ${serverUrl.hostname}`}
                           variant="secondary"

@@ -6,6 +6,7 @@ import { BackButton } from "@/components/BackButton"
 import { BookThumbnailImage } from "@/components/BookThumbnail"
 import { LoadingView } from "@/components/LoadingView"
 import { MiniPlayerWidget } from "@/components/MiniPlayerWidget"
+import { SeriesRequestActions } from "@/components/RequestEntryActions"
 import { ScreenBackButton } from "@/components/ScreenBackButton"
 import { SeriesBookAction } from "@/components/SeriesProgressSection"
 import { seriesCardLabel } from "@/components/seriesLabel"
@@ -119,6 +120,7 @@ export default function SeriesScreen() {
                   {series.missing.map((position) => `#${position}`).join(", ")}
                 </Text>
               )}
+              <SeriesRequestActions seriesUuid={uuid} series={series} />
               {series.behind.length > 0 && (
                 <View className="items-start gap-2">
                   <Text className="text-muted-foreground text-sm">
