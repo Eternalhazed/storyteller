@@ -4,6 +4,7 @@ import { useReducedMotion } from "react-native-reanimated"
 
 import { BackButton } from "@/components/BackButton"
 import { usesSystemHeader } from "@/lib/nativeChrome"
+import { useRequestNotifications } from "@/pushNotifications"
 
 /**
  * The JavaScript back button, for platforms that do not draw a system header.
@@ -25,6 +26,7 @@ function javaScriptBackButton(fallback = "/") {
 export default function ModalLayout() {
   const modalPresentation = Platform.OS === "android" ? "formSheet" : "modal"
   const reduceMotion = useReducedMotion()
+  useRequestNotifications()
 
   return (
     <Stack

@@ -3,6 +3,7 @@ import { Image } from "expo-image"
 import * as SecureStore from "expo-secure-store"
 
 import { getBookCoverShas, updateBook } from "@/database/books"
+import { unregisterFromPush } from "@/pushNotifications"
 import { localApi } from "@/store/localApi"
 import { getCoverUrl } from "@/store/serverApi"
 
@@ -14,6 +15,8 @@ startAppListening({
     const { uuid: serverUuid } = action.meta.arg.originalArgs
     const { server, downloadedBooks } = action.payload
 
+    // stop notifications while the session can still say which install
+    await unregisterFromPush({ uuid: serverUuid, baseUrl: server.baseUrl })
     await SecureStore.deleteItemAsync(`server.${serverUuid}.token`)
 
     const shasByUuid = await getBookCoverShas(downloadedBooks)

@@ -2,6 +2,7 @@ import * as SecureStore from "expo-secure-store"
 
 import { type Token } from "@/apiModels"
 import { createServer, getServerByUrl, updateServer } from "@/database/servers"
+import { registerForPush } from "@/pushNotifications"
 import { type UUID, randomUUID } from "@/uuid"
 
 type Props = {
@@ -39,6 +40,10 @@ export async function saveServerSession({
   )
 
   await updateServer(uuid, { username })
+
+  // Signing in, or switching accounts, moves this install's notifications
+  // to the account now signed in.
+  void registerForPush({ uuid, baseUrl: serverUrl })
 
   return uuid
 }

@@ -38,6 +38,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       "expo-image",
       "expo-sharing",
       "expo-web-browser",
+      "expo-notifications",
       "expo-router",
       [
         "expo-secure-store",
@@ -206,6 +207,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           ? "io.github.eternalhazed.storyteller"
           : "dev.smoores.Storyteller",
       ...(IS_FORK && forkVersionCode > 0 && { versionCode: forkVersionCode }),
+      // Push for book requests: the fork's release build writes its Firebase
+      // config to this path. Builds without it simply have no push.
+      ...(process.env["GOOGLE_SERVICES_FILE"] && {
+        googleServicesFile: process.env["GOOGLE_SERVICES_FILE"],
+      }),
       adaptiveIcon: {
         foregroundImage: "./assets/Storyteller_Logo.png",
         backgroundColor: "#ffffff",
