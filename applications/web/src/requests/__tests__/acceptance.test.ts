@@ -41,7 +41,12 @@ import { migrate } from "@/database/migrate"
 import { subscribeToJobEvents } from "@/jobEvents"
 import { type JobStatus } from "@/jobStatuses"
 import { RequestEngine } from "@/requests/engine"
-import { createRequest, setRequestCollection } from "@/requests/service"
+import { toRequestView } from "@/requests/http"
+import {
+  createRequest,
+  dismissRequest,
+  setRequestCollection,
+} from "@/requests/service"
 import { type Milestone } from "@/requests/types"
 import { createAudiobookManifest } from "@/utils/audioManifest"
 import { type UUID } from "@/uuid"
@@ -430,7 +435,7 @@ describe("book request delivery survives a crash after the ebook import", () => 
     assert.strictEqual(sync.runs.length, 1)
   }, 300_000)
 
-  it("tells the requester when the read-along is ready, and closes the request", async () => {
+  it("tells the requester when the read-along is ready", async () => {
     const readaloud = join(dataDir, "moby-dick-readaloud.epub")
     await copyFile(
       join(FIXTURES, "readalouds", "moby-dick", "moby-dick-small.epub"),
@@ -440,14 +445,21 @@ describe("book request delivery survives a crash after the ebook import", () => 
     await sync.runs[0]?.finish(readaloud)
     await syncDone
 
-    await new RequestEngine({ adapter, seedDir, notify }).tick()
+    const engine = new RequestEngine({ adapter, seedDir, notify })
+    await engine.tick()
+    await engine.tick()
     const done = await getBookRequest(request.uuid)
-    assert.strictEqual(done?.alignStatus, "done")
-    assert.ok(done.closedAt, "a finished request leaves the Home card")
+    assert.ok(done)
+    assert.strictEqual(done.alignStatus, "done")
+    // it stays on the Home card, as "Open read-along", until opened
+    assert.strictEqual(done.closedAt, null)
+    assert.strictEqual((await toRequestView(done)).complete, true)
     assert.deepStrictEqual(
       sent.map(({ milestone }) => milestone),
       ["readable", "synced"],
     )
+    const dismissed = await dismissRequest(requester, request.uuid)
+    assert.ok(dismissed.closedAt)
   })
 
   it("leaves the seed folder exactly as it was", async () => {

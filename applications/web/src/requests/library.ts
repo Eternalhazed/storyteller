@@ -1,3 +1,4 @@
+import { isPresent } from "@/assets/library/deliver"
 import {
   type BookWithRelations,
   getBooks,
@@ -30,9 +31,9 @@ export type LibraryCopy = {
 function copyOf(book: BookWithRelations): LibraryCopy {
   return {
     bookUuid: book.uuid,
-    ebook: !!book.ebook?.filepath && !book.ebook.missing,
-    audiobook: !!book.audiobook?.filepath && !book.audiobook.missing,
-    readaloud: !!book.readaloud?.filepath && !book.readaloud.missing,
+    ebook: isPresent(book.ebook),
+    audiobook: isPresent(book.audiobook),
+    readaloud: isPresent(book.readaloud),
   }
 }
 

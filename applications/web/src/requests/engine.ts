@@ -1,6 +1,10 @@
 import { dirname, resolve, sep } from "node:path"
 
-import { DeliveryError, deliverFormat } from "@/assets/library/deliver"
+import {
+  DeliveryError,
+  deliverFormat,
+  isPresent,
+} from "@/assets/library/deliver"
 import { pathBelongsTo } from "@/assets/library/paths"
 import { isAudioFile } from "@/audio"
 import {
@@ -8,7 +12,6 @@ import {
   type BookRequestUpdate,
   type RequestEventInput,
   getOpenBookRequests,
-  sqlNow,
   updateBookRequest,
 } from "@/database/bookRequests"
 import { getBook } from "@/database/books"
@@ -469,28 +472,25 @@ export class RequestEngine {
   }
 
   /**
-   * Once both formats are in, follow the book's sync: the one this request
-   * queued, an active one, or a new one. A sync that failed or was cancelled
-   * is not queued again; retrying is the reader's call.
+   * Once every requested format is in and the book has both an ebook and an
+   * audiobook (one may have been on it already), follow the book's sync: the
+   * one this request queued, an active one, or a new one. A sync that failed
+   * or was cancelled is not queued again; retrying is the reader's call.
+   *
+   * A request stays on the Home card when it is done, offering the book,
+   * until the reader opens or dismisses it.
    */
   private async advanceSync(request: BookRequest): Promise<BookRequest> {
-    if (request.ebookStatus !== "ready" || request.audioStatus !== "ready") {
-      // One format only: done when it is ready.
-      const wanted = [request.ebookStatus, request.audioStatus].filter(
-        (status) => status !== "none",
-      )
-      if (wanted.length && wanted.every((status) => status === "ready")) {
-        return await this.update(
-          request,
-          { closedAt: sqlNow() },
-          { kind: "done", message: "Done" },
-        )
-      }
-      return request
-    }
+    const wanted = [request.ebookStatus, request.audioStatus].filter(
+      (status) => status !== "none",
+    )
+    if (!wanted.every((status) => status === "ready")) return request
     if (request.alignStatus === "done" || request.alignStatus === "failed") {
       return request
     }
+
+    const book = await getBook(request.bookUuid)
+    if (!isPresent(book?.ebook) || !isPresent(book?.audiobook)) return request
 
     let jobUuid = request.alignJobUuid
     let status: AlignStatus | null = null
@@ -502,9 +502,8 @@ export class RequestEngine {
     }
 
     if (!jobUuid) {
-      const book = await getBook(request.bookUuid)
       const latest = await getLatestJobForBook(request.bookUuid, "book_align")
-      if (book?.readaloud?.filepath && !book.readaloud.missing) {
+      if (isPresent(book?.readaloud)) {
         status = "done"
       } else if (latest) {
         jobUuid = latest.uuid
@@ -533,7 +532,6 @@ export class RequestEngine {
       {
         alignJobUuid: jobUuid,
         alignStatus: status,
-        ...(status === "done" && { closedAt: sqlNow() }),
       },
       event[status],
     )

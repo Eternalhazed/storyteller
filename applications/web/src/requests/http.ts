@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 
+import { isPresent } from "@/assets/library/deliver"
 import { type BookRequest } from "@/database/bookRequests"
+import { getBook } from "@/database/books"
 import { getJob } from "@/database/jobs"
 import { logger } from "@/logging"
 import { type UUID } from "@/uuid"
@@ -78,8 +80,26 @@ export type RequestView = {
     progress: number
     stage: string | null
   }
+  /**
+   * Everything asked for is in: every requested format is ready, and the
+   * read-along too when the book has both formats. The app takes a complete
+   * request off the Home card once the reader opens the book.
+   */
+  complete: boolean
   createdAt: string
   closedAt: string | null
+}
+
+async function isComplete(request: BookRequest): Promise<boolean> {
+  const wanted = [request.ebookStatus, request.audioStatus].filter(
+    (status) => status !== "none",
+  )
+  if (!wanted.every((status) => status === "ready")) return false
+  if (request.alignStatus === "done") return true
+  if (request.alignStatus !== "none") return false
+  // nothing to sync unless the book holds both formats
+  const book = await getBook(request.bookUuid)
+  return !(isPresent(book?.ebook) && isPresent(book?.audiobook))
 }
 
 export async function toRequestView(
@@ -108,6 +128,7 @@ export async function toRequestView(
       progress: job?.progress ?? 0,
       stage: job?.stage ?? null,
     },
+    complete: await isComplete(request),
     createdAt: request.createdAt,
     closedAt: request.closedAt,
   }

@@ -47,9 +47,15 @@ export class DeliveryError extends Error {
   }
 }
 
-function hasFormat(book: BookWithRelations, format: DeliveryFormat): boolean {
-  const asset = format === "ebook" ? book.ebook : book.audiobook
+/** A format that points at a file the scanner has not marked missing. */
+export function isPresent(
+  asset: { filepath: string | null; missing: boolean } | null | undefined,
+): boolean {
   return !!asset?.filepath && !asset.missing
+}
+
+function hasFormat(book: BookWithRelations, format: DeliveryFormat): boolean {
+  return isPresent(format === "ebook" ? book.ebook : book.audiobook)
 }
 
 function isSource(filepath: string, input: DeliverFormatInput): boolean {
