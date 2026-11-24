@@ -351,6 +351,8 @@ export const SettingsSchema = z.object({
   xrayAnthropicApiKey: z.string().nullable(),
   xrayModel: z.string().trim().min(1),
   xrayAutoGenerate: z.boolean(),
+  // Narration sync
+  syncNarrationAutomatically: z.boolean(),
   hardcoverApiToken: z.string().nullable().optional(),
   metadataAutoImportThresholds: z.object({
     audnexus: z.enum(MATCH_CONFIDENCES),
@@ -474,6 +476,7 @@ export const SETTINGS_DEFAULTS = {
   // Matches the default seeded by migration 114_xray_settings.sql.
   xrayModel: "claude-haiku-5-5",
   xrayAutoGenerate: false,
+  syncNarrationAutomatically: false,
 } satisfies Settings
 
 // settings-only schema for config file validation;

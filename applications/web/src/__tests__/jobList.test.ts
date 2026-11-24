@@ -31,6 +31,7 @@ function job(
     updatedAt: "2026-01-01T00:00:00Z",
     config: null,
     stats: null,
+    interruptedCount: 0,
     alignmentGrade: null,
     alignmentReportUuid: null,
     alignmentSentenceCoverage: null,

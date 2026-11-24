@@ -1347,6 +1347,24 @@ export function ReadaloudSection() {
           />
         )}
 
+        <SettingsFormField
+          name="syncNarrationAutomatically"
+          label={tr("syncNarrationAutomatically")}
+          description={tr("syncNarrationAutomaticallyDescription")}
+          render={(field, fieldState, isLocked) => (
+            <Switch
+              id="syncNarrationAutomatically"
+              name={field.name}
+              ref={field.ref}
+              checked={field.value}
+              onCheckedChange={field.onChange}
+              onBlur={field.onBlur}
+              disabled={isLocked}
+              aria-invalid={fieldState.invalid}
+            />
+          )}
+        />
+
         <Controller
           name="cleanCacheAfterReadaloud"
           control={form.control}

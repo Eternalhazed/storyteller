@@ -1,4 +1,4 @@
-import { type Selectable } from "kysely"
+import { type Selectable, sql } from "kysely"
 import { jsonObjectFrom } from "kysely/helpers/sqlite"
 
 import { type JobEvent, JobEvents } from "@/jobEvents"
@@ -77,6 +77,7 @@ export type JobUpdate = Partial<{
   startedAt: string | null
   finishedAt: string | null
   position: number
+  interruptedCount: number
   stats: JobStats
 }>
 
@@ -104,6 +105,73 @@ export async function createJob(job: NewJob): Promise<DisplayJob> {
   }
   emit({ type: "jobCreated", jobUuid: row.uuid, payload: createdJob })
   return createdJob
+}
+
+/**
+ * Queue a job for a book unless one of the same type is already active
+ * (queued, running or paused), in which case that job is returned. The check
+ * and the insert run in one transaction, and a unique index on active jobs
+ * backs it up, so two triggers can never queue the same book twice.
+ */
+export async function queueJobForBook(
+  job: Omit<NewJob, "position">,
+): Promise<{ job: DisplayJob; created: boolean }> {
+  let queued: { uuid: UUID; created: boolean }
+  try {
+    queued = await db.transaction().execute(async (tr) => {
+      const active = await tr
+        .selectFrom("job")
+        .select("uuid")
+        .where("bookUuid", "=", job.bookUuid)
+        .where("type", "=", job.type)
+        .where("status", "in", ACTIVE_JOB_STATUSES)
+        .executeTakeFirst()
+      if (active) return { uuid: active.uuid, created: false }
+
+      const last = await tr
+        .selectFrom("job")
+        .select("position")
+        .where("status", "in", ACTIVE_JOB_STATUSES)
+        .orderBy("position", "desc")
+        .limit(1)
+        .executeTakeFirst()
+
+      const row = await tr
+        .insertInto("job")
+        .values({
+          type: job.type,
+          bookUuid: job.bookUuid,
+          restart: job.restart || null,
+          config: job.config ? JSON.stringify(job.config) : null,
+          position: (last?.position ?? -1) + 1,
+          status: "QUEUED",
+        })
+        .returning("uuid")
+        .executeTakeFirstOrThrow()
+      return { uuid: row.uuid, created: true }
+    })
+  } catch (error) {
+    // Another connection queued one between our check and insert.
+    if (!isUniqueConstraintError(error)) throw error
+    const existing = await getActiveJobForBook(job.bookUuid, job.type)
+    if (!existing) throw error
+    return { job: existing, created: false }
+  }
+
+  const display = await getDisplayJob(queued.uuid)
+  if (!display) throw new Error("Job not found")
+  if (queued.created) {
+    emit({ type: "jobCreated", jobUuid: queued.uuid, payload: display })
+  }
+  return { job: display, created: queued.created }
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    error.code === "SQLITE_CONSTRAINT_UNIQUE"
+  )
 }
 
 export async function getJob(uuid: UUID): Promise<Job | null> {
@@ -231,6 +299,23 @@ export async function getDisplayJobs(
       hasReport: alignment?.hasReport ?? false,
     }),
   )
+}
+
+/** The book's most recent job of this type, whatever its status. */
+export async function getLatestJobForBook(
+  bookUuid: UUID,
+  type: JobType,
+): Promise<Job | null> {
+  const row = await db
+    .selectFrom("job")
+    .selectAll()
+    .where("bookUuid", "=", bookUuid)
+    .where("type", "=", type)
+    .orderBy("createdAt", "desc")
+    .orderBy(sql`rowid`, "desc")
+    .limit(1)
+    .executeTakeFirst()
+  return row ?? null
 }
 
 export async function getActiveJobForBook(

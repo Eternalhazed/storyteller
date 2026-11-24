@@ -90,33 +90,43 @@ const fakeModel: CallModel = () =>
     outputTokens: 5,
   })
 
-async function setupBook() {
+/**
+ * A book can have only one active job of a type, so a test that needs two
+ * at once asks for `secondBook` and puts the second job on it.
+ */
+async function setupBook({ secondBook = false } = {}) {
   const ctx = setupTestDb()
   const folder = await mkdtemp(join(tmpdir(), "storyteller-xray-worker-test-"))
   const ebook = join(folder, "source.epub")
   await writeFile(ebook, "test-only source ebook")
-  const bookUuid = seedBooks(ctx, [
+  const [bookUuid, otherBookUuid] = seedBooks(ctx, [
     {
       title: "X-Ray worker test",
       ebook,
       // Deliberately not an EPUB: X-Ray must never read the readaloud path.
       readaloud: join(folder, "not-an-ebook.epub"),
     },
-  ])[0]! as UUID
+    ...(secondBook ? [{ title: "Second X-Ray worker test", ebook }] : []),
+  ]) as [UUID, UUID | undefined]
   await mkdir(XRAY_DIR, { recursive: true })
 
   return {
     ctx,
     bookUuid,
+    otherBookUuid: otherBookUuid ?? bookUuid,
     readSource: ((task, signal) => {
       assert.equal(task.epubPath, ebook)
       signal?.throwIfAborted()
       return Promise.resolve(source)
     }) satisfies XraySourceReader,
-    async job(type: JobType = "book_xray", queued = false) {
+    async job(
+      type: JobType = "book_xray",
+      queued = false,
+      forBook: UUID = bookUuid,
+    ) {
       const job = await createJob({
         type,
-        bookUuid,
+        bookUuid: forBook,
         restart: false,
         config: null,
         position: (await getJobs()).length,
@@ -129,8 +139,10 @@ async function setupBook() {
       return updateJob(job.uuid, { status: "RUNNING" })
     },
     async [Symbol.asyncDispose]() {
-      await rm(getXrayFilepath(bookUuid), { force: true })
-      await rm(getXrayStateFilepath(bookUuid), { force: true })
+      for (const uuid of [bookUuid, otherBookUuid ?? bookUuid]) {
+        await rm(getXrayFilepath(uuid), { force: true })
+        await rm(getXrayStateFilepath(uuid), { force: true })
+      }
       await rm(folder, { recursive: true, force: true })
       ctx[Symbol.dispose]()
     },
@@ -334,12 +346,12 @@ describe("X-Ray generation jobs", () => {
 
 describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
   it("recovers a running X-Ray job while alignment is busy and admits only one X-Ray job", async () => {
-    await using fixture = await setupBook()
+    await using fixture = await setupBook({ secondBook: true })
     const alignment = await fixture.job("book_align")
     assert.ok(globalThis.jobControllers)
     globalThis.jobControllers.set(alignment.uuid, new AbortController())
     const interrupted = await fixture.job()
-    const queued = await fixture.job("book_xray", true)
+    const queued = await fixture.job("book_xray", true, fixture.otherBookUuid)
     const entered = Promise.withResolvers<null>()
     const release = Promise.withResolvers<null>()
     let held = false
@@ -434,14 +446,14 @@ describe("independent X-Ray queue lane", { timeout: 30_000 }, () => {
   })
 
   it("pauses, resumes, reorders, and cancels queued X-Ray jobs without changing readaloud status", async () => {
-    await using fixture = await setupBook()
+    await using fixture = await setupBook({ secondBook: true })
     const before = (await getBook(fixture.bookUuid))?.readaloud
     const reservation = randomUUID()
     assert.ok(globalThis.xrayJobControllers)
     globalThis.xrayJobControllers.set(reservation, new AbortController())
     try {
       const first = await fixture.job("book_xray", true)
-      const second = await fixture.job("book_xray", true)
+      const second = await fixture.job("book_xray", true, fixture.otherBookUuid)
       await pauseJob(first.uuid)
       assert.equal((await getJob(first.uuid))?.status, "PAUSED")
       await resumeJob(first.uuid)

@@ -230,9 +230,11 @@ export async function openAudiobookDir(
 /**
  * The collections a new book joins: its import rule's, plus any collection
  * named like a folder the book was found in, so that a file dropped into
- * "book-imports/David/…" lands in the "David" collection.
+ * "book-imports/David/…" lands in the "David" collection. A candidate marked
+ * `exactCollections` joins its own collections only.
  */
 async function collectionsFor(candidate: Candidate): Promise<UUID[]> {
+  if (candidate.exactCollections) return [...(candidate.collections ?? [])]
   const folders = dirname(candidate.filepath).split(/[\\/]/).filter(Boolean)
   const named = await getCollectionUuidsNamed(folders)
   return [...new Set([...(candidate.collections ?? []), ...named])]

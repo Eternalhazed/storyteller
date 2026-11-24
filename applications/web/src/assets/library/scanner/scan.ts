@@ -10,6 +10,7 @@ import {
 import { logger } from "@/logging"
 import { type UUID } from "@/uuid"
 
+import { notifyBooksScanned } from "./books-scanned"
 import {
   type PipelineCtx,
   type ScanCtx,
@@ -300,6 +301,7 @@ export async function scan(opts: {
   for (const uuid of importedBookUuids) {
     await notifyEbookImported(uuid)
   }
+  await notifyBooksScanned([...(locked?.scannedBookUuids ?? [])])
 
   report.finish()
   report.logger.info({ msg: report.formatSummary() })

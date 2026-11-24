@@ -1089,6 +1089,8 @@
             "locationTypeSiblingFolder": "Alongside input in a folder",
             "locationTypeCustomFolder": "In a custom folder",
             "locationTypeInternal": "In the Storyteller internal folder",
+            "syncNarrationAutomatically": "Sync narration automatically",
+            "syncNarrationAutomaticallyDescription": "Queue a sync as soon as a book has both an ebook and an audiobook. Each book is synced automatically at most once; a sync that failed or was stopped is left for you to retry.",
             "cleanCacheAfterReadaloud": "Clean up cache after alignment",
             "cleanCacheAfterReadaloudDescription": "Saves disk space, but re-aligning a book later starts from scratch.",
             "previewLabel": "Saved as",

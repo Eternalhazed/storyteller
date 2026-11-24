@@ -325,6 +325,27 @@ export async function addIgnoreRule(
     .execute()
 }
 
+/**
+ * The book that copied or linked any of these files into the library, from
+ * the ignore rules a copy-mode or hardlink import leaves on its sources. Null
+ * when none of them was imported that way, or the book has since been
+ * deleted.
+ */
+export async function getBookImportedFrom(
+  paths: string[],
+): Promise<UUID | null> {
+  if (!paths.length) return null
+  const row = await db
+    .selectFrom("importRule")
+    .innerJoin("book", "book.uuid", "importRule.bookUuid")
+    .select("book.uuid")
+    .where("importRule.kind", "=", "ignore")
+    .where("importRule.source", "=", "import-relocate")
+    .where("importRule.path", "in", paths)
+    .executeTakeFirst()
+  return row?.uuid ?? null
+}
+
 export async function removeImportBackupIgnoreRule(path: string) {
   await db
     .deleteFrom("importRule")

@@ -140,6 +140,60 @@ export interface BookAccessView {
   userId: import("@/uuid").UUID
 }
 
+export interface BookRequest {
+  alignJobUuid: import("@/uuid").UUID | null
+  alignStatus: Generated<import("@/requests/types").AlignStatus>
+  audioAddedAt: number | null
+  audioBytesDone: Generated<number>
+  audioError: string | null
+  audioInfohash: string | null
+  audioProgress: Generated<number>
+  audioProgressAt: number | null
+  audioRelease: ColumnType<
+    import("@/requests/types").ChosenRelease,
+    string,
+    string
+  > | null
+  audioReused: Generated<boolean>
+  audioStatus: Generated<import("@/requests/types").FormatStatus>
+  bookUuid: import("@/uuid").UUID
+  chosenWork: ColumnType<import("@/requests/types").ChosenWork, string, string>
+  closedAt: string | null
+  collectionUuid: import("@/uuid").UUID
+  createdAt: Generated<string>
+  ebookAddedAt: number | null
+  ebookBytesDone: Generated<number>
+  ebookError: string | null
+  ebookInfohash: string | null
+  ebookProgress: Generated<number>
+  ebookProgressAt: number | null
+  ebookRelease: ColumnType<
+    import("@/requests/types").ChosenRelease,
+    string,
+    string
+  > | null
+  ebookReused: Generated<boolean>
+  ebookStatus: Generated<import("@/requests/types").FormatStatus>
+  input: ColumnType<import("@/requests/types").RequestInput, string, string>
+  kind: import("@/requests/types").RequestKind
+  notified: ColumnType<
+    import("@/requests/types").Milestone[],
+    string | undefined,
+    string
+  >
+  updatedAt: Generated<string>
+  userId: import("@/uuid").UUID
+  uuid: Generated<import("@/uuid").UUID>
+}
+
+export interface BookRequestEvent {
+  createdAt: Generated<string>
+  kind: string
+  message: string
+  requestUuid: import("@/uuid").UUID
+  uuid: Generated<import("@/uuid").UUID>
+}
+
 export interface BookToCollection {
   bookUuid: import("@/uuid").UUID
   collectionUuid: import("@/uuid").UUID
@@ -390,6 +444,7 @@ export interface Job {
   createdAt: Generated<string>
   error: string | null
   finishedAt: string | null
+  interruptedCount: Generated<number>
   position: Generated<number>
   progress: Generated<number>
   restart: import("@/work/distributor").RestartMode | null
@@ -650,6 +705,15 @@ export interface UserBookRating {
   uuid: Generated<import("@/uuid").UUID>
 }
 
+export interface UserDevice {
+  createdAt: Generated<string>
+  installId: string
+  platform: string
+  pushToken: string | null
+  updatedAt: Generated<string>
+  userId: import("@/uuid").UUID
+}
+
 export interface UserPermission {
   bookCreate: Generated<boolean>
   bookDelete: Generated<boolean>
@@ -701,6 +765,8 @@ export interface DB {
   book: Book
   bookAccess: BookAccess
   bookAccessView: BookAccessView
+  bookRequest: BookRequest
+  bookRequestEvent: BookRequestEvent
   bookToCollection: BookToCollection
   bookToCreator: BookToCreator
   bookToSeries: BookToSeries
@@ -742,6 +808,7 @@ export interface DB {
   tokenRevokation: TokenRevokation
   user: User
   userBookRating: UserBookRating
+  userDevice: UserDevice
   userPermission: UserPermission
   userSettings: UserSettings
   verificationToken: VerificationToken

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { MediaType } from "@storyteller/media-types"
 
 import { hasPermission, withHasPermission } from "@/auth/auth"
+import { isBookVisibleTo } from "@/database/books"
 import { subscribeToBookEvents } from "@/events"
 import { subscribeToJobEvents } from "@/jobEvents"
 
@@ -57,9 +58,24 @@ export const GET = withHasPermission(["bookList", "bookProcess"])((request) => {
       }, HEARTBEAT_INTERVAL_MS)
 
       if (canReadBooks) {
+        // A reader only hears about books on shelves they can see. The checks
+        // are chained so events still arrive in the order they happened. A
+        // deletion carries only the book's id and cannot be checked anymore.
+        let delivered = Promise.resolve()
         unsubscribes.push(
           subscribeToBookEvents((event) => {
-            send(`data: ${JSON.stringify({ channel: "book", event })}\n\n`)
+            delivered = delivered
+              .then(async () => {
+                if (
+                  event.type !== "bookDeleted" &&
+                  !(await isBookVisibleTo(event.bookUuid, user.id))
+                ) {
+                  return
+                }
+                send(`data: ${JSON.stringify({ channel: "book", event })}\n\n`)
+              })
+              // a failed check drops that event, never the ones after it
+              .catch(() => {})
           }),
         )
       }

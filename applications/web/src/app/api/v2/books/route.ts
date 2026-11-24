@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { basename, dirname, extname, sep } from "node:path"
 
 import { NextResponse } from "next/server"
+import { z } from "zod"
 
 import { Epub, MemoryAdapter } from "@storyteller/epub"
 import { isHiddenFile } from "@storyteller/fs"
@@ -82,6 +83,14 @@ async function probeEpub2(filepath: string): Promise<boolean> {
  *       When `epub2Strategy` is an explicit value ("replace", "skip",
  *       "backup-and-convert", "convert-alongside"), the import proceeds
  *       using that strategy.
+ *
+ *       Audio files may sit in one folder or in its disc sub-folders.
+ *
+ *       Pass `bookUuid` to make the import safe to repeat: the book is
+ *       created with that id, and if it already exists, only formats it does
+ *       not have yet are attached; existing formats are never replaced. Pass
+ *       `exactCollection: true` to file the book into `collection` only,
+ *       rather than also into collections named like its folders.
  */
 export const POST = withHasPermission("bookCreate")(async (request) => {
   const {
@@ -89,11 +98,28 @@ export const POST = withHasPermission("bookCreate")(async (request) => {
     collection,
     importMode,
     epub2Strategy = "auto",
+    bookUuid,
+    exactCollection = false,
   } = (await request.json()) as {
     paths: string[]
     collection: UUID | undefined
     importMode: ImportMode
     epub2Strategy?: Epub2ImportStrategy | "auto"
+    bookUuid?: UUID
+    exactCollection?: boolean
+  }
+
+  if (bookUuid !== undefined) {
+    if (!z.uuid().safeParse(bookUuid).success) {
+      return Response.json(
+        { message: "bookUuid must be a UUID" },
+        { status: 400 },
+      )
+    }
+    const existing = await getBook(bookUuid)
+    if (existing && !(await getBook(bookUuid, request.auth.user.id))) {
+      return Response.json({ message: "Not found" }, { status: 404 })
+    }
   }
 
   const epubs = paths.filter((path) => extname(path) === ".epub")
@@ -116,7 +142,7 @@ export const POST = withHasPermission("bookCreate")(async (request) => {
     }
   }
 
-  const newBookUuid = randomUUID()
+  const newBookUuid = bookUuid ?? randomUUID()
   const resolvedStrategy = epub2Strategy === "auto" ? undefined : epub2Strategy
 
   const candidates: Candidate[] = []
@@ -129,31 +155,28 @@ export const POST = withHasPermission("bookCreate")(async (request) => {
       filepath: epubPath,
       titleHint: basename(epubPath, extname(epubPath)),
       ...(collection && { collections: [collection] }),
+      exactCollections: exactCollection,
+      attachIfMissing: bookUuid !== undefined,
       importMode,
       ...(resolvedStrategy && { epub2ImportStrategy: resolvedStrategy }),
     })
   }
 
   if (audio.length) {
-    if (audio.length > 1) {
-      const longestPrefx = longestPrefix(audio).split(sep)
-      const notDirectlyUnderLongestPrefix = audio.find(
-        (path) => path.split(sep).length !== longestPrefx.length + 1,
-      )
-
-      if (notDirectlyUnderLongestPrefix) {
-        return Response.json(
-          {
-            message: `Audio files must be in a single directory. ${notDirectlyUnderLongestPrefix} is not directly under ${longestPrefx.join(sep)}`,
-          },
-          { status: 405 },
-        )
-      }
-    }
-
     const audioDirectory =
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       audio.length === 1 ? dirname(audio[0]!) : longestPrefix(audio)
+    // one folder, or one folder of disc sub-folders
+    const depth = audioDirectory.split(sep).length
+    const misplaced = audio.find((path) => path.split(sep).length > depth + 2)
+    if (misplaced) {
+      return Response.json(
+        {
+          message: `Audio files must be in one folder or its disc sub-folders. ${misplaced} is not directly under ${audioDirectory} or one of its sub-folders`,
+        },
+        { status: 405 },
+      )
+    }
 
     candidates.push({
       folder: audioDirectory,
@@ -163,6 +186,8 @@ export const POST = withHasPermission("bookCreate")(async (request) => {
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       titleHint: basename(audio[0]!, extname(audio[0]!)),
       ...(collection && { collections: [collection] }),
+      exactCollections: exactCollection,
+      attachIfMissing: bookUuid !== undefined,
       importMode,
     })
   }

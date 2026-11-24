@@ -169,6 +169,9 @@ const TABLES = {
     exclude:
       "materialized into progression documents; the parent progression is always updated alongside it",
   },
+  bookRequest: { exclude: "served by the requests API, not synced" },
+  bookRequestEvent: { exclude: "served by the requests API, not synced" },
+  userDevice: { exclude: "push registration, not synced" },
 
   book: {
     custom:

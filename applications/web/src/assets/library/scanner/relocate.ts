@@ -1,5 +1,7 @@
-import { mkdir, readdir, rm } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { chmod, mkdir, readdir, rm, stat } from "node:fs/promises"
+import { dirname, join, relative } from "node:path"
+
+import { isHiddenFile } from "@storyteller/fs"
 
 import { copyWithHardlink, copyWithReflink, move } from "@/assets/fs"
 import { type ScanFormat } from "@/assets/library/scanner/types"
@@ -35,7 +37,13 @@ function resolveRelocator(
       resolver = copyWithHardlink
       break
     case "copy":
-      resolver = copyWithReflink
+      resolver = async (source, destination) => {
+        await copyWithReflink(source, destination)
+        // a copy from a read-only source (a download still being seeded)
+        // keeps its mode; the library's copy has to be writable.
+        const { mode } = await stat(destination)
+        if (!(mode & 0o200)) await chmod(destination, mode | 0o200)
+      }
       break
   }
 
@@ -119,21 +127,30 @@ export async function relocateIfNeeded(
     return { book: updated, filepath: dest }
   }
 
-  // audiobook: filepath is the source directory.
+  // audiobook: filepath is the source directory. tracks may sit in
+  // sub-folders (one per disc); track discovery is recursive, so the copy
+  // keeps the same layout and loses nothing.
   const destDir = getInternalAudioDirectory(book)
   await mkdir(destDir, { recursive: true })
-  const entries = await readdir(filepath)
-  const nonAudioEntries: string[] = []
+  const entries = await readdir(filepath, {
+    recursive: true,
+    withFileTypes: true,
+  })
+  let leftBehind = false
   for (const entry of entries) {
-    if (!isAudioFile(entry)) {
-      nonAudioEntries.push(entry)
+    if (!entry.isFile()) continue
+    if (!isAudioFile(entry.name) || isHiddenFile(entry.name)) {
+      leftBehind = true
       continue
     }
-    await relocator(join(filepath, entry), join(destDir, entry))
+    const source = join(entry.parentPath, entry.name)
+    const dest = join(destDir, relative(filepath, source))
+    await mkdir(dirname(dest), { recursive: true })
+    await relocator(source, dest)
   }
 
   // dont remove the dir if theres other stuff in there
-  if (importMode === "move" && nonAudioEntries.length === 0) {
+  if (importMode === "move" && !leftBehind) {
     await rm(filepath, { recursive: true })
   }
   const updated = await updateBook(book.uuid, null, {

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs"
 import { readdir, stat } from "node:fs/promises"
-import { basename, extname, join } from "node:path"
+import { basename, extname, join, sep } from "node:path"
 
 import {
   Contributor,
@@ -63,7 +63,9 @@ export async function getAudioFileInfo(
 }
 
 /**
- * scan directory for audio files and return sorted list
+ * Every audio file in the directory, including ones in sub-folders (one per
+ * disc). `filename` is the path relative to the directory with `/`
+ * separators, which is also the track's href in the manifest.
  */
 export async function getDirectoryAudioFiles(
   dirPath: string,
@@ -72,15 +74,13 @@ export async function getDirectoryAudioFiles(
     return []
   }
 
-  const files = await readdir(dirPath)
+  const files = await readdir(dirPath, { recursive: true })
   const audioFiles: AudioFileInfo[] = []
 
   for (const file of files) {
-    const filepath = join(dirPath, file)
-
     if (isAudioFile(file)) {
-      const fileInfo = await getAudioFileInfo(filepath)
-      audioFiles.push(fileInfo)
+      const fileInfo = await getAudioFileInfo(join(dirPath, file))
+      audioFiles.push({ ...fileInfo, filename: file.split(sep).join("/") })
     }
   }
 

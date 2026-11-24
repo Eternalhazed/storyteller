@@ -1,0 +1,270 @@
+{
+  "work": {
+    "title": "Sharpe's Eagle",
+    "authors": ["Bernard Cornwell"],
+    "series": { "name": "Sharpe", "position": 8 },
+    "language": "en"
+  },
+  "editionNarrators": ["Rupert Farley"],
+  "releases": [
+    {
+      "source": "first",
+      "id": "a-popular-unverified",
+      "kind": "audio",
+      "title": "Sharpe's Eagle",
+      "authors": ["Bernard Cornwell"],
+      "seeders": 40,
+      "size": 300000000,
+      "infohash": null,
+      "files": null,
+      "facts": {
+        "narrators": null,
+        "abridged": null,
+        "dramatized": null,
+        "language": { "value": "en", "source": "field" },
+        "fileTypes": { "value": ["mp3"], "source": "field" },
+        "bitrateKbps": { "value": 64, "source": "field" },
+        "durationSeconds": null,
+        "pack": null,
+        "series": null,
+        "publishedYear": null
+      }
+    },
+    {
+      "source": "first",
+      "id": "a-farley-m4b",
+      "kind": "audio",
+      "title": "Sharpe's Eagle (Unabridged)",
+      "authors": ["Bernard Cornwell"],
+      "seeders": 14,
+      "size": 350000000,
+      "infohash": null,
+      "files": [{ "path": "Sharpe's Eagle.m4b", "size": 350000000 }],
+      "facts": {
+        "narrators": { "value": ["Rupert Farley"], "source": "field" },
+        "abridged": { "value": false, "source": "field" },
+        "dramatized": null,
+        "language": { "value": "en-GB", "source": "field" },
+        "fileTypes": { "value": ["m4b"], "source": "field" },
+        "bitrateKbps": { "value": 64, "source": "field" },
+        "durationSeconds": { "value": 45420, "source": "field" },
+        "pack": { "value": false, "source": "field" },
+        "series": {
+          "value": { "name": "Sharpe", "position": 8 },
+          "source": "field"
+        },
+        "publishedYear": null
+      }
+    },
+    {
+      "source": "second",
+      "id": "a-farley-mp3",
+      "kind": "audio",
+      "title": "Sharpes Eagle",
+      "authors": ["Bernard Cornwell"],
+      "seeders": 30,
+      "size": 400000000,
+      "infohash": null,
+      "files": [
+        { "path": "CD1/01.mp3", "size": 200000000 },
+        { "path": "CD2/01.mp3", "size": 200000000 }
+      ],
+      "facts": {
+        "narrators": { "value": ["rupert farley"], "source": "field" },
+        "abridged": { "value": false, "source": "field" },
+        "dramatized": null,
+        "language": null,
+        "fileTypes": { "value": ["mp3"], "source": "files" },
+        "bitrateKbps": null,
+        "durationSeconds": null,
+        "pack": null,
+        "series": null,
+        "publishedYear": null
+      }
+    },
+    {
+      "source": "first",
+      "id": "a-abridged",
+      "kind": "audio",
+      "title": "Sharpe's Eagle",
+      "authors": ["Bernard Cornwell"],
+      "seeders": 60,
+      "size": 100000000,
+      "infohash": null,
+      "files": null,
+      "facts": {
+        "narrators": { "value": ["Rupert Farley"], "source": "field" },
+        "abridged": { "value": true, "source": "field" },
+        "dramatized": null,
+        "language": null,
+        "fileTypes": null,
+        "bitrateKbps": null,
+        "durationSeconds": null,
+        "pack": null,
+        "series": null,
+        "publishedYear": null
+      }
+    },
+    {
+      "source": "first",
+      "id": "a-pack",
+      "kind": "audio",
+      "title": "Sharpe's Eagle, Sharpe's Gold, Sharpe's Company",
+      "authors": ["Bernard Cornwell"],
+      "seeders": 90,
+      "size": 1000000000,
+      "infohash": null,
+      "files": null,
+      "facts": {
+        "narrators": { "value": ["Rupert Farley"], "source": "field" },
+        "abridged": { "value": false, "source": "field" },
+        "dramatized": null,
+        "language": null,
+        "fileTypes": null,
+        "bitrateKbps": null,
+        "durationSeconds": null,
+        "pack": { "value": true, "source": "field" },
+        "series": null,
+        "publishedYear": null
+      }
+    },
+    {
+      "source": "first",
+      "id": "a-thin",
+      "kind": "audio",
+      "title": "Sharpe's Eagle",
+      "authors": ["Bernard Cornwell"],
+      "seeders": 70,
+      "size": 90000000,
+      "infohash": null,
+      "files": null,
+      "facts": {
+        "narrators": { "value": ["Rupert Farley"], "source": "field" },
+        "abridged": { "value": false, "source": "field" },
+        "dramatized": null,
+        "language": null,
+        "fileTypes": null,
+        "bitrateKbps": { "value": 32, "source": "field" },
+        "durationSeconds": null,
+        "pack": null,
+        "series": null,
+        "publishedYear": null
+      }
+    },
+    {
+      "source": "first",
+      "id": "a-german",
+      "kind": "audio",
+      "title": "Sharpe's Eagle",
+      "authors": ["Bernard Cornwell"],
+      "seeders": 80,
+      "size": 300000000,
+      "infohash": null,
+      "files": null,
+      "facts": {
+        "narrators": { "value": ["Rupert Farley"], "source": "field" },
+        "abridged": { "value": false, "source": "field" },
+        "dramatized": null,
+        "language": { "value": "de", "source": "field" },
+        "fileTypes": null,
+        "bitrateKbps": null,
+        "durationSeconds": null,
+        "pack": null,
+        "series": null,
+        "publishedYear": null
+      }
+    },
+    {
+      "source": "first",
+      "id": "a-dead",
+      "kind": "audio",
+      "title": "Sharpe's Eagle",
+      "authors": ["Bernard Cornwell"],
+      "seeders": 0,
+      "size": 300000000,
+      "infohash": null,
+      "files": null,
+      "facts": {
+        "narrators": { "value": ["Rupert Farley"], "source": "field" },
+        "abridged": { "value": false, "source": "field" },
+        "dramatized": null,
+        "language": null,
+        "fileTypes": { "value": ["m4b"], "source": "field" },
+        "bitrateKbps": null,
+        "durationSeconds": null,
+        "pack": null,
+        "series": null,
+        "publishedYear": null
+      }
+    },
+    {
+      "source": "first",
+      "id": "e-epub",
+      "kind": "ebook",
+      "title": "Sharpe's Eagle",
+      "authors": ["Bernard Cornwell"],
+      "seeders": 2,
+      "size": 600000,
+      "infohash": null,
+      "files": null,
+      "facts": {
+        "narrators": null,
+        "abridged": null,
+        "dramatized": null,
+        "language": { "value": "en", "source": "field" },
+        "fileTypes": { "value": ["epub", "mobi"], "source": "field" },
+        "bitrateKbps": null,
+        "durationSeconds": null,
+        "pack": null,
+        "series": null,
+        "publishedYear": { "value": 2014, "source": "field" }
+      }
+    },
+    {
+      "source": "first",
+      "id": "e-mobi",
+      "kind": "ebook",
+      "title": "Sharpe's Eagle",
+      "authors": ["Bernard Cornwell"],
+      "seeders": 25,
+      "size": 600000,
+      "infohash": null,
+      "files": null,
+      "facts": {
+        "narrators": null,
+        "abridged": null,
+        "dramatized": null,
+        "language": null,
+        "fileTypes": { "value": ["mobi"], "source": "field" },
+        "bitrateKbps": null,
+        "durationSeconds": null,
+        "pack": null,
+        "series": null,
+        "publishedYear": null
+      }
+    },
+    {
+      "source": "first",
+      "id": "e-other-book",
+      "kind": "ebook",
+      "title": "Sharpe's Gold",
+      "authors": ["Bernard Cornwell"],
+      "seeders": 50,
+      "size": 600000,
+      "infohash": null,
+      "files": null,
+      "facts": {
+        "narrators": null,
+        "abridged": null,
+        "dramatized": null,
+        "language": null,
+        "fileTypes": { "value": ["epub"], "source": "field" },
+        "bitrateKbps": null,
+        "durationSeconds": null,
+        "pack": null,
+        "series": null,
+        "publishedYear": null
+      }
+    }
+  ]
+}

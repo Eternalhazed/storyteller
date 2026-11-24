@@ -255,6 +255,19 @@ export async function ingestCandidate(
     const importMode = candidate.importMode ?? ctx.defaultImportMode
 
     if (storedPath !== candidate.filepath) {
+      if (
+        candidate.attachIfMissing &&
+        storedPath !== null &&
+        !existing[format]?.missing
+      ) {
+        ctx.report.skipped({
+          step: "ingest",
+          book: existing,
+          format,
+          reason: "format-already-attached",
+        })
+        return null
+      }
       const placed = await placeForExistingBook(
         existing,
         candidate.filepath,

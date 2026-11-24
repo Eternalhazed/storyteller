@@ -66,6 +66,7 @@ const DEFAULT_SETTINGS: Settings = {
   xrayAnthropicApiKey: null,
   xrayModel: DEFAULT_XRAY_MODEL,
   xrayAutoGenerate: false,
+  syncNarrationAutomatically: false,
   parallelTranscodes: 1,
   parallelTranscribes: 1,
   authProviders: [],

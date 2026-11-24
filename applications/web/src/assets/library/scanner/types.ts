@@ -30,6 +30,17 @@ export type Candidate = {
    */
   collections?: UUID[]
   /**
+   * file the book into `collections` only. without this, a new book also
+   * joins any collection named like a folder in its path.
+   */
+  exactCollections?: boolean
+  /**
+   * when the candidate resolves to an existing book that already has this
+   * format, leave the book as it is instead of pointing the format at the
+   * candidate's file. makes a repeated import a no-op rather than a replace.
+   */
+  attachIfMissing?: boolean
+  /**
    * import mode for this candidate's source rule. falls back to the scan's
    * default when absent. lets one scan honor different modes per rule.
    */

@@ -950,6 +950,8 @@
             "locationTypeSiblingFolder": "In dezelfde folder als de EPUB, in een folder",
             "locationTypeCustomFolder": "In een specifieke folder",
             "locationTypeInternal": "In de interne Storyteller-folder",
+            "syncNarrationAutomatically": "Vertelling automatisch synchroniseren",
+            "syncNarrationAutomaticallyDescription": "Zet een synchronisatie in de wachtrij zodra een boek zowel een e-book als een audioboek heeft. Elk boek wordt hooguit één keer automatisch gesynchroniseerd; een mislukte of gestopte synchronisatie kun je zelf opnieuw starten.",
             "cleanCacheAfterReadaloud": "Cache opruimen na synchronisatie",
             "cleanCacheAfterReadaloudDescription": "Bespaart schijfruimte, maar opnieuw synchroniseren begint dan helemaal opnieuw.",
             "previewLabel": "Opgeslagen als",

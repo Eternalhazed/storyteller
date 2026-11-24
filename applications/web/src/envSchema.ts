@@ -137,6 +137,36 @@ export const documentedServerEnvVars = {
     .describe(
       "Hardcover API token used when none has been saved through the settings UI.",
     ),
+  STORYTELLER_ACQUISITION_URL: z
+    .url()
+    .optional()
+    .describe(
+      "[Base URL of an acquisition adapter.](https://storyteller-platform.gitlab.io/storyteller/docs/managing/book-requests) Book requests are off unless this, a secret and `STORYTELLER_ACQUISITION_SEED_DIR` are set.",
+    ),
+  STORYTELLER_ACQUISITION_SECRET: z
+    .string()
+    .optional()
+    .describe(
+      "Shared secret sent to the acquisition adapter. Either this or STORYTELLER_ACQUISITION_SECRET_FILE.",
+    ),
+  STORYTELLER_ACQUISITION_SECRET_FILE: z
+    .string()
+    .optional()
+    .describe(
+      "Path to a file containing the acquisition adapter's shared secret.",
+    ),
+  STORYTELLER_ACQUISITION_SEED_DIR: z
+    .string()
+    .optional()
+    .describe(
+      "Where Storyteller sees the adapter's download folder. Mount it read-only; requested books are copied from it into the library.",
+    ),
+  STORYTELLER_PUSH_SERVICE_ACCOUNT_FILE: z
+    .string()
+    .optional()
+    .describe(
+      "Path to a Firebase service account key. When set, Storyteller sends push notifications about book requests to the reader's Android devices.",
+    ),
   PUID: z.coerce
     .number()
     .optional()

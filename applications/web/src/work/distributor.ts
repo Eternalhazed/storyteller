@@ -29,12 +29,11 @@ import {
   type DisplayJob,
   type Job,
   type JobType,
-  createJob,
   getActiveJobForBook,
   getJob,
   getJobs,
-  getNextJobPosition,
   nowTimestamp,
+  queueJobForBook,
   reorderActiveJobs,
   updateJob,
 } from "@/database/jobs"
@@ -153,26 +152,20 @@ export async function enqueueBookAlign(
   restart: RestartMode,
   overrides?: Partial<RunConfig>,
 ): Promise<DisplayJob> {
-  const existing = await getActiveJobForBook(bookUuid, "book_align")
-  if (existing) {
-    return existing
-  }
-
   const book = await getBookOrThrow(bookUuid)
   const settings = await getSettings()
   const config = buildRunConfig(settings, book.language ?? null, overrides)
 
   const effectiveRestart = clampRestart(restart, book)
   const startStage = getStartStage(effectiveRestart, book)
-  const position = await getNextJobPosition()
 
-  const job = await createJob({
+  const { job, created } = await queueJobForBook({
     type: "book_align",
     bookUuid,
     restart: effectiveRestart,
     config,
-    position,
   })
+  if (!created) return job
 
   await updateJob(job.uuid, { stage: startStage })
 
@@ -180,7 +173,7 @@ export async function enqueueBookAlign(
     readaloud: {
       status: "QUEUED",
       currentStage: startStage,
-      queuePosition: position,
+      queuePosition: job.position,
       restartPending: effectiveRestart || null,
     },
   })
@@ -190,23 +183,13 @@ export async function enqueueBookAlign(
 }
 
 export async function enqueueBookXray(bookUuid: UUID): Promise<DisplayJob> {
-  let job: DisplayJob
-  await pumpMutex.lock()
-  try {
-    const existing = await getActiveJobForBook(bookUuid, "book_xray")
-    if (existing) return existing
-    job = await createJob({
-      type: "book_xray",
-      bookUuid,
-      restart: false,
-      config: null,
-      position: await getNextJobPosition(),
-    })
-  } finally {
-    pumpMutex.unlock()
-  }
-  // Only the X-Ray lane: queueing X-Ray must not restart alignment jobs that
-  // were left queued when the server last stopped.
+  const { job } = await queueJobForBook({
+    type: "book_xray",
+    bookUuid,
+    restart: false,
+    config: null,
+  })
+  // Only the X-Ray lane; alignment jobs have their own triggers.
   void pump(undefined, undefined, ["book_xray"])
   return job
 }
@@ -309,6 +292,54 @@ setEbookImportHandler(async (bookUuid) => {
   await lookUpSeriesForNewBook(bookUuid)
   await maybeEnqueueBookXray(bookUuid)
 })
+
+/** Restarts a sync may be running through before it is failed instead. */
+const MAX_INTERRUPTIONS = 2
+
+/**
+ * Run once at server start, before the queue is pumped. Syncs that were
+ * queued or running when the server stopped are picked up again, a running
+ * one from the stage it reached; paused and cancelled ones stay as they are.
+ * A sync that was running through two restarts in a row is failed instead,
+ * so one bad book cannot crash-loop the server. Retrying it stays manual.
+ */
+export async function recoverInterruptedAlignJobs(): Promise<void> {
+  const running = await getJobs({ statuses: ["RUNNING"], type: "book_align" })
+  for (const job of running) {
+    const interruptedCount = job.interruptedCount + 1
+    if (interruptedCount < MAX_INTERRUPTIONS) {
+      await updateJob(job.uuid, { interruptedCount })
+      logger.info({
+        msg: "Resuming a sync that was running when the server stopped",
+        jobUuid: job.uuid,
+        bookUuid: job.bookUuid,
+      })
+      continue
+    }
+
+    await updateJob(job.uuid, {
+      status: "ERROR",
+      interruptedCount,
+      finishedAt: nowTimestamp(),
+      error: `Stopped by ${interruptedCount} server restarts in a row while running`,
+    })
+    if (job.bookUuid) {
+      await updateBook(job.bookUuid, null, {
+        readaloud: {
+          status: "ERROR",
+          currentStage: job.stage ?? "SPLIT_TRACKS",
+          queuePosition: null,
+          restartPending: null,
+        },
+      })
+    }
+    logger.error({
+      msg: "Failed a sync that was running through repeated server restarts",
+      jobUuid: job.uuid,
+      bookUuid: job.bookUuid,
+    })
+  }
+}
 
 async function claimNextJob(
   type: JobType,

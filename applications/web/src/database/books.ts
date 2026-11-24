@@ -917,19 +917,6 @@ export async function getAlignedReadaloudBooks(userId?: UUID) {
     .execute()
 }
 
-export async function getQueuedBooks() {
-  return await booksQuery()
-    .innerJoin("readaloud", "readaloud.bookUuid", "book.uuid")
-    .where((qb) =>
-      qb.or([
-        qb("readaloud.status", "=", "QUEUED"),
-        qb("readaloud.status", "=", "PROCESSING"),
-      ]),
-    )
-    .orderBy("readaloud.queuePosition", "asc")
-    .execute()
-}
-
 export type GetBooksOptions = {
   limit?: number
   offset?: number
@@ -1152,6 +1139,20 @@ export async function getBookOrThrow(uuid: UUID) {
   const book = await getBook(uuid)
   if (!book) throw new Error(`No book found with uuid ${uuid}`)
   return book
+}
+
+/** Whether the book is on a shelf the reader can see. */
+export async function isBookVisibleTo(
+  bookUuid: UUID,
+  userId: UUID,
+): Promise<boolean> {
+  const row = await db
+    .selectFrom("bookAccess")
+    .select("bookUuid")
+    .where("bookUuid", "=", bookUuid)
+    .where("userId", "=", userId)
+    .executeTakeFirst()
+  return !!row
 }
 
 /**
