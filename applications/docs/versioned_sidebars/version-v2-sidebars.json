@@ -16,7 +16,12 @@
       "type": "category",
       "label": "Managing your library",
       "collapsed": false,
-      "items": ["managing/adding", "managing/aligning", "managing/organizing"]
+      "items": [
+        "managing/adding",
+        "managing/aligning",
+        "managing/organizing",
+        "managing/book-requests"
+      ]
     },
     {
       "type": "category",
