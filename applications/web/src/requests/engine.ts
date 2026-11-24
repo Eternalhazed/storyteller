@@ -298,15 +298,16 @@ export class RequestEngine {
     }
     const now = this.now()
     const torrent = torrents.get(fields.infohash)
+    const ref: ReleaseRef = {
+      source: fields.release.source,
+      id: fields.release.id,
+      kind: format,
+    }
+    const folder = seedFolderFor(fields.release, fields.infohash)
 
     if (!torrent) {
       // Not in the download client: never added, or added before a crash
       // and lost. Seeders go stale, so check again right before adding.
-      const ref: ReleaseRef = {
-        source: fields.release.source,
-        id: fields.release.id,
-        kind: format,
-      }
       const fresh = await this.deps.adapter.inspect(ref)
       if (fresh.seeders < 1) {
         request = await this.update(
@@ -322,11 +323,7 @@ export class RequestEngine {
         )
         return await this.reach(request, `${format}-choosing`)
       }
-      const added = await this.deps.adapter.add(
-        ref,
-        fields.infohash,
-        seedFolderFor(fields.release, fields.infohash),
-      )
+      const added = await this.deps.adapter.add(ref, fields.infohash, folder)
       return await this.update(
         request,
         prefixed(format, {
@@ -344,6 +341,11 @@ export class RequestEngine {
       )
     }
 
+    // Nothing here pauses a download, so a paused one is an add the adapter
+    // did not finish setting up; adding again is safe and finishes it.
+    if (torrent.state === "paused" && torrent.progress < 1) {
+      await this.deps.adapter.add(ref, fields.infohash, folder)
+    }
     // In the client although this request never added it (another request's
     // download, or a lost response to our own add): it costs no new download.
     const firstSeen: FormatPatch =

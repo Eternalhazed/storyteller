@@ -272,6 +272,28 @@ describe("delivery engine", () => {
     )
   })
 
+  it("adds a paused download again so an interrupted add finishes", async () => {
+    using ctx = setupTestDb()
+    const [reader] = household(ctx)
+    await setRequestCollection(reader, giveShelf(ctx, reader))
+    const adapter = new MemoryAdapter([release("e1", "ebook")])
+    const request = await requestEbook(reader, adapter)
+    const { engine: run } = engine(adapter, { now: 0 })
+    const hash = request.ebookInfohash!
+
+    await run.tick()
+    adapter.torrents.set(hash, {
+      ...adapter.torrents.get(hash)!,
+      state: "paused",
+    })
+    await run.tick()
+    assert.deepStrictEqual(adapter.added, [hash, hash])
+    assert.strictEqual(adapter.torrents.get(hash)?.state, "downloading")
+
+    await run.tick()
+    assert.deepStrictEqual(adapter.added, [hash, hash], "only while paused")
+  })
+
   it("marks a download stalled after 30 minutes without data, once", async () => {
     using ctx = setupTestDb()
     const [reader] = household(ctx)

@@ -135,7 +135,10 @@ as verified. `language` is a BCP 47 tag.
   sources require.
 - `add`: save the download into `folder` under your download root; `folder` is
   `<source>/<infohash>`. Adding one that is already present answers its infohash
-  with `alreadyPresent: true`. Never remove or pause anything.
+  with `alreadyPresent: true`. Never remove or pause anything. Storyteller calls
+  `add` again for a download it finds paused, so an `add` cut short (for
+  example one that adds paused before finishing its setup) should finish the
+  setup and resume when repeated.
 - `status`: one entry per torrent you have, leaving out unknown hashes:
 
   ```json
