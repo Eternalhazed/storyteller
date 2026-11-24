@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
 import createNextIntlPlugin from "next-intl/plugin"
 
@@ -10,7 +11,7 @@ const pkg = JSON.parse(
   readFileSync(new URL("./package.json", import.meta.url), "utf-8"),
 ) as Record<string, unknown>
 
-const repoRoot = resolve(new URL(import.meta.url).pathname, "../../..")
+const repoRoot = resolve(fileURLToPath(import.meta.url), "../../..")
 
 const notNeededAtRuntime = new Set(["onnxruntime-web", "@types/node"])
 
