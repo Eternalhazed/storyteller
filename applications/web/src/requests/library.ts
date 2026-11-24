@@ -11,11 +11,19 @@ import { normalize } from "./ranking"
 import { RequestError, getRequestCollection } from "./service"
 import { type ChosenWork } from "./types"
 
+/**
+ * The title without a subtitle: "Moby Dick; Or, The Whale" and "Moby Dick"
+ * name the same work, whichever the catalog or the file carries.
+ */
+function mainTitle(title: string): string {
+  return normalize(title.split(/[:;(]/)[0] ?? title)
+}
+
 function isWork(book: BookWithRelations, work: ChosenWork): boolean {
   const titles = new Set(
-    [work.title, ...(work.altTitles ?? [])].map(normalize).filter(Boolean),
+    [work.title, ...(work.altTitles ?? [])].map(mainTitle).filter(Boolean),
   )
-  if (!titles.has(normalize(book.title))) return false
+  if (!titles.has(mainTitle(book.title))) return false
   if (!work.authors.length) return true
   const authors = new Set(work.authors.map(normalize))
   return book.authors.some((author) => authors.has(normalize(author.name)))

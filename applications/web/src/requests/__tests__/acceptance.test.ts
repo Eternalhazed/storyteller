@@ -42,6 +42,7 @@ import { subscribeToJobEvents } from "@/jobEvents"
 import { type JobStatus } from "@/jobStatuses"
 import { RequestEngine } from "@/requests/engine"
 import { toRequestView } from "@/requests/http"
+import { findLibraryCopies } from "@/requests/library"
 import {
   createRequest,
   dismissRequest,
@@ -473,6 +474,22 @@ describe("book request delivery survives a crash after the ebook import", () => 
     assert.strictEqual((await getBooks(null, requester)).length, 1)
   })
 
+  it("tells each reader in the picker where the book already is", async () => {
+    // the catalog title has no subtitle; the book's file does
+    const work = { title: "Moby Dick", authors: ["Herman Melville"] }
+    const mine = await findLibraryCopies(work, requester)
+    assert.deepStrictEqual(
+      mine.mine.map((copy) => copy.bookUuid),
+      [request.bookUuid],
+    )
+    const theirs = await findLibraryCopies(work, housemate)
+    assert.deepStrictEqual(theirs.mine, [])
+    assert.deepStrictEqual(
+      theirs.elsewhere.map((copy) => copy.bookUuid),
+      [request.bookUuid],
+    )
+  })
+
   it("puts the same book on the housemate's shelf when they request it too", async () => {
     const theirs = await createRequest(
       housemate,
@@ -502,9 +519,10 @@ describe("book request delivery survives a crash after the ebook import", () => 
 
     const book = await getBook(request.bookUuid, housemate)
     assert.ok(book, "the housemate sees the book now")
+    // the requester's shelf is theirs: its name stays out of the housemate's view
     assert.deepStrictEqual(
-      book.collections.map((collection) => collection.uuid).sort(),
-      [requesterShelf, housemateShelf].sort(),
+      book.collections.map((collection) => collection.uuid),
+      [housemateShelf],
     )
     const events = await getBookRequestEvents(theirs.uuid)
     assert.ok(

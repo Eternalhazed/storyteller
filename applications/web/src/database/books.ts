@@ -693,7 +693,28 @@ export function booksQuery(userId?: UUID, options?: BooksQueryOptions) {
             "collection.createdAt",
             "collection.updatedAt",
           ])
-          .whereRef("bookToCollection.bookUuid", "=", "book.uuid"),
+          .whereRef("bookToCollection.bookUuid", "=", "book.uuid")
+          // A reader sees the shelves they can see, not the names of other
+          // readers' private shelves the same book is on.
+          .$if(!!userId, (qb) =>
+            qb.where((eb) =>
+              eb.or([
+                eb("collection.public", "=", true),
+                eb.exists(
+                  eb
+                    .selectFrom("collectionToUser")
+                    .select(sql.lit(1).as("one"))
+                    .whereRef(
+                      "collectionToUser.collectionUuid",
+                      "=",
+                      "collection.uuid",
+                    )
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    .where("collectionToUser.userId", "=", userId!),
+                ),
+              ]),
+            ),
+          ),
       ).as("collections"),
       identifiersQuery(eb),
       externalDataQuery(eb),
