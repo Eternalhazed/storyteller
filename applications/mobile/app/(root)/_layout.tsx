@@ -23,6 +23,15 @@ function javaScriptBackButton(fallback = "/") {
       }
 }
 
+function recommendationScreen(title: string) {
+  return {
+    title,
+    headerShown: true,
+    headerShadowVisible: false,
+    ...javaScriptBackButton(),
+  }
+}
+
 export default function ModalLayout() {
   const modalPresentation = Platform.OS === "android" ? "formSheet" : "modal"
   const reduceMotion = useReducedMotion()
@@ -126,6 +135,7 @@ export default function ModalLayout() {
           ...javaScriptBackButton(),
         }}
       />
+      <Stack.Screen name="ask" options={recommendationScreen("Ask")} />
       <Stack.Screen
         name="server"
         options={{

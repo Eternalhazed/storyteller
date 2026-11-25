@@ -37,6 +37,7 @@ const SECTION_LABELS: Record<string, { title: string; description: string }> = {
     title: "Next in your series",
     description: "The next unread book after the furthest you've read",
   },
+  forYou: { title: "For you", description: "Recommendations picked for you" },
   nearlyDone: {
     title: "Nearly done",
     description: "Books more than half read that you set aside",

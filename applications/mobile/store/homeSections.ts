@@ -379,7 +379,7 @@ export function buildHomeSections<Book extends HomeBook>(
 /**
  * The reader's saved order, with sections it doesn't mention yet (a new
  * built-in, or a shelf just made on the web) placed where they belong by
- * default: shelves before "To read", anything else at the end.
+ * default: For you after Next in your series, shelves before To read.
  */
 export function resolveOrder(
   saved: readonly string[],
@@ -387,10 +387,16 @@ export function resolveOrder(
 ): string[] {
   const order = saved.filter((id) => available.includes(id))
   for (const id of available) {
+    if (id === "forYou") continue
     if (order.includes(id)) continue
     const before = id.startsWith("shelf:") ? order.indexOf("toRead") : -1
     if (before === -1) order.push(id)
     else order.splice(before, 0, id)
+  }
+  if (available.includes("forYou") && !order.includes("forYou")) {
+    const next = order.indexOf("nextInSeries")
+    if (next === -1) order.push("forYou")
+    else order.splice(next + 1, 0, "forYou")
   }
   return order
 }

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Text } from "@/components/ui/text"
 import { type BookWithRelations } from "@/database/books"
 import { useNextAfterFinish } from "@/hooks/useNextAfterFinish"
+import { useRecommendationConfig } from "@/hooks/useRecommendations"
 import { useAppDispatch, useAppSelector } from "@/store/appState"
 import { getProgress } from "@/store/finish"
 import {
@@ -16,6 +17,8 @@ import {
   useListStatusesQuery,
   useUpdateStatusMutation,
 } from "@/store/localApi"
+import { recommendationsHref } from "@/store/recommendations"
+import { serverApi } from "@/store/serverApi"
 import { finishSlice } from "@/store/slices/finishSlice"
 import { type UUID } from "@/uuid"
 

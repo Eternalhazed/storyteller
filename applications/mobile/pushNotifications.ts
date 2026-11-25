@@ -7,11 +7,12 @@ import { Platform } from "react-native"
 import { getServers } from "@/database/servers"
 import { describeError } from "@/describeError"
 import { logger } from "@/logger"
-import { parseRequestUuid } from "@/store/requestNavigation"
+import { pushDestination } from "@/store/pushRouting"
 import { type UUID, randomUUID } from "@/uuid"
 
 /** Matches the channel the server names in each book request notification. */
 const REQUESTS_CHANNEL = "requests"
+const RECOMMENDATIONS_CHANNEL = "recommendations"
 const INSTALL_ID_KEY = "push.installId"
 
 /**
@@ -40,6 +41,11 @@ async function getPushToken(): Promise<string | null> {
   await Notifications.setNotificationChannelAsync(REQUESTS_CHANNEL, {
     name: "Book requests",
     importance: Notifications.AndroidImportance.HIGH,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+  })
+  await Notifications.setNotificationChannelAsync(RECOMMENDATIONS_CHANNEL, {
+    name: "New books in your series",
+    importance: Notifications.AndroidImportance.DEFAULT,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
   })
   const { granted } = await Notifications.requestPermissionsAsync()
@@ -124,16 +130,7 @@ export async function registerAllServersForPush(): Promise<void> {
   }
 }
 
-/** The request a tapped notification is about, if it is a book request. */
-export function requestUuidOf(
-  response: Notifications.NotificationResponse | null,
-): UUID | undefined {
-  return parseRequestUuid(
-    response?.notification.request.content.data?.["requestUuid"],
-  )
-}
-
-// A request notification that arrives while the app is open still shows.
+// A notification that arrives while the app is open still shows.
 Notifications.setNotificationHandler({
   handleNotification: () =>
     Promise.resolve({
@@ -145,29 +142,28 @@ Notifications.setNotificationHandler({
 })
 
 /**
- * Opens the request a tapped notification is about. The request screen loads
- * it as the current account, so a notification left over from another account
- * shows nothing of that account's request.
+ * Both destinations recheck visibility as the current signed-in account.
+ * With no server identifier in the payload, they use the first signed-in server.
  */
-function openTappedRequest(
+function openTappedNotification(
   response: Notifications.NotificationResponse | null,
 ) {
   const uuid = requestUuidOf(response)
   if (!uuid) return
   // The last response outlives the tap; clear it so it opens once.
   Notifications.clearLastNotificationResponse()
-  router.push({ pathname: "/request/[uuid]", params: { uuid } })
+  router.push(destination)
 }
 
 /**
  * Registers every signed-in server for push at start-up and whenever the
- * push token changes, and opens the request a tapped notification is about.
+ * push token changes, and opens the target a tapped notification is about.
  */
 export function useRequestNotifications() {
   useEffect(() => {
     void registerAllServersForPush()
     void Notifications.getLastNotificationResponseAsync().then(
-      openTappedRequest,
+      openTappedNotification,
     )
     const tapped =
       Notifications.addNotificationResponseReceivedListener(openTappedRequest)

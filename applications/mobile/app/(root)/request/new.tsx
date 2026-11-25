@@ -8,8 +8,9 @@ import {
   type RankedRelease,
   type ReleaseFlag,
 } from "@storyteller/web/src/requests/ranking"
+import { type LibraryCopy } from "@storyteller/web/src/requests/library"
 import { Stack, useLocalSearchParams, useRouter } from "expo-router"
-import { useState } from "react"
+import { useEffect, useEffectEvent, useRef, useState } from "react"
 import { Pressable, View } from "react-native"
 
 import {
@@ -83,6 +84,13 @@ function sizeLabel(bytes: number | null) {
   if (bytes < 1_000_000) return `${Math.round(bytes / 1_000)} KB`
   if (bytes < 1_000_000_000) return `${Math.round(bytes / 1_000_000)} MB`
   return `${(bytes / 1_000_000_000).toFixed(1)} GB`
+}
+
+function usableCopy(copies: LibraryCopy[] | undefined) {
+  return (
+    copies?.find((copy) => copy.ebook && copy.audiobook) ??
+    copies?.find((copy) => copy.ebook || copy.audiobook)
+  )
 }
 
 function releaseSummary(format: RequestFormat, release: RankedRelease | null) {
@@ -229,8 +237,7 @@ function Picker({
   const router = useRouter()
   const dispatch = useAppDispatch()
   const replacement = "requestUuid" in target
-  const lockedFormat = "format" in target ? target.format : null
-  const formats = lockedFormat ? [lockedFormat] : FORMATS
+  const resolved = !replacement && target.resolved === true
   const needsTitle =
     !replacement && (target.kind === "gap" || target.kind === "successor")
   const [title, setTitle] = useState(work.title)
@@ -244,7 +251,9 @@ function Picker({
     previousRelease ? [releaseKey(previousRelease)] : [],
   )
   const [chooseShelf, setChooseShelf] = useState(false)
-  const [addedCopy, setAddedCopy] = useState<UUID | null>(null)
+  const [addedCopy, setAddedCopy] = useState<LibraryCopy | null>(null)
+  const [savedForLater, setSavedForLater] = useState(false)
+  const autoSearched = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [search, { isLoading: searching }] =
     serverApi.useSearchRequestReleasesMutation()
@@ -269,6 +278,7 @@ function Picker({
       setExpanded(lost.kind)
     } else {
       setError(null)
+      setSavedForLater(false)
       setExpanded(null)
     }
     try {
@@ -302,8 +312,8 @@ function Picker({
       }
       const next = { ebook: nextPick("ebook"), audio: nextPick("audio") }
       setPicks(next)
-      if (!lost && lockedFormat && !next[lockedFormat])
-        setExpanded(lockedFormat)
+      if (!lost && "format" in target && !next[target.format])
+        setExpanded(target.format)
     } catch (cause) {
       const message = requestErrorMessage(
         cause,
@@ -356,13 +366,15 @@ function Picker({
       await create({
         serverUuid,
         work: searched.work,
-        kind: target.kind,
+        kind: addFormatBookUuid ? "add_format" : target.kind,
         input: target.input,
-        ebook: releaseRef(picks.ebook),
-        audio: releaseRef(picks.audio),
-        ...(target.kind === "add_format" ? { bookUuid: target.bookUuid } : {}),
+        ebook: releaseRef(ebook),
+        audio: releaseRef(audio),
+        ...(addFormatBookUuid ? { bookUuid: addFormatBookUuid } : {}),
       }).unwrap()
-      router.dismissTo("/")
+      if (!resolved) router.dismissTo("/")
+      else if (router.canGoBack()) router.back()
+      else router.replace("/")
     } catch (cause) {
       showActionError(cause, "Could not start the request. Try again.")
       const code = requestErrorCode(cause)
@@ -376,12 +388,13 @@ function Picker({
     }
   }
 
-  async function addCopy(bookUuid: UUID) {
+  async function addCopy(copy: LibraryCopy) {
     if (!searched) return
+    const { bookUuid } = copy
     setError(null)
     try {
       await addToShelf({ serverUuid, bookUuid, work: searched.work }).unwrap()
-      setAddedCopy(bookUuid)
+      setAddedCopy(copy)
       dispatch(
         serverApi.endpoints.listBooks.initiate(
           { serverUuid },
@@ -423,12 +436,12 @@ function Picker({
       !recommendation[lockedFormat === "ebook" ? "audio" : "ebook"])
       ? recommendation.reasons
       : []
-  const selected = !!(picks.ebook || picks.audio)
+  const selected = !!(ebook || audio)
   const submitLabel = replacement
     ? "Use this version"
-    : picks.ebook && picks.audio
+    : ebook && audio
       ? "Get this pair"
-      : picks.audio || lockedFormat === "audio"
+      : audio || lockedFormat === "audio"
         ? "Get audiobook"
         : "Get ebook"
 
@@ -511,8 +524,12 @@ function Picker({
         </View>
       ) : elsewhere ? (
         <View className="items-start gap-3">
-          <Text>Both formats are already in the library.</Text>
-          <Button disabled={busy} onPress={() => addCopy(elsewhere.bookUuid)}>
+          <Text>
+            {elsewhere.ebook && elsewhere.audiobook
+              ? "Both formats are already in the household library."
+              : `The ${elsewhere.ebook ? "ebook" : "audiobook"} is in the household library. Add it to your shelf to request the missing format.`}
+          </Text>
+          <Button disabled={busy} onPress={() => addCopy(elsewhere)}>
             <Text>{adding ? "Adding…" : "Add to my shelf"}</Text>
           </Button>
         </View>
@@ -551,7 +568,7 @@ function Picker({
                     {reasons.join(" · ")}
                   </Text>
                 )}
-                {!selected && (
+                {!selected && !notFound && (
                   <Text className="text-muted-foreground text-sm">
                     Choose a version to continue.
                   </Text>
@@ -578,7 +595,7 @@ function Picker({
                   </Button>
                 ))}
               </View>
-              {expanded && (
+              {expanded && formats.includes(expanded) && (
                 <ReleaseOptions
                   format={expanded}
                   releases={(expanded === "ebook"

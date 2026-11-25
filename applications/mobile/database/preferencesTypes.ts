@@ -7,6 +7,7 @@ export const DEFAULT_HOME_SECTION_ORDER = [
   "jumpBackIn",
   "shortlist",
   "nextInSeries",
+  "forYou",
   "nearlyDone",
   "startSeries",
   "newReadalouds",

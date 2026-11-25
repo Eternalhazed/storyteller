@@ -19,6 +19,7 @@ import {
 } from "react-native"
 
 import { ContinueReading } from "@/components/ContinueReading"
+import { HomeRecommendations } from "@/components/HomeRecommendations"
 import { HomeRequests } from "@/components/HomeRequests"
 import { LooksFinishedCard } from "@/components/LooksFinishedCard"
 import { MiniPlayerWidget } from "@/components/MiniPlayerWidget"
@@ -36,6 +37,7 @@ import { useHomeSeriesInputs } from "@/hooks/useHomeSeriesInputs"
 import { useIsFocused } from "@/hooks/useIsFocused"
 import { useListAllServerBooks } from "@/hooks/useListAllServerBooks"
 import { useLastReadingSession } from "@/hooks/useReadingSession"
+import { useEnabledRecommendationServers } from "@/hooks/useRecommendations"
 import { useServerShelves } from "@/hooks/useServerShelves"
 import { useShortlist } from "@/hooks/useShortlist"
 import { bookImported } from "@/store/actions"
@@ -47,6 +49,7 @@ import {
   useListBooksQuery as useListLocalBooksQuery,
   useListCollectionsQuery,
 } from "@/store/localApi"
+import { recommendationsHref } from "@/store/recommendations"
 
 const EMPTY_BOOKS: BookWithRelations[] = []
 const EMPTY_COLLECTIONS: Collection[] = []
@@ -75,6 +78,7 @@ export default function Home() {
   const staleBooksRef = useRef<BookWithRelations[]>(liveBooks)
 
   const isFocused = useIsFocused()
+  const recommendationServers = useEnabledRecommendationServers(isFocused)
   const books = isFocused ? liveBooks : staleBooksRef.current
 
   useEffect(() => {

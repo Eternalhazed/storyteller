@@ -8,6 +8,18 @@ import * as SecureStore from "expo-secure-store"
 import { type BookWithRelations } from "@storyteller/web/src/database/books"
 import { type Position } from "@storyteller/web/src/database/positions"
 import { type Status } from "@storyteller/web/src/database/statuses"
+import {
+  type AskResult,
+  type InterviewView,
+  type PickView,
+  type ReaderPickState,
+  type RecommendationHistoryView,
+  type RecommendationPreferences,
+  type RecommendationsConfig,
+  type RecommendationsView,
+  type RoundView,
+  type StartRoundInput,
+} from "@storyteller/web/src/recommendations/types"
 import { type RequestView } from "@storyteller/web/src/requests/http"
 import { type LibraryCopy } from "@storyteller/web/src/requests/library"
 import {
@@ -45,6 +57,8 @@ export interface ServerShelf {
 
 type RequestServer = { serverUuid: UUID }
 type RequestKey = RequestServer & { requestUuid: UUID }
+type PickKey = RequestServer & { recommendationUuid: UUID }
+type RoundKey = RequestServer & { roundUuid: UUID }
 type RequestSearch = RequestServer & { work: ChosenWork; seriesUuid?: UUID }
 type ReleaseRef = Pick<Release, "source" | "id" | "kind">
 
@@ -90,9 +104,16 @@ function changedRequest(result: RequestView | undefined, args: RequestKey) {
     : []
 }
 
+function recommendationTag(serverUuid: UUID, key?: UUID | "preferences") {
+  return {
+    type: "Recommendations" as const,
+    id: key ? `${serverUuid}:${key}` : serverUuid,
+  }
+}
+
 export const serverApi = createApi({
   reducerPath: "serverApi",
-  tagTypes: ["Requests", "RequestConfig"],
+  tagTypes: ["Requests", "RequestConfig", "Recommendations"],
   async baseQuery(
     args: FetchArgs,
     baseQueryApi,

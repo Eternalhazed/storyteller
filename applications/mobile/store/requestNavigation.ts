@@ -11,6 +11,7 @@ type NewRequestTarget =
       kind: "gap" | "successor" | "title"
       work: ChosenWork
       input: RequestInput
+      resolved?: boolean
     }
   | {
       kind: "add_format"
@@ -18,6 +19,7 @@ type NewRequestTarget =
       input: RequestInput
       bookUuid: UUID
       format: RequestFormat
+      resolved?: boolean
     }
 
 type ReplacementTarget = { requestUuid: UUID; format: RequestFormat }
@@ -66,12 +68,19 @@ export function parsePickerTarget(
     positionParam && Number.isFinite(Number(positionParam))
       ? Number(positionParam)
       : null
+  const ids = parseIds(params["ids"])
+  const altTitles = parseAuthors(params["altTitles"])
+  const recommendationUuid = parseRequestUuid(params["recommendationUuid"])
+  const recommendationInput = recommendationUuid ? { recommendationUuid } : {}
+  const resolved = params["resolved"] === "true"
   const work: ChosenWork = {
     title,
     authors: parseAuthors(params["authors"]),
     series: typeof name === "string" ? { name, position } : null,
     language:
       typeof params["language"] === "string" ? params["language"] : null,
+    ...(ids ? { ids } : {}),
+    ...(altTitles.length ? { altTitles } : {}),
   }
   const seriesUuid = parseRequestUuid(params["seriesUuid"])
   if (
@@ -91,9 +100,10 @@ export function parsePickerTarget(
     return {
       kind,
       work,
-      input: seriesUuid ? { seriesUuid } : {},
+      input: { ...(seriesUuid ? { seriesUuid } : {}), ...recommendationInput },
       bookUuid,
       format,
+      resolved,
     }
   }
   if (kind === "title") return { kind, work, input: { text: title } }
@@ -120,6 +130,10 @@ export function requestPickerHref(
       seriesName: work.series?.name,
       position: work.series?.position,
       sourceBookUuid: input.sourceBookUuid,
+      resolved: target.resolved ? "true" : undefined,
+      recommendationUuid: input.recommendationUuid,
+      ids: work.ids ? JSON.stringify(work.ids) : undefined,
+      altTitles: work.altTitles ? JSON.stringify(work.altTitles) : undefined,
       ...(target.kind === "add_format"
         ? { bookUuid: target.bookUuid, format: target.format }
         : {}),

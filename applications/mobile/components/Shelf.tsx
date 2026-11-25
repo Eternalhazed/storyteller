@@ -57,7 +57,8 @@ export function Shelf({
             letter spacing too narrow; either cuts or wraps the heading. */}
         <Text
           variant="h3"
-          className="font-youngserif shrink font-normal tracking-normal"
+          numberOfLines={1}
+          className="font-youngserif min-w-0 flex-1 font-normal tracking-normal"
         >
           {label}
         </Text>
