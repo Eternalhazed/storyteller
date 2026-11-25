@@ -47,6 +47,11 @@ export function FinishPrompt({
   const [error, setError] = useState<string | null>(null)
   const readStatus = statuses?.find((status) => status.name === "Read")
   const expiresAt = prompt?.kind === "undo" ? prompt.expiresAt : undefined
+  const recommendationServer =
+    prompt?.kind === "ask" ? (book?.serverUuid ?? undefined) : undefined
+  const recommendationConfig = useRecommendationConfig(recommendationServer)
+  const [startRecommendationRound] =
+    serverApi.useStartRecommendationRoundMutation()
 
   useEffect(() => {
     setError(null)
@@ -144,6 +149,28 @@ export function FinishPrompt({
     setBusy(false)
   }
 
+  /** "Finished?" answered with "What next?": mark it read and find picks. */
+  async function whatNext() {
+    if (!recommendationServer || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      if (readStatus) {
+        await updateStatus({ bookUuid, statusUuid: readStatus.uuid }).unwrap()
+      }
+      await startRecommendationRound({
+        serverUuid: recommendationServer,
+        anchorBookUuid: bookUuid,
+      }).unwrap()
+      dispatch(finishSlice.actions.promptCleared({ bookUuid }))
+      router.push(recommendationsHref(recommendationServer))
+    } catch {
+      setError("Could not start your picks. Try again.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function undo() {
     if (prompt?.kind !== "undo" || busy) return
     setBusy(true)
@@ -219,6 +246,16 @@ export function FinishPrompt({
                   <Text className="shrink">
                     Mark as read &amp; start next: {next.label}
                   </Text>
+                </Button>
+              )}
+              {recommendationConfig.config?.enabled && (
+                <Button
+                  size="flex"
+                  variant="outline"
+                  disabled={busy || recommendationConfig.isError}
+                  onPress={whatNext}
+                >
+                  <Text>What next?</Text>
                 </Button>
               )}
               <Button

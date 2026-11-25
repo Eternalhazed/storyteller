@@ -156,6 +156,151 @@ export const serverApi = createApi({
     return makeRequest(args, baseQueryApi, extraOptions ?? {})
   },
   endpoints: (build) => ({
+    getRecommendationsConfig: build.query<RecommendationsConfig, RequestServer>(
+      {
+        query: ({ serverUuid }) => ({
+          url: "/recommendations/config",
+          serverUuid,
+          timeout: 5_000,
+        }),
+        keepUnusedDataFor: 3600,
+      },
+    ),
+    getRecommendations: build.query<RecommendationsView, RequestServer>({
+      query: ({ serverUuid }) => ({
+        url: "/recommendations",
+        serverUuid,
+        timeout: 5_000,
+      }),
+      providesTags: (_result, _error, { serverUuid }) => [
+        recommendationTag(serverUuid),
+      ],
+      keepUnusedDataFor: 3600,
+    }),
+    getRecommendationHistory: build.query<
+      RecommendationHistoryView,
+      RequestServer
+    >({
+      query: ({ serverUuid }) => ({
+        url: "/recommendations/history",
+        serverUuid,
+      }),
+      providesTags: (_result, _error, { serverUuid }) => [
+        recommendationTag(serverUuid),
+      ],
+    }),
+    startRecommendationRound: build.mutation<
+      RoundView,
+      RequestServer & StartRoundInput
+    >({
+      query: ({ serverUuid, ...body }) => ({
+        url: "/recommendations/rounds",
+        serverUuid,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (result, _error, { serverUuid, answers }) =>
+        result
+          ? [
+              recommendationTag(serverUuid),
+              ...(answers?.saveAsUsual
+                ? [recommendationTag(serverUuid, "preferences")]
+                : []),
+            ]
+          : [],
+    }),
+    getRecommendationRound: build.query<
+      RoundView & { picks: PickView[] },
+      RoundKey
+    >({
+      query: ({ serverUuid, roundUuid }) => ({
+        url: `/recommendations/rounds/${roundUuid}`,
+        serverUuid,
+      }),
+      providesTags: (_result, _error, { serverUuid }) => [
+        recommendationTag(serverUuid),
+      ],
+    }),
+    getRecommendationPick: build.query<PickView, PickKey>({
+      query: ({ serverUuid, recommendationUuid }) => ({
+        url: `/recommendations/picks/${recommendationUuid}`,
+        serverUuid,
+        timeout: 5_000,
+      }),
+      providesTags: (_result, _error, { serverUuid, recommendationUuid }) => [
+        recommendationTag(serverUuid, recommendationUuid),
+      ],
+    }),
+    setRecommendationPickState: build.mutation<
+      PickView,
+      PickKey & { state: ReaderPickState; reason?: string; rating?: number }
+    >({
+      query: ({ serverUuid, recommendationUuid, ...body }) => ({
+        url: `/recommendations/picks/${recommendationUuid}`,
+        serverUuid,
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: (result, _error, { serverUuid, recommendationUuid }) =>
+        result
+          ? [
+              recommendationTag(serverUuid),
+              recommendationTag(serverUuid, recommendationUuid),
+            ]
+          : [],
+    }),
+    getRecommendationPreferences: build.query<
+      RecommendationPreferences,
+      RequestServer
+    >({
+      query: ({ serverUuid }) => ({
+        url: "/recommendations/preferences",
+        serverUuid,
+      }),
+      providesTags: (_result, _error, { serverUuid }) => [
+        recommendationTag(serverUuid, "preferences"),
+      ],
+    }),
+    setRecommendationPreferences: build.mutation<
+      RecommendationPreferences,
+      RequestServer & Partial<RecommendationPreferences>
+    >({
+      query: ({ serverUuid, ...body }) => ({
+        url: "/recommendations/preferences",
+        serverUuid,
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: (result, _error, { serverUuid }) =>
+        result
+          ? [
+              recommendationTag(serverUuid, "preferences"),
+              recommendationTag(serverUuid),
+            ]
+          : [],
+    }),
+    getRecommendationInterview: build.query<InterviewView, RequestServer>({
+      query: ({ serverUuid }) => ({
+        url: "/recommendations/interview",
+        serverUuid,
+      }),
+      providesTags: (_result, _error, { serverUuid }) => [
+        recommendationTag(serverUuid, "preferences"),
+        recommendationTag(serverUuid),
+      ],
+    }),
+    askForBooks: build.mutation<AskResult, RequestServer & { text: string }>({
+      query: ({ serverUuid, text }) => ({
+        url: "/ask",
+        serverUuid,
+        method: "POST",
+        body: { text },
+      }),
+      invalidatesTags: (result, _error, { serverUuid }) =>
+        result?.intent === "next" || result?.intent === "wish"
+          ? [recommendationTag(serverUuid)]
+          : [],
+    }),
     getRequestConfig: build.query<RequestConfig, RequestServer>({
       query: ({ serverUuid }) => ({ url: "/requests/config", serverUuid }),
       providesTags: (_result, _error, { serverUuid }) => [
@@ -209,8 +354,18 @@ export const serverApi = createApi({
         method: "POST",
         body,
       }),
-      invalidatesTags: (result, _error, { serverUuid }) =>
-        result ? [requestTag(serverUuid)] : [],
+      invalidatesTags: (result, _error, { serverUuid, input }) =>
+        result
+          ? [
+              requestTag(serverUuid),
+              ...(input.recommendationUuid
+                ? [
+                    recommendationTag(serverUuid),
+                    recommendationTag(serverUuid, input.recommendationUuid),
+                  ]
+                : []),
+            ]
+          : [],
     }),
     addRequestCopyToShelf: build.mutation<
       void,

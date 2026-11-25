@@ -220,6 +220,25 @@ test("a shelf made on the web lands before To read until the reader moves it", (
   )
 })
 
+test("For you follows Next in your series in saved orders unless moved", () => {
+  const available = ["continue", "nextInSeries", "forYou", "toRead"]
+  assert.deepEqual(
+    resolveOrder(["toRead", "nextInSeries", "continue"], available),
+    ["toRead", "nextInSeries", "forYou", "continue"],
+  )
+  assert.deepEqual(
+    resolveOrder(["forYou", "nextInSeries", "toRead", "continue"], available),
+    ["forYou", "nextInSeries", "toRead", "continue"],
+  )
+  assert.deepEqual(resolveOrder([], available), available)
+  assert.deepEqual(resolveOrder(["continue", "toRead"], available), [
+    "continue",
+    "toRead",
+    "nextInSeries",
+    "forYou",
+  ])
+})
+
 test("finished books never appear in the Shortlist or Next in your series", () => {
   const done = book({ status: { name: "Read" } })
   const sections = buildHomeSections({

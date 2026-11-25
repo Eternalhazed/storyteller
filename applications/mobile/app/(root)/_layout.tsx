@@ -137,6 +137,26 @@ export default function ModalLayout() {
       />
       <Stack.Screen name="ask" options={recommendationScreen("Ask")} />
       <Stack.Screen
+        name="recommendations/index"
+        options={recommendationScreen("Recommendations")}
+      />
+      <Stack.Screen
+        name="recommendations/tune"
+        options={recommendationScreen("Tune recommendations")}
+      />
+      <Stack.Screen
+        name="recommendations/preferences"
+        options={recommendationScreen("Recommendation preferences")}
+      />
+      <Stack.Screen
+        name="recommendations/history"
+        options={recommendationScreen("Earlier picks")}
+      />
+      <Stack.Screen
+        name="recommendations/pick/[uuid]"
+        options={recommendationScreen("Recommended book")}
+      />
+      <Stack.Screen
         name="server"
         options={{
           headerShown: true,

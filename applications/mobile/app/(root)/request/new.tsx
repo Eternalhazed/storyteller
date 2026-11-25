@@ -239,7 +239,9 @@ function Picker({
   const replacement = "requestUuid" in target
   const resolved = !replacement && target.resolved === true
   const needsTitle =
-    !replacement && (target.kind === "gap" || target.kind === "successor")
+    !replacement &&
+    !resolved &&
+    (target.kind === "gap" || target.kind === "successor")
   const [title, setTitle] = useState(work.title)
   const [searched, setSearched] = useState<{
     work: ChosenWork
@@ -264,11 +266,87 @@ function Picker({
     serverApi.useReplaceRequestReleaseMutation()
   const [addToShelf, { isLoading: adding }] =
     serverApi.useAddRequestCopyToShelfMutation()
-  const busy = searching || savingShelf || creating || replacing || adding
+  const [setPickState, { isLoading: updatingPick }] =
+    serverApi.useSetRecommendationPickStateMutation()
+  const busy =
+    searching || savingShelf || creating || replacing || adding || updatingPick
   const mustChooseShelf = !replacement && (chooseShelf || !config.collection)
   const canSearch =
     !!title.trim() && (!needsTitle || title.trim() !== work.title.trim())
   const seriesUuid = replacement ? null : target.input.seriesUuid
+  const recommendationUuid = replacement
+    ? null
+    : target.input.recommendationUuid
+  const library = searched?.result.library
+  const mine =
+    addedCopy ??
+    (replacement
+      ? undefined
+      : target.kind === "add_format"
+        ? library?.mine.find((copy) => copy.bookUuid === target.bookUuid)
+        : usableCopy(library?.mine))
+  const shelfBookUuid = mine?.ebook && mine.audiobook ? mine.bookUuid : null
+  const elsewhere =
+    !mine && !replacement && target.kind !== "add_format"
+      ? usableCopy(library?.elsewhere)
+      : undefined
+  const addFormatBookUuid =
+    !replacement && target.kind === "add_format"
+      ? target.bookUuid
+      : mine?.bookUuid
+  const lockedFormat =
+    "format" in target
+      ? target.format
+      : mine?.ebook
+        ? "audio"
+        : mine?.audiobook
+          ? "ebook"
+          : null
+  const formats = lockedFormat ? [lockedFormat] : FORMATS
+  const ebook = lockedFormat === "audio" ? null : picks.ebook
+  const audio = lockedFormat === "ebook" ? null : picks.audio
+  const missing =
+    searched && !shelfBookUuid && !elsewhere
+      ? formats.filter(
+          (format) =>
+            !(
+              format === "ebook"
+                ? searched.result.ebooks
+                : searched.result.audios
+            ).some(
+              (release) =>
+                !release.excluded && !blocked.includes(releaseKey(release)),
+            ),
+        )
+      : []
+  const notFound = missing.length > 0
+
+  const runAutomaticSearch = useEffectEvent(() => {
+    void searchFor(work)
+  })
+  useEffect(() => {
+    if (!resolved || mustChooseShelf || autoSearched.current) return
+    autoSearched.current = true
+    runAutomaticSearch()
+  }, [resolved, mustChooseShelf])
+
+  const recordNotFound = useEffectEvent(async (uuid: UUID) => {
+    try {
+      await setPickState({
+        serverUuid,
+        recommendationUuid: uuid,
+        state: "not_found",
+      }).unwrap()
+    } catch (cause) {
+      setError(
+        requestErrorMessage(cause, "Could not update this recommendation."),
+      )
+    }
+  })
+  useEffect(() => {
+    if (searched && notFound && recommendationUuid)
+      void recordNotFound(recommendationUuid)
+  }, [searched, notFound, recommendationUuid])
 
   async function searchFor(chosenWork: ChosenWork, lost?: RankedRelease) {
     const hidden = lost ? [...blocked, releaseKey(lost)] : blocked
@@ -289,8 +367,7 @@ function Picker({
       }).unwrap()
       setSearched({ work: chosenWork, result })
       const nextPick = (format: RequestFormat) => {
-        if ((lockedFormat && lockedFormat !== format) || lost?.kind === format)
-          return null
+        if (lost?.kind === format) return null
         const previous = picks[format]
         if (lost) {
           const releases = format === "ebook" ? result.ebooks : result.audios
@@ -409,20 +486,25 @@ function Picker({
     }
   }
 
-  const library = searched?.result.library
-  const mine =
-    !replacement &&
-    library?.mine.find(
-      (copy) =>
-        copy.ebook &&
-        copy.audiobook &&
-        (target.kind !== "add_format" || target.bookUuid === copy.bookUuid),
-    )
-  const shelfBookUuid = addedCopy ?? (mine ? mine.bookUuid : null)
-  const elsewhere =
-    !replacement &&
-    target.kind !== "add_format" &&
-    library?.elsewhere.find((copy) => copy.ebook && copy.audiobook)
+  async function saveForLater() {
+    if (!recommendationUuid) return
+    setError(null)
+    try {
+      await setPickState({
+        serverUuid,
+        recommendationUuid,
+        state: "saved",
+      }).unwrap()
+      setSavedForLater(true)
+    } catch (cause) {
+      setError(
+        requestErrorMessage(
+          cause,
+          "Could not save this recommendation. Try again.",
+        ),
+      )
+    }
+  }
   const recommendation = searched?.result.recommendation
   const recommended =
     recommendation &&
@@ -535,6 +617,19 @@ function Picker({
         </View>
       ) : (
         <>
+          {mine && (
+            <View className="gap-2">
+              <Text>
+                {addedCopy ? "Added to your shelf." : "Already on your shelf."}
+                {lockedFormat &&
+                  ` Request the missing ${REQUEST_FORMAT_LABEL[lockedFormat].toLowerCase()} below.`}
+              </Text>
+              <OpenRequestedBook
+                serverUuid={serverUuid}
+                bookUuid={mine.bookUuid}
+              />
+            </View>
+          )}
           <Button
             variant={searched ? "outline" : "default"}
             disabled={!canSearch || busy}
@@ -551,6 +646,24 @@ function Picker({
           </Button>
           {searched && (
             <View className="gap-3">
+              {notFound && (
+                <View className="items-start gap-2">
+                  <Text accessibilityLiveRegion="polite">
+                    {savedForLater
+                      ? "Not found right now — saved for later"
+                      : `Not found right now: ${missing.map((format) => REQUEST_FORMAT_LABEL[format].toLowerCase()).join(", ")}.`}
+                  </Text>
+                  {recommendationUuid && !savedForLater && (
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onPress={saveForLater}
+                    >
+                      <Text>Save for later</Text>
+                    </Button>
+                  )}
+                </View>
+              )}
               <View className="border-border bg-card gap-1 rounded-lg border p-4">
                 <Text className="font-semibold">
                   {recommended && selected ? "Recommended" : "Your picks"}

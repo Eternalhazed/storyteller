@@ -15,6 +15,11 @@ export default function SearchScreen() {
   const [search, setSearch] = useState("")
 
   const results = useBookSearch(search)
+  const { isSuccess: libraryLoaded } =
+    localApi.endpoints.listBooks.useQueryState(undefined)
+  const focused = useIsFocused()
+  const [recommendationServer] = useEnabledRecommendationServers(focused)
+  const query = search.trim()
 
   return (
     <BookGrid
@@ -22,16 +27,36 @@ export default function SearchScreen() {
       books={results}
       refreshable={false}
       header={
-        <Input
-          className="mx-safe-or-4 mb-2 w-auto"
-          accessibilityLabel="Search books"
-          autoFocus
-          maxFontSizeMultiplier={2}
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Search"
-          returnKeyType="search"
-        />
+        <View className="mx-safe-or-4 mb-2 gap-2">
+          <Input
+            accessibilityLabel="Search books"
+            autoFocus
+            maxFontSizeMultiplier={2}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search"
+            returnKeyType="search"
+          />
+          {libraryLoaded &&
+            !!query &&
+            !results.length &&
+            recommendationServer && (
+              <Link
+                href={{
+                  pathname: "/ask",
+                  params: {
+                    serverUuid: recommendationServer.uuid,
+                    text: query,
+                  },
+                }}
+                asChild
+              >
+                <Button className="self-start" variant="outline" size="flex">
+                  <Text className="shrink">Ask for ‘{query}’</Text>
+                </Button>
+              </Link>
+            )}
+        </View>
       }
     />
   )

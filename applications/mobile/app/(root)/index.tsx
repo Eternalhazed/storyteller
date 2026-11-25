@@ -177,6 +177,14 @@ export default function Home() {
               title: "Customize home",
               onPress: () => router.push("/customize-home"),
             },
+            ...recommendationServers.map((server) => ({
+              id: `recommendations:${server.uuid}`,
+              title:
+                recommendationServers.length > 1
+                  ? `Recommendations · ${server.name ?? server.baseUrl}`
+                  : "Recommendations",
+              onPress: () => router.push(recommendationsHref(server.uuid)),
+            })),
             {
               id: "import-book",
               title: "Import book",
@@ -216,6 +224,20 @@ export default function Home() {
       >
         <HomeRequests focused={isFocused} />
         {sections.map((section) => {
+          if (section.id === "forYou") {
+            return recommendationServers.map((server) => (
+              <HomeRecommendations
+                key={server.uuid}
+                serverUuid={server.uuid}
+                serverName={
+                  recommendationServers.length > 1
+                    ? (server.name ?? server.baseUrl)
+                    : undefined
+                }
+                focused={isFocused}
+              />
+            ))
+          }
           if (section.id === "continue") {
             return continueReading && section.items.length ? (
               <View key="continue" className="gap-6">

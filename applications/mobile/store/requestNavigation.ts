@@ -50,6 +50,23 @@ function parseAuthors(value: string | undefined): string[] {
   }
 }
 
+function parseIds(
+  value: string | undefined,
+): Record<string, string> | undefined {
+  if (!value) return undefined
+  try {
+    const ids: unknown = JSON.parse(value)
+    if (!ids || typeof ids !== "object" || Array.isArray(ids)) return undefined
+    return Object.fromEntries(
+      Object.entries(ids).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    )
+  } catch {
+    return undefined
+  }
+}
+
 export function parsePickerTarget(
   params: RequestPickerParams,
 ): RequestPickerTarget | null {
@@ -89,11 +106,21 @@ export function parsePickerTarget(
     typeof name === "string" &&
     position !== null
   ) {
-    return { kind, work, input: { seriesUuid, seriesName: name, position } }
+    return {
+      kind,
+      work,
+      input: { seriesUuid, seriesName: name, position, ...recommendationInput },
+      resolved,
+    }
   }
   const sourceBookUuid = parseRequestUuid(params["sourceBookUuid"])
   if (kind === "successor" && seriesUuid && sourceBookUuid) {
-    return { kind, work, input: { seriesUuid, sourceBookUuid } }
+    return {
+      kind,
+      work,
+      input: { seriesUuid, sourceBookUuid, ...recommendationInput },
+      resolved,
+    }
   }
   const bookUuid = parseRequestUuid(params["bookUuid"])
   if (kind === "add_format" && bookUuid && validFormat) {
@@ -106,7 +133,13 @@ export function parsePickerTarget(
       resolved,
     }
   }
-  if (kind === "title") return { kind, work, input: { text: title } }
+  if (kind === "title")
+    return {
+      kind,
+      work,
+      input: { text: title, ...recommendationInput },
+      resolved,
+    }
   return null
 }
 

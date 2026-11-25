@@ -205,6 +205,15 @@ export function buildHomeSections<Book extends HomeBook>(
         viewAll: { pathname: "/series" },
       },
     ],
+    forYou: () => [
+      {
+        id: "forYou",
+        preferenceId: "forYou",
+        title: "For you",
+        items: [],
+        viewAll: null,
+      },
+    ],
     nearlyDone: () => [
       {
         id: "nearlyDone",

@@ -148,8 +148,10 @@ Notifications.setNotificationHandler({
 function openTappedNotification(
   response: Notifications.NotificationResponse | null,
 ) {
-  const uuid = requestUuidOf(response)
-  if (!uuid) return
+  const destination = pushDestination(
+    response?.notification.request.content.data,
+  )
+  if (!destination) return
   // The last response outlives the tap; clear it so it opens once.
   Notifications.clearLastNotificationResponse()
   router.push(destination)
@@ -165,8 +167,9 @@ export function useRequestNotifications() {
     void Notifications.getLastNotificationResponseAsync().then(
       openTappedNotification,
     )
-    const tapped =
-      Notifications.addNotificationResponseReceivedListener(openTappedRequest)
+    const tapped = Notifications.addNotificationResponseReceivedListener(
+      openTappedNotification,
+    )
     // Fetching the token reports it to this listener too, so only a token
     // that differs from the last one is a rotation worth registering.
     const rotated = Notifications.addPushTokenListener(({ data }) => {
