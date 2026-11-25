@@ -26,6 +26,9 @@ With no adapter configured, every request control is hidden.
    | `STORYTELLER_ACQUISITION_SECRET_FILE` | Or a file holding the secret.                              |
    | `STORYTELLER_ACQUISITION_SEED_DIR`    | Where Storyteller sees the adapter's download folder.      |
 
+   Mount the secret file read-only and make it readable by the user the server
+   runs as (UID 1000 in the Docker image), not only by root.
+
 4. Each reader picks the shelf their requested books go on, in the app. It must
    be a private collection they belong to, so a request never puts a book where
    another reader can see it.
@@ -37,7 +40,8 @@ To send push notifications to the Android app, set
 Firebase project the app is built with. Notifications go only to the app
 installs signed in to the requesting account, and the lock screen shows that
 something arrived, not what. A notification that never arrives loses nothing:
-the Home card shows the same state.
+the Home card shows the same state. Like the adapter secret, the key file must
+be readable by the server's user.
 
 ## What happens to a request
 
