@@ -44,6 +44,7 @@ export function createKyselyDb(sqlite: Database): Kysely<DB> {
           userRead: true,
           userUpdate: true,
           isEpub2: true,
+          explicit: true,
           ebookReused: true,
           audioReused: true,
         },

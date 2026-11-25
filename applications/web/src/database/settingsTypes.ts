@@ -351,6 +351,10 @@ export const SettingsSchema = z.object({
   xrayAnthropicApiKey: z.string().nullable(),
   xrayModel: z.string().trim().min(1),
   xrayAutoGenerate: z.boolean(),
+  // Recommendations (use the X-Ray Anthropic key)
+  recommendationModel: z.string().trim().min(1),
+  recommendationFastModel: z.string().trim().min(1),
+  recommendationMonthlyBudgetUsd: z.number().min(0),
   // Narration sync
   syncNarrationAutomatically: z.boolean(),
   hardcoverApiToken: z.string().nullable().optional(),
@@ -476,6 +480,10 @@ export const SETTINGS_DEFAULTS = {
   // Matches the default seeded by migration 114_xray_settings.sql.
   xrayModel: "claude-haiku-5-5",
   xrayAutoGenerate: false,
+  // Match the defaults seeded by migration 132_recommendations.sql.
+  recommendationModel: "claude-sonnet-5-5",
+  recommendationFastModel: "claude-haiku-5-5",
+  recommendationMonthlyBudgetUsd: 5,
   syncNarrationAutomatically: false,
 } satisfies Settings
 

@@ -15,6 +15,8 @@ export type RequestInput = {
   position?: number | null
   sourceBookUuid?: UUID | null
   text?: string | null
+  /** The recommendation the request came from, to trace its outcome. */
+  recommendationUuid?: UUID | null
 }
 
 /** The book the reader confirmed. */

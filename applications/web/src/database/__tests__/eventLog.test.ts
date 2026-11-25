@@ -172,6 +172,17 @@ const TABLES = {
   bookRequest: { exclude: "served by the requests API, not synced" },
   bookRequestEvent: { exclude: "served by the requests API, not synced" },
   userDevice: { exclude: "push registration, not synced" },
+  historyImportJob: { exclude: "served by the history API, not synced" },
+  readingHistoryItem: { exclude: "served by the history API, not synced" },
+  readerProfile: { exclude: "server-internal, not synced" },
+  recommendationReader: {
+    exclude: "served by the recommendations API, not synced",
+  },
+  recommendationRound: {
+    exclude: "served by the recommendations API, not synced",
+  },
+  recommendation: { exclude: "served by the recommendations API, not synced" },
+  catalogCache: { exclude: "server-internal cache, not synced" },
 
   book: {
     custom:

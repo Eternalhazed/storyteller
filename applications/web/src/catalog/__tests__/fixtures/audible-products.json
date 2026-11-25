@@ -1,0 +1,116 @@
+{
+  "products": [
+    {
+      "asin": "B002UZI17C",
+      "title": "Post Captain",
+      "subtitle": "Aubrey/Maturin Series, Book 2",
+      "content_type": "Product",
+      "content_delivery_type": "MultiPartBook",
+      "authors": [{ "name": "Patrick O'Brian" }],
+      "narrators": [{ "name": "Patrick Tull" }],
+      "series": [
+        { "asin": "B005NBOMVO", "title": "Aubrey/Maturin", "sequence": "2" }
+      ],
+      "language": "english",
+      "format_type": "unabridged",
+      "runtime_length_min": 1163,
+      "release_date": "2004-01-07",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51sJUdc4AWL._SL500_.jpg"
+      },
+      "category_ladders": [
+        {
+          "ladder": [
+            { "name": "Literature & Fiction" },
+            { "name": "Action & Adventure" }
+          ]
+        },
+        {
+          "ladder": [
+            { "name": "Literature & Fiction" },
+            { "name": "Genre Fiction" },
+            { "name": "Literary Fiction" }
+          ]
+        },
+        {
+          "ladder": [
+            { "name": "Literature & Fiction" },
+            { "name": "Historical Fiction" }
+          ]
+        }
+      ],
+      "merchandising_summary": "The Peace of Amiens has left Jack Aubrey with no ship, no enemy to pursue, and no possibility of prize money to supplement his meager income. His decision to seek refuge from his troubles, and creditors, in France proves doubly disastrous..."
+    },
+    {
+      "asin": "B0089ZO8BA",
+      "title": "Post Captain",
+      "subtitle": "Aubrey-Maturin Series, Book 2",
+      "content_type": "Product",
+      "content_delivery_type": "MultiPartBook",
+      "authors": [{ "name": "Patrick O'Brian" }],
+      "narrators": [{ "name": "Ric Jerrom" }],
+      "series": [
+        { "asin": "B005NBOMVO", "title": "Aubrey/Maturin", "sequence": "2" }
+      ],
+      "language": "english",
+      "format_type": "unabridged",
+      "runtime_length_min": 1116,
+      "release_date": "2012-06-12"
+    },
+    {
+      "asin": "B002V0KS9A",
+      "title": "Master and Commander",
+      "subtitle": "Aubrey/Maturin Series, Book 1",
+      "content_type": "Product",
+      "content_delivery_type": "MultiPartBook",
+      "authors": [{ "name": "Patrick O'Brian" }],
+      "narrators": [{ "name": "Patrick Tull" }],
+      "series": [
+        { "asin": "B005NBOMVO", "title": "Aubrey/Maturin", "sequence": "1" }
+      ],
+      "language": "english",
+      "format_type": "unabridged",
+      "runtime_length_min": 1005,
+      "release_date": "2004-01-07"
+    },
+    {
+      "asin": "B002V5GT0C",
+      "title": "21",
+      "subtitle": "The Final Unfinished Voyage of Jack Aubrey",
+      "authors": [{ "name": "Patrick O'Brian" }],
+      "narrators": [{ "name": "Patrick Tull" }],
+      "series": [
+        { "asin": "B005NBOMVO", "title": "Aubrey/Maturin", "sequence": "21" }
+      ],
+      "language": "english",
+      "format_type": "unabridged",
+      "runtime_length_min": 153,
+      "release_date": "2005-02-01"
+    },
+    {
+      "asin": "B002V1A6VO",
+      "title": "Men-of-War",
+      "subtitle": "The Final Unfinished Voyage of Jack Aubrey",
+      "authors": [{ "name": "Patrick O'Brian" }],
+      "narrators": [{ "name": "Stephen Thorne" }],
+      "series": [
+        { "asin": "B005NBOMVO", "title": "Aubrey/Maturin", "sequence": "21" }
+      ],
+      "language": "english",
+      "format_type": "unabridged",
+      "runtime_length_min": 207,
+      "release_date": "2007-09-25"
+    },
+    {
+      "asin": "B075FV6MZQ",
+      "title": "Men-of-War",
+      "authors": [{ "name": "Patrick O'Brian" }],
+      "series": [
+        { "asin": "B005NBOMVO", "title": "Aubrey/Maturin", "sequence": "21" }
+      ],
+      "language": "english",
+      "format_type": "unabridged",
+      "release_date": "2200-01-01"
+    }
+  ]
+}

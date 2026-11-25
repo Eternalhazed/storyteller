@@ -1,0 +1,40 @@
+{
+  "numFound": 2,
+  "docs": [
+    {
+      "author_name": ["Diana Peterfreund"],
+      "cover_i": 240281,
+      "isbn": [
+        "9780440243892",
+        "044033618X",
+        "9780385340021",
+        "0385340028",
+        "9780440336181",
+        "0440243890"
+      ],
+      "key": "/works/OL8052018W",
+      "language": ["eng"],
+      "number_of_pages_median": 312,
+      "title": "Secret Society Girl",
+      "subject": [
+        "Fiction",
+        "Humor (Fiction)",
+        "Romance",
+        "College students",
+        "Greek letter societies",
+        "Fiction, romance, general"
+      ]
+    },
+    {
+      "author_name": ["Diana Peterfreund"],
+      "cover_i": 6561044,
+      "isbn": ["0385340028", "9780385340021"],
+      "key": "/works/OL15151586W",
+      "language": ["eng"],
+      "number_of_pages_median": 296,
+      "subtitle": "an Ivy League novel",
+      "title": "Secret society girl",
+      "subject": ["Greek letter societies", "Fiction", "Women college students"]
+    }
+  ]
+}

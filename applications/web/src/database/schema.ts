@@ -238,6 +238,12 @@ export interface BookToTag {
   uuid: Generated<import("@/uuid").UUID>
 }
 
+export interface CatalogCache {
+  fetchedAt: number
+  key: string
+  value: ColumnType<unknown, string, string>
+}
+
 export interface Changelog {
   component: string
   createdAt: Generated<string>
@@ -347,6 +353,20 @@ export interface ExternalSource {
   ratingMin: number | null
   updatedAt: Generated<string>
   url: string | null
+  uuid: Generated<import("@/uuid").UUID>
+}
+
+export interface HistoryImportJob {
+  createdAt: Generated<string>
+  error: string | null
+  finishedAt: string | null
+  matched: Generated<number>
+  processed: Generated<number>
+  source: import("@/history/types").HistorySource
+  status: Generated<import("@/history/types").ImportJobStatus>
+  total: Generated<number>
+  unmatched: Generated<number>
+  userId: import("@/uuid").UUID
   uuid: Generated<import("@/uuid").UUID>
 }
 
@@ -550,6 +570,129 @@ export interface Readaloud {
     "CREATED" | "QUEUED" | "PROCESSING" | "STOPPED" | "ERROR" | "ALIGNED"
   >
   updatedAt: Generated<string>
+  uuid: Generated<import("@/uuid").UUID>
+}
+
+export interface ReaderProfile {
+  builtAt: Generated<string>
+  inputHash: string
+  profile: ColumnType<
+    import("@/recommendations/reader").ReaderProfile,
+    string,
+    string
+  >
+  userId: import("@/uuid").UUID
+}
+
+export interface ReadingHistoryItem {
+  addedAt: string | null
+  asin: string | null
+  authors: ColumnType<string[], string | undefined, string>
+  bookUuid: import("@/uuid").UUID | null
+  explicit: Generated<boolean>
+  finishedAt: string | null
+  importedAt: Generated<string>
+  isbn10: string | null
+  isbn13: string | null
+  jobUuid: import("@/uuid").UUID | null
+  matchedBy: import("@/catalog/types").MatchedBy | null
+  matchStatus: Generated<import("@/history/types").MatchStatus>
+  narrators: ColumnType<string[], string | undefined, string>
+  pageFlips: number | null
+  pages: number | null
+  progress: number | null
+  publishedYear: number | null
+  rating: number | null
+  readCount: number | null
+  readingMinutes: number | null
+  runtimeMinutes: number | null
+  series: ColumnType<
+    { name: string; position: number | null },
+    string,
+    string
+  > | null
+  shelves: ColumnType<string[], string | undefined, string>
+  source: import("@/history/types").HistoryItemSource
+  sourceId: string
+  startedAt: string | null
+  status: import("@/history/types").HistoryStatus
+  title: string
+  userId: import("@/uuid").UUID
+  uuid: Generated<import("@/uuid").UUID>
+  work: ColumnType<import("@/history/types").HistoryWork, string, string> | null
+}
+
+export interface Recommendation {
+  adjustedScore: number | null
+  anchorTitle: string | null
+  createdAt: Generated<string>
+  evidence: ColumnType<
+    import("@/recommendations/types").Evidence[],
+    string | undefined,
+    string
+  >
+  fitScore: number | null
+  label: string | null
+  note: string | null
+  notifiedAt: string | null
+  pill: import("@/recommendations/types").PickView["pill"]
+  rank: number
+  reason: string
+  requestUuid: import("@/uuid").UUID | null
+  restedUntil: string | null
+  roundUuid: import("@/uuid").UUID
+  section: import("@/recommendations/types").Section
+  series: ColumnType<
+    import("@/recommendations/types").PickSeries,
+    string,
+    string
+  > | null
+  state: Generated<import("@/recommendations/types").PickState>
+  stateAt: string | null
+  stateReason: string | null
+  userId: import("@/uuid").UUID
+  uuid: Generated<import("@/uuid").UUID>
+  why: string
+  work: ColumnType<import("@/recommendations/types").PickWork, string, string>
+  workIdentity: string
+  workKey: string
+}
+
+export interface RecommendationReader {
+  finishBookUuid: import("@/uuid").UUID | null
+  finishCount: Generated<number>
+  finishDueAt: string | null
+  lastWeeklyAt: string | null
+  prefs: ColumnType<
+    Partial<import("@/recommendations/types").RecommendationPreferences>,
+    string | undefined,
+    string
+  >
+  seriesCheckedAt: string | null
+  updatedAt: Generated<string>
+  userId: import("@/uuid").UUID
+}
+
+export interface RecommendationRound {
+  cacheReadTokens: Generated<number>
+  cacheWriteTokens: Generated<number>
+  costMicrousd: Generated<number>
+  createdAt: Generated<string>
+  error: string | null
+  finishedAt: string | null
+  input: ColumnType<
+    import("@/recommendations/rounds").RoundInput,
+    string | undefined,
+    string
+  >
+  inputTokens: Generated<number>
+  kind: import("@/recommendations/types").RoundKind
+  model: string | null
+  outputTokens: Generated<number>
+  stage: import("@/recommendations/types").RoundStage | null
+  status: Generated<import("@/recommendations/types").RoundStatus>
+  trigger: import("@/recommendations/types").RoundTrigger
+  userId: import("@/uuid").UUID
   uuid: Generated<import("@/uuid").UUID>
 }
 
@@ -772,6 +915,7 @@ export interface DB {
   bookToSeries: BookToSeries
   bookToStatus: BookToStatus
   bookToTag: BookToTag
+  catalogCache: CatalogCache
   changelog: Changelog
   collection: Collection
   collectionToUser: CollectionToUser
@@ -781,6 +925,7 @@ export interface DB {
   eventLog: EventLog
   externalData: ExternalData
   externalSource: ExternalSource
+  historyImportJob: HistoryImportJob
   homeSection: HomeSection
   identifier: Identifier
   identifierType: IdentifierType
@@ -794,6 +939,11 @@ export interface DB {
   progressionHistory: ProgressionHistory
   progressionReference: ProgressionReference
   readaloud: Readaloud
+  readerProfile: ReaderProfile
+  readingHistoryItem: ReadingHistoryItem
+  recommendation: Recommendation
+  recommendationReader: RecommendationReader
+  recommendationRound: RecommendationRound
   series: Series
   serverIdentity: ServerIdentity
   session: Session

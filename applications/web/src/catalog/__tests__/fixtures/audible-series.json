@@ -1,0 +1,55 @@
+{
+  "product": {
+    "asin": "B005NBOMVO",
+    "title": "Aubrey/Maturin",
+    "relationships": [
+      {
+        "asin": "B0089ZO8BA",
+        "relationship_to_product": "child",
+        "relationship_type": "series",
+        "sequence": "2"
+      },
+      {
+        "asin": "B002V0KS9A",
+        "relationship_to_product": "child",
+        "relationship_type": "series",
+        "sequence": "1"
+      },
+      {
+        "asin": "B005NBOXCC",
+        "relationship_to_product": "child",
+        "relationship_type": "merchant_title_authority"
+      },
+      {
+        "asin": "B002UZI17C",
+        "relationship_to_product": "child",
+        "relationship_type": "series",
+        "sequence": "2"
+      },
+      {
+        "asin": "B002V5GT0C",
+        "relationship_to_product": "child",
+        "relationship_type": "series",
+        "sequence": "21"
+      },
+      {
+        "asin": "B002V1A6VO",
+        "relationship_to_product": "child",
+        "relationship_type": "series",
+        "sequence": "21"
+      },
+      {
+        "asin": "B075FV6MZQ",
+        "relationship_to_product": "child",
+        "relationship_type": "series",
+        "sequence": "21"
+      },
+      {
+        "asin": "B09SGQYWMH",
+        "relationship_to_product": "child",
+        "relationship_type": "series",
+        "sequence": ""
+      }
+    ]
+  }
+}

@@ -117,5 +117,18 @@ export async function register() {
     logger.error(err)
   }
 
+  try {
+    const { resumeHistoryImports } = await import("./history/importer")
+    void resumeHistoryImports().catch((err: unknown) => {
+      logger.error({ msg: "Failed to resume reading history imports", err })
+    })
+    const { startRecommendationScheduler } =
+      await import("./recommendations/scheduler")
+    startRecommendationScheduler()
+  } catch (err) {
+    logger.error("Failed to start recommendations")
+    logger.error(err)
+  }
+
   logger.info("Starting app")
 }

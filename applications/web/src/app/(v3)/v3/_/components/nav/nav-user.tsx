@@ -47,6 +47,7 @@ export function NavUser({
 }) {
   const { isMobile } = useSidebar()
   const basePath = useVersionBasePath()
+  const canAccessHistory = usePermission("bookRead")
   const canAccessSettings = usePermission("settingsUpdate")
   const [logout, { isLoading: isLoggingOut }] = useLogoutMutation()
 
@@ -165,6 +166,21 @@ export function NavUser({
                   </Link>
                 }
               />
+
+              {canAccessHistory && (
+                <DropdownMenuItem
+                  nativeButton={false}
+                  render={
+                    <V3Link
+                      href="/preferences/reading-history"
+                      className="flex items-center gap-2"
+                    >
+                      <icon.History />
+                      {t("readingHistory")}
+                    </V3Link>
+                  }
+                />
+              )}
 
               <DropdownMenuItem onClick={onCustomize}>
                 <icon.AdjustmentsHorizontal />

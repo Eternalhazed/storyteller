@@ -1,3 +1,5 @@
+import { mergeInitials } from "@/catalog/normalize"
+
 import { type ChosenWork, type Release, type RequestFormat } from "./types"
 
 /** Shown next to a release so the reader knows what they are picking. */
@@ -34,15 +36,20 @@ const FEW_SEEDERS = 3
 /** Audio this thin or thinner is not worth listening to. */
 const MIN_BITRATE_KBPS = 32
 
-/** Compares titles and names: case, accents, apostrophes and punctuation aside. */
+/**
+ * Compares titles and names: case, accents, apostrophes and punctuation
+ * aside, and "H.M.S." the same as "HMS".
+ */
 export function normalize(text: string): string {
-  return text
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/['’]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
+  return mergeInitials(
+    text
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/['’]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim(),
+  )
 }
 
 function namesMatch(a: string, b: string): boolean {

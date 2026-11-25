@@ -46,6 +46,27 @@ function copyOf(book: BookWithRelations): LibraryCopy {
 }
 
 /**
+ * Library books that are this work, whatever punctuation their titles use
+ * ("HMS Surprise" for "H.M.S. Surprise"): looked up by title and by the
+ * author's surname, then compared. Only books `userId` can see, when given.
+ */
+export async function findWorkInLibrary(
+  work: ChosenWork,
+  userId?: UUID,
+): Promise<BookWithRelations[]> {
+  const terms = new Set([work.title, ...(work.altTitles ?? [])])
+  const surname = work.authors[0]?.trim().split(/\s+/).at(-1)
+  if (surname && surname.length > 2) terms.add(surname)
+  const found = new Map<UUID, BookWithRelations>()
+  for (const term of terms) {
+    for (const book of await getBooks(null, userId, { search: term })) {
+      found.set(book.uuid, book)
+    }
+  }
+  return [...found.values()].filter((book) => isWork(book, work))
+}
+
+/**
  * Copies of the confirmed work already in the library: on the reader's own
  * shelves, and on shelves they cannot see. Of the latter only the id and the
  * formats are returned, enough to offer "Add to my shelf".
@@ -54,9 +75,7 @@ export async function findLibraryCopies(
   work: ChosenWork,
   userId: UUID,
 ): Promise<{ mine: LibraryCopy[]; elsewhere: LibraryCopy[] }> {
-  const candidates = (
-    await getBooks(null, undefined, { search: work.title })
-  ).filter((book) => isWork(book, work))
+  const candidates = await findWorkInLibrary(work)
   const mine: LibraryCopy[] = []
   const elsewhere: LibraryCopy[] = []
   for (const book of candidates) {

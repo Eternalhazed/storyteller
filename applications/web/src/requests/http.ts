@@ -51,6 +51,7 @@ export const CreateRequestSchema = z.object({
       position: z.number().nullable().optional(),
       sourceBookUuid: UuidSchema.nullable().optional(),
       text: z.string().nullable().optional(),
+      recommendationUuid: UuidSchema.nullable().optional(),
     })
     .default({}),
   work: WorkSchema,

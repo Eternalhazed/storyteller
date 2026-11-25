@@ -73,6 +73,16 @@ export async function createBookRequest(
       .insertInto("bookRequestEvent")
       .values({ requestUuid: row.uuid, ...event })
       .execute()
+    // A request from a recommendation closes that pick, for the same reader only.
+    const recommendationUuid = request.input.recommendationUuid
+    if (recommendationUuid) {
+      await tr
+        .updateTable("recommendation")
+        .set({ state: "requested", requestUuid: row.uuid, stateAt: sqlNow() })
+        .where("uuid", "=", recommendationUuid)
+        .where("userId", "=", request.userId)
+        .execute()
+    }
     return row
   })
 }

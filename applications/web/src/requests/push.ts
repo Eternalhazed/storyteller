@@ -9,6 +9,7 @@ import { getBook } from "@/database/books"
 import { clearPushToken, getPushTokens } from "@/database/userDevices"
 import { env } from "@/env"
 import { logger } from "@/logging"
+import { type UUID } from "@/uuid"
 
 import { type Milestone } from "./types"
 
@@ -25,6 +26,8 @@ export type PushMessage = {
   body: string
   /** Opened when the notification is tapped; the app re-checks the account. */
   data: Record<string, string>
+  /** The Android channel, so a reader can mute one kind without the other. */
+  channel?: "requests" | "recommendations"
 }
 
 /** Sends one message to one device; resolves false when the token is gone. */
@@ -165,7 +168,10 @@ export function fcmTransport(
             android: {
               priority: "HIGH",
               // the lock screen shows that something arrived, not what
-              notification: { visibility: "PRIVATE", channel_id: "requests" },
+              notification: {
+                visibility: "PRIVATE",
+                channel_id: message.channel ?? "requests",
+              },
             },
           },
         }),
@@ -183,8 +189,8 @@ declare global {
   // eslint-disable-next-line no-var
   var bookRequestPush: PushTransport | null | undefined
 }
-
-function configuredTransport(): PushTransport | null {
+/** The push transport set up on this server, or null when push is off. */
+export function configuredTransport(): PushTransport | null {
   if (globalThis.bookRequestPush !== undefined)
     return globalThis.bookRequestPush
   const file = env.STORYTELLER_PUSH_SERVICE_ACCOUNT_FILE
@@ -195,20 +201,17 @@ function configuredTransport(): PushTransport | null {
     : null
   return globalThis.bookRequestPush
 }
-
 /**
- * Send a request milestone to every device signed in to the requester's
- * account, and to no one else.
+ * Send a message to every device signed in to one reader's account, and to
+ * no one else. Devices whose token is gone are forgotten.
  */
-export async function sendRequestNotification(
-  request: BookRequest,
-  milestone: Milestone,
+export async function sendToReader(
+  userId: UUID,
+  message: PushMessage,
   transport: PushTransport | null = configuredTransport(),
 ): Promise<void> {
   if (!transport) return
-  const devices = await getPushTokens(request.userId)
-  if (!devices.length) return
-  const message = await describeMilestone(request, milestone)
+  const devices = await getPushTokens(userId)
   for (const { installId, pushToken } of devices) {
     try {
       if (!(await transport(pushToken, message))) {
@@ -217,10 +220,24 @@ export async function sendRequestNotification(
     } catch (error) {
       logger.warn({
         msg: "Failed to send a push notification",
-        requestUuid: request.uuid,
-        milestone,
+        data: message.data,
         error: error instanceof Error ? error.message : String(error),
       })
     }
   }
+}
+
+/** Send a request milestone to the requester's devices. */
+export async function sendRequestNotification(
+  request: BookRequest,
+  milestone: Milestone,
+  transport: PushTransport | null = configuredTransport(),
+): Promise<void> {
+  if (!transport) return
+  if (!(await getPushTokens(request.userId)).length) return
+  await sendToReader(
+    request.userId,
+    await describeMilestone(request, milestone),
+    transport,
+  )
 }

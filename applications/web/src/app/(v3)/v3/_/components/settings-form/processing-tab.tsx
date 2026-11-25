@@ -1236,6 +1236,52 @@ export function XraySection() {
             />
           )}
         />
+        <SettingsFormField
+          name="recommendationModel"
+          label={t("recommendationModel")}
+          render={(field, fieldState, isLocked) => (
+            <Input
+              id="recommendationModel"
+              required
+              disabled={isLocked}
+              {...field}
+              aria-invalid={fieldState.invalid}
+            />
+          )}
+        />
+        <SettingsFormField
+          name="recommendationFastModel"
+          label={t("recommendationFastModel")}
+          render={(field, fieldState, isLocked) => (
+            <Input
+              id="recommendationFastModel"
+              required
+              disabled={isLocked}
+              {...field}
+              aria-invalid={fieldState.invalid}
+            />
+          )}
+        />
+        <SettingsFormField
+          name="recommendationMonthlyBudgetUsd"
+          label={t("recommendationMonthlyBudgetUsd")}
+          render={(field, fieldState, isLocked) => (
+            <Input
+              id="recommendationMonthlyBudgetUsd"
+              type="number"
+              min={0}
+              step="0.01"
+              required
+              disabled={isLocked}
+              {...field}
+              value={Number.isNaN(field.value) ? "" : field.value}
+              onChange={(event) => {
+                field.onChange(event.target.valueAsNumber)
+              }}
+              aria-invalid={fieldState.invalid}
+            />
+          )}
+        />
       </SettingsCard>
     </SettingsSection>
   )

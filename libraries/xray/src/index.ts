@@ -1,6 +1,14 @@
 export { DEFAULT_XRAY_MODEL, createAnthropicModel } from "./anthropic.ts"
 export type { AnthropicModelOptions } from "./anthropic.ts"
 export {
+  StructuredCallError,
+  addUsage,
+  callStructured,
+  costMicroUsd,
+  emptyUsage,
+} from "./structured.ts"
+export type { StructuredCallOptions, TokenUsage } from "./structured.ts"
+export {
   STALE_STATE_MESSAGE,
   UnansweredError,
   generateXray,
