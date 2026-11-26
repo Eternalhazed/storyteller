@@ -183,6 +183,7 @@ const TABLES = {
   },
   recommendation: { exclude: "served by the recommendations API, not synced" },
   catalogCache: { exclude: "server-internal cache, not synced" },
+  helperTurn: { exclude: "server-internal spending record, not synced" },
 
   book: {
     custom:

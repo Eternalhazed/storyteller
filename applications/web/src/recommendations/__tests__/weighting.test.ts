@@ -10,7 +10,7 @@ describe("series preferences", () => {
   it("weighs crossed preferences instead of filtering, and says so", () => {
     const prefs = {
       seriesShape: "series" as const,
-      seriesLength: "long" as const,
+      seriesLength: ["long"] as const,
       needsAudio: false,
     }
     expect(
@@ -36,10 +36,41 @@ describe("series preferences", () => {
     })
   })
 
+  it("matches either selected length, and weighs a mismatch against the closest", () => {
+    const prefs = {
+      seriesShape: "series" as const,
+      seriesLength: ["medium", "long"] as const,
+      needsAudio: false,
+    }
+    for (const seriesBooks of [6, 14]) {
+      expect(preferencePenalty({ seriesBooks, hasAudio: true }, prefs)).toEqual(
+        {
+          penalty: 0,
+          label: null,
+        },
+      )
+    }
+    expect(
+      preferencePenalty({ seriesBooks: 3, hasAudio: true }, prefs),
+    ).toEqual({
+      penalty: 10,
+      label: "Shorter: 3 books",
+    })
+    expect(
+      preferencePenalty(
+        { seriesBooks: 6, hasAudio: true },
+        {
+          ...prefs,
+          seriesLength: ["short", "long"],
+        },
+      ),
+    ).toEqual({ penalty: 10, label: "Between preferred lengths: 6 books" })
+  })
+
   it("applies nothing for Any and Either", () => {
     const prefs = {
       seriesShape: "either" as const,
-      seriesLength: "any" as const,
+      seriesLength: [],
       needsAudio: false,
     }
     expect(
@@ -48,12 +79,21 @@ describe("series preferences", () => {
     expect(
       preferencePenalty({ seriesBooks: null, hasAudio: false }, prefs).penalty,
     ).toBe(0)
+    expect(
+      preferencePenalty(
+        { seriesBooks: 3, hasAudio: true },
+        {
+          ...prefs,
+          seriesLength: ["short", "medium", "long"],
+        },
+      ).penalty,
+    ).toBe(0)
   })
 
   it("marks books without an audiobook for a reader who listens", () => {
     const prefs = {
       seriesShape: "either" as const,
-      seriesLength: "any" as const,
+      seriesLength: [],
       needsAudio: true,
     }
     expect(

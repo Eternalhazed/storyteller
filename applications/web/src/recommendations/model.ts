@@ -9,7 +9,7 @@ import {
 
 import { type AiConfig } from "./ai"
 import { type ReaderProfile } from "./reader"
-import { type Evidence } from "./types"
+import { type Evidence, type SeriesLength, type SeriesShape } from "./types"
 
 /** Swapped in by tests; the real one calls the Anthropic API. */
 export type ModelCaller = typeof callStructured
@@ -23,7 +23,7 @@ export function setModelCallerForTests(caller: ModelCaller | undefined) {
   globalThis.recommendationModelCaller = caller
 }
 
-function caller(): ModelCaller {
+export function caller(): ModelCaller {
   return globalThis.recommendationModelCaller ?? callStructured
 }
 
@@ -42,16 +42,32 @@ export type Brief = {
   wish: string | null
   /** Answers from the interview, as plain lines. */
   answers: string[]
+  seriesShape: SeriesShape
+  seriesLength: SeriesLength[]
   favorSubjects: string[]
   avoidSubjects: string[]
   /** The finished book an anchored round follows. */
   anchor: { title: string; author: string; rating: number | null } | null
 }
 
+const LENGTH_LABELS: Record<SeriesLength, string> = {
+  short: "short (2–4 books)",
+  medium: "medium (5–9 books)",
+  long: "long (10+ books)",
+}
+
 function briefBlock(brief: Brief): string {
   const lines = [
     brief.wish ? `Reader asked for: ${brief.wish}` : null,
     ...brief.answers,
+    brief.seriesShape === "series"
+      ? "Prefers books in a series."
+      : brief.seriesShape === "standalone"
+        ? "Prefers standalone books."
+        : null,
+    brief.seriesShape !== "standalone" && brief.seriesLength.length
+      ? `Preferred series lengths (any of): ${brief.seriesLength.map((length) => LENGTH_LABELS[length]).join(" or ")}`
+      : null,
     brief.favorSubjects.length
       ? `Favor subjects: ${brief.favorSubjects.join(", ")}`
       : null,
@@ -144,9 +160,8 @@ const ScoreSchema = z.object({
 export type Score = z.infer<typeof ScoreSchema>["picks"][number]
 
 /**
- * Score how well each verified candidate fits the reader and the brief, and
- * write the reasons. Series length is deliberately not mentioned: code
- * applies that preference afterwards.
+ * Score each verified candidate's fit and write reasons. Series makeup is
+ * verified and weighted separately by code; do not guess missing details.
  */
 export async function scoreCandidates(
   ai: AiConfig,
@@ -172,7 +187,7 @@ export async function scoreCandidates(
 - why: at most two short sentences (under 240 characters).
 - evidence: ids from the evidence list (or the candidate's own evidence ids) that the reason rests on. Cite at least one. Never invent ids.
 For a candidate with fit below 50, leave reason and why empty and evidence [].
-Do not mention series length or how many books a series has.`,
+Do not guess a candidate's series shape or penalize a candidate for unknown series length; code checks series preferences separately. Do not mention series length or book count in the reasons.`,
     ]
       .filter(Boolean)
       .join("\n\n"),

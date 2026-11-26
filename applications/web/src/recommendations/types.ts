@@ -156,12 +156,21 @@ export type RecommendationsConfig = {
 }
 
 export type SeriesShape = "series" | "standalone" | "either"
-export type SeriesLength = "short" | "medium" | "long" | "any"
+export const SERIES_LENGTHS = ["short", "medium", "long"] as const
+export type SeriesLength = (typeof SERIES_LENGTHS)[number]
+
+/** Empty means any length. Also reads single values from older stored JSON. */
+export function normalizeSeriesLengths(value: unknown): SeriesLength[] {
+  const lengths = SERIES_LENGTHS.filter((length) =>
+    Array.isArray(value) ? value.includes(length) : value === length,
+  )
+  return lengths.length === SERIES_LENGTHS.length ? [] : lengths
+}
 export type FormatPreference = "read" | "listen" | "readalong" | "any"
 
 export type RecommendationPreferences = {
   seriesShape: SeriesShape
-  seriesLength: SeriesLength
+  seriesLength: SeriesLength[]
   format: FormatPreference
   favorSubjects: string[]
   avoidSubjects: string[]
@@ -173,7 +182,7 @@ export type RecommendationPreferences = {
 
 export const DEFAULT_PREFERENCES: RecommendationPreferences = {
   seriesShape: "either",
-  seriesLength: "any",
+  seriesLength: [],
   format: "any",
   favorSubjects: [],
   avoidSubjects: [],
@@ -189,8 +198,8 @@ export type InterviewView = {
   coldStart: boolean
   goal: InterviewGoal | null
   seriesShape: SeriesShape
-  seriesLength: SeriesLength
-  /** Subject chips from the reader's own history, most read first. */
+  seriesLength: SeriesLength[]
+  /** Top subjects from the reader's own profile, even with little history. */
   subjects: string[]
   /** Asked only when the reader both reads and listens. */
   askFormat: boolean
@@ -202,8 +211,10 @@ export type InterviewAnswers = {
   /** Titles for "Like a book I loved…" and the cold-start question. */
   likedBooks?: string[]
   seriesShape?: SeriesShape
-  seriesLength?: SeriesLength
+  seriesLength?: SeriesLength[]
   subjects?: string[]
+  /** Additional subjects to exclude for a wish interpreted by the reading helper. */
+  avoidSubjects?: string[]
   freeText?: string | null
   format?: FormatPreference
   /** Write these answers to standing preferences. */

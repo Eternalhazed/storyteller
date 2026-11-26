@@ -1,6 +1,11 @@
 import { type Selectable, type Updateable, sql } from "kysely"
 
 import {
+  MAX_SUBJECT_PICKS,
+  uniqueSubjects,
+  withoutSubjects,
+} from "@/recommendations/subjects"
+import {
   DEFAULT_PREFERENCES,
   type Evidence,
   type PickSeries,
@@ -12,6 +17,7 @@ import {
   type RoundStage,
   type RoundTrigger,
   type Section,
+  normalizeSeriesLengths,
 } from "@/recommendations/types"
 import { type UUID } from "@/uuid"
 
@@ -69,7 +75,20 @@ export async function updateReader(
 export function preferencesOf(
   reader: Pick<ReaderRow, "prefs"> | null,
 ): RecommendationPreferences {
-  return { ...DEFAULT_PREFERENCES, ...(reader?.prefs ?? {}) }
+  const prefs = { ...DEFAULT_PREFERENCES, ...reader?.prefs }
+  const avoidSubjects = uniqueSubjects(prefs.avoidSubjects).slice(
+    0,
+    MAX_SUBJECT_PICKS,
+  )
+  return {
+    ...prefs,
+    seriesLength: normalizeSeriesLengths(prefs.seriesLength),
+    favorSubjects: withoutSubjects(
+      uniqueSubjects(prefs.favorSubjects),
+      avoidSubjects,
+    ).slice(0, MAX_SUBJECT_PICKS),
+    avoidSubjects,
+  }
 }
 
 export async function savePreferences(
@@ -364,9 +383,20 @@ export async function addPicksToRound(
 /** Spend on model calls since a time (all readers: the budget is the server's). */
 export async function spentMicroUsdSince(since: string): Promise<number> {
   const row = await db
-    .selectFrom("recommendationRound")
+    .selectFrom((eb) =>
+      eb
+        .selectFrom("recommendationRound")
+        .select("costMicrousd")
+        .where("createdAt", ">=", since)
+        .unionAll(
+          eb
+            .selectFrom("helperTurn")
+            .select("costMicrousd")
+            .where("createdAt", ">=", since),
+        )
+        .as("modelCalls"),
+    )
     .select((eb) => eb.fn.sum<number>("costMicrousd").as("spent"))
-    .where("createdAt", ">=", since)
     .executeTakeFirst()
   return row?.spent ?? 0
 }

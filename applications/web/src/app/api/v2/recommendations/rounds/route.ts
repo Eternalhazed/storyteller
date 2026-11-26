@@ -8,6 +8,10 @@ import {
   disabledRecommendations,
   recommendationErrorResponse,
 } from "@/recommendations/http"
+import {
+  SeriesLengthsSchema,
+  SubjectListSchema,
+} from "@/recommendations/preferenceSchemas"
 import { startRound } from "@/recommendations/rounds"
 import { clearFinishWindow } from "@/recommendations/triggers"
 import {
@@ -23,8 +27,8 @@ const AnswersSchema = z.object({
   goal: z.enum(["continue", "new", "like", "surprise"]).nullable().optional(),
   likedBooks: z.array(z.string().max(200)).max(5).optional(),
   seriesShape: z.enum(["series", "standalone", "either"]).optional(),
-  seriesLength: z.enum(["short", "medium", "long", "any"]).optional(),
-  subjects: z.array(z.string().max(80)).max(12).optional(),
+  seriesLength: SeriesLengthsSchema.optional(),
+  subjects: SubjectListSchema.optional(),
   freeText: z.string().max(500).nullable().optional(),
   format: z.enum(["read", "listen", "readalong", "any"]).optional(),
   saveAsUsual: z.boolean().optional(),

@@ -69,6 +69,8 @@ const DEFAULT_SETTINGS: Settings = {
   recommendationModel: "claude-sonnet-5-5",
   recommendationFastModel: "claude-haiku-5-5",
   recommendationMonthlyBudgetUsd: 5,
+  openRouterApiKey: null,
+  speechModel: "microsoft/mai-transcribe-2",
   syncNarrationAutomatically: false,
   parallelTranscodes: 1,
   parallelTranscribes: 1,

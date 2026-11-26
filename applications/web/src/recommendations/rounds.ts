@@ -18,6 +18,7 @@ import {
   failRound,
   getAllPicks,
   getRound,
+  getRounds,
   getRunningRound,
   getRunningRounds,
   preferencesOf,
@@ -46,6 +47,7 @@ import {
 import { sqlTime } from "./clock"
 import { type Brief, proposeBooks, scoreCandidates } from "./model"
 import { type ReaderData, type ReaderProfile, rebuildProfile } from "./reader"
+import { uniqueSubjects, withoutSubjects } from "./subjects"
 import {
   type InterviewAnswers,
   type PickSeries,
@@ -54,6 +56,7 @@ import {
   type RoundKind,
   type RoundTrigger,
   type Section,
+  normalizeSeriesLengths,
 } from "./types"
 import {
   applyDiversity,
@@ -134,8 +137,10 @@ export async function drainRounds(): Promise<void> {
 }
 
 /**
- * Start a round for a reader, or return the one already running: a reader
- * never has two at once.
+ * Start a round for a reader. A repeat of a request that is still running
+ * (a second tap) returns that round; an automatic round returns whatever is
+ * running. A different request from the reader queues its own round, ahead
+ * of automatic ones, so they see picks for what they asked.
  */
 export async function startRound(
   userId: UUID,
@@ -143,20 +148,35 @@ export async function startRound(
   input: RoundInput = {},
 ): Promise<RoundRow> {
   await ensureReader(userId)
-  const running = await getRunningRound(userId)
-  if (running) return running
+  const onDemand = ON_DEMAND.includes(trigger)
+  if (!onDemand) {
+    const running = await getRunningRound(userId)
+    if (running) return running
+  } else {
+    const same = (await getRounds(userId, { status: "running" })).find(
+      (round) =>
+        round.trigger === trigger &&
+        JSON.stringify(round.input) === JSON.stringify(input),
+    )
+    if (same) return same
+  }
   const round = await createRound({
     userId,
     trigger,
     kind: kindOf(trigger),
     input,
   })
-  const onDemand = ["tune", "wish", "refresh", "finished", "first"].includes(
-    trigger,
-  )
   void enqueue(round.uuid, onDemand)
   return round
 }
+
+const ON_DEMAND: RoundTrigger[] = [
+  "tune",
+  "wish",
+  "refresh",
+  "finished",
+  "first",
+]
 
 /**
  * At server start: a round still running was cut off. Mark it failed and,
@@ -229,14 +249,22 @@ function mergedPreferences(
   answers: InterviewAnswers | undefined,
 ): RecommendationPreferences {
   if (!answers) return prefs
+  const favored = answers.subjects?.length
+    ? answers.subjects
+    : prefs.favorSubjects
+  const avoidSubjects = answers.avoidSubjects?.length
+    ? uniqueSubjects([...answers.avoidSubjects, ...prefs.avoidSubjects])
+    : prefs.avoidSubjects
   return {
     ...prefs,
     seriesShape: answers.seriesShape ?? prefs.seriesShape,
-    seriesLength: answers.seriesLength ?? prefs.seriesLength,
+    seriesLength:
+      answers.seriesLength === undefined
+        ? prefs.seriesLength
+        : normalizeSeriesLengths(answers.seriesLength),
     format: answers.format ?? prefs.format,
-    favorSubjects: answers.subjects?.length
-      ? answers.subjects
-      : prefs.favorSubjects,
+    favorSubjects: withoutSubjects(favored, avoidSubjects),
+    avoidSubjects,
   }
 }
 
@@ -273,6 +301,8 @@ function briefFor(
   return {
     wish: round.input.wish ?? null,
     answers: lines.filter(Boolean),
+    seriesShape: prefs.seriesShape,
+    seriesLength: prefs.seriesLength,
     favorSubjects: prefs.favorSubjects,
     avoidSubjects: prefs.avoidSubjects,
     anchor,
@@ -384,6 +414,7 @@ async function gather(
       exclude,
     )
     addUsage(usage, used)
+    await setRoundStage(round.uuid, "verifying")
     candidates.push(
       ...(await verifyProposals(proposals, catalog, "finished", () => [fact])),
     )
@@ -444,6 +475,7 @@ async function gather(
       exclude,
     )
     addUsage(usage, used)
+    await setRoundStage(round.uuid, "verifying")
     candidates.push(
       ...(await verifyProposals(
         proposals,
@@ -452,6 +484,8 @@ async function gather(
         () => [],
       )),
     )
+  } else {
+    await setRoundStage(round.uuid, "verifying")
   }
   return { candidates, brief, anchorTitle: null }
 }
@@ -493,8 +527,8 @@ export async function runRound(uuid: UUID): Promise<void> {
       prefs = mergedPreferences(prefs, answers)
     }
 
-    await setRoundStage(uuid, "finding")
     const { profile, data } = await rebuildProfile(round.userId, prefs)
+    await setRoundStage(uuid, "finding")
     const evidence = new EvidenceBook()
     const gathered = await gather(
       round,
@@ -506,7 +540,6 @@ export async function runRound(uuid: UUID): Promise<void> {
       usage,
     )
 
-    await setRoundStage(uuid, "verifying")
     const placed = await placeInSeries(gathered.candidates, getCatalog(), data)
     const { kept, ignoredTwice } = filterCandidates(placed, {
       data,
@@ -596,7 +629,7 @@ export async function runRound(uuid: UUID): Promise<void> {
         },
         {
           seriesShape: unknownSeries ? "either" : prefs.seriesShape,
-          seriesLength: unknownSeries ? "any" : prefs.seriesLength,
+          seriesLength: prefs.seriesLength,
           needsAudio,
         },
       )

@@ -356,6 +356,13 @@ export interface ExternalSource {
   uuid: Generated<import("@/uuid").UUID>
 }
 
+export interface HelperTurn {
+  costMicrousd: number
+  createdAt: Generated<string>
+  userId: string
+  uuid: Generated<string>
+}
+
 export interface HistoryImportJob {
   createdAt: Generated<string>
   error: string | null
@@ -925,6 +932,7 @@ export interface DB {
   eventLog: EventLog
   externalData: ExternalData
   externalSource: ExternalSource
+  helperTurn: HelperTurn
   historyImportJob: HistoryImportJob
   homeSection: HomeSection
   identifier: Identifier

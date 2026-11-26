@@ -245,7 +245,7 @@ async function findBook(
 /** The finished book the reader named, if it is in their library. */
 async function libraryBook(
   userId: UUID,
-  book: AskParse["books"][number],
+  book: Pick<AskParse["books"][number], "title" | "author">,
 ): Promise<{ bookUuid: UUID; title: string; read: boolean } | null> {
   const [match] = await findWorkInLibrary(
     { title: book.title, authors: book.author ? [book.author] : [] },
@@ -259,6 +259,53 @@ async function libraryBook(
   }
 }
 
+export async function findBooks(
+  userId: UUID,
+  books: AskParse["books"],
+): Promise<Extract<AskResult, { intent: "get" }>> {
+  const cards: AskCard[] = []
+  const questions: AskQuestion[] = []
+  const notFound: string[] = []
+  for (const book of books.slice(0, 10)) {
+    const found = await findBook(userId, book)
+    if (found.kind === "card") {
+      cards.push(await card(userId, found.work, found.series))
+    } else if (found.kind === "question") {
+      questions.push({
+        asked: found.asked,
+        choices: await Promise.all(
+          found.works.map((work) => card(userId, work, null)),
+        ),
+      })
+    } else {
+      notFound.push(found.asked)
+    }
+  }
+  return { intent: "get", cards, questions, notFound }
+}
+
+export async function recommendationsAfterBook(
+  userId: UUID,
+  book: Pick<AskParse["books"][number], "title" | "author">,
+): Promise<Extract<AskResult, { intent: "next" }>> {
+  const mine = await libraryBook(userId, book)
+  if (mine) {
+    await clearFinishWindow(userId).catch(() => undefined)
+    const round = await startRound(userId, "finished", {
+      anchorBookUuid: mine.bookUuid,
+    })
+    return { intent: "next", round: toRoundView(round), anchor: mine }
+  }
+  const round = await startRound(userId, "wish", {
+    wish: `What to read after finishing ${book.title}${book.author ? ` by ${book.author}` : ""}`,
+  })
+  return {
+    intent: "next",
+    round: toRoundView(round),
+    anchor: { bookUuid: null, title: book.title, read: true },
+  }
+}
+
 /** Answer what the reader typed. Nothing is requested from here. */
 export async function ask(
   userId: UUID,
@@ -268,45 +315,11 @@ export async function ask(
   const { parse } = await parseAsk(ai, text.slice(0, 1000))
 
   if (parse.intent === "get" && parse.books.length) {
-    const cards: AskCard[] = []
-    const questions: AskQuestion[] = []
-    const notFound: string[] = []
-    for (const book of parse.books.slice(0, 10)) {
-      const found = await findBook(userId, book)
-      if (found.kind === "card") {
-        cards.push(await card(userId, found.work, found.series))
-      } else if (found.kind === "question") {
-        questions.push({
-          asked: found.asked,
-          choices: await Promise.all(
-            found.works.map((work) => card(userId, work, null)),
-          ),
-        })
-      } else {
-        notFound.push(found.asked)
-      }
-    }
-    return { intent: "get", cards, questions, notFound }
+    return findBooks(userId, parse.books)
   }
 
   if (parse.intent === "next" && parse.books[0]) {
-    const book = parse.books[0]
-    const mine = await libraryBook(userId, book)
-    if (mine) {
-      await clearFinishWindow(userId).catch(() => undefined)
-      const round = await startRound(userId, "finished", {
-        anchorBookUuid: mine.bookUuid,
-      })
-      return { intent: "next", round: toRoundView(round), anchor: mine }
-    }
-    const round = await startRound(userId, "wish", {
-      wish: `What to read after finishing ${book.title}${book.author ? ` by ${book.author}` : ""}`,
-    })
-    return {
-      intent: "next",
-      round: toRoundView(round),
-      anchor: { bookUuid: null, title: book.title, read: true },
-    }
+    return recommendationsAfterBook(userId, parse.books[0])
   }
 
   if (parse.intent === "wish" && (parse.wish || text.trim())) {

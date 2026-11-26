@@ -9,6 +9,11 @@ import {
 } from "@/database/recommendations"
 import { getAiConfig } from "@/recommendations/ai"
 import { disabledRecommendations } from "@/recommendations/http"
+import {
+  SeriesLengthsSchema,
+  SubjectListSchema,
+} from "@/recommendations/preferenceSchemas"
+import { withoutSubjects } from "@/recommendations/subjects"
 import { parseBody } from "@/requests/http"
 
 export const dynamic = "force-dynamic"
@@ -16,10 +21,10 @@ export const dynamic = "force-dynamic"
 const PreferencesSchema = z
   .object({
     seriesShape: z.enum(["series", "standalone", "either"]),
-    seriesLength: z.enum(["short", "medium", "long", "any"]),
+    seriesLength: SeriesLengthsSchema,
     format: z.enum(["read", "listen", "readalong", "any"]),
-    favorSubjects: z.array(z.string().trim().min(1).max(80)).max(20),
-    avoidSubjects: z.array(z.string().trim().min(1).max(80)).max(20),
+    favorSubjects: SubjectListSchema,
+    avoidSubjects: SubjectListSchema,
     useHistory: z.boolean(),
     notifyNewInSeries: z.boolean(),
     notifyNewPicks: z.boolean(),
@@ -40,6 +45,20 @@ export const PUT = withHasPermission("bookRead")(async (request) => {
   if (!body.ok) return body.response
   const userId = request.auth.user.id
   const prefs = { ...preferencesOf(await ensureReader(userId)), ...body.data }
+  if (
+    body.data.favorSubjects !== undefined &&
+    body.data.avoidSubjects === undefined
+  ) {
+    prefs.avoidSubjects = withoutSubjects(
+      prefs.avoidSubjects,
+      prefs.favorSubjects,
+    )
+  } else {
+    prefs.favorSubjects = withoutSubjects(
+      prefs.favorSubjects,
+      prefs.avoidSubjects,
+    )
+  }
   await savePreferences(userId, prefs)
   return NextResponse.json(prefs)
 })

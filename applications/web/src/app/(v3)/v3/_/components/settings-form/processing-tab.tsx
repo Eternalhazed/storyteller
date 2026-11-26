@@ -1282,6 +1282,35 @@ export function XraySection() {
             />
           )}
         />
+        <SettingsFormField
+          name="openRouterApiKey"
+          label={t("openRouterApiKey")}
+          description={t("openRouterApiKeyDescription")}
+          render={(field, fieldState, isLocked) => (
+            <Input
+              id="openRouterApiKey"
+              type="password"
+              autoComplete="off"
+              disabled={isLocked}
+              {...field}
+              value={field.value ?? ""}
+              aria-invalid={fieldState.invalid}
+            />
+          )}
+        />
+        <SettingsFormField
+          name="speechModel"
+          label={t("speechModel")}
+          render={(field, fieldState, isLocked) => (
+            <Input
+              id="speechModel"
+              required
+              disabled={isLocked}
+              {...field}
+              aria-invalid={fieldState.invalid}
+            />
+          )}
+        />
       </SettingsCard>
     </SettingsSection>
   )

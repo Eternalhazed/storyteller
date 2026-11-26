@@ -1935,3 +1935,10 @@ CREATE TABLE catalog_cache (
   value TEXT NOT NULL,
   fetched_at INTEGER NOT NULL
 );
+CREATE TABLE helper_turn (
+  uuid TEXT PRIMARY KEY NOT NULL DEFAULT (uuid ()),
+  user_id TEXT NOT NULL REFERENCES user (id) ON DELETE CASCADE,
+  cost_microusd INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_helper_turn_created_at ON helper_turn (created_at);

@@ -9,6 +9,7 @@ import {
   isColdStart,
   loadReaderData,
 } from "@/recommendations/reader"
+import { uniqueSubjects } from "@/recommendations/subjects"
 import { type InterviewView } from "@/recommendations/types"
 
 export const dynamic = "force-dynamic"
@@ -30,7 +31,9 @@ export const GET = withHasPermission("bookRead")(async (request) => {
     goal: null,
     seriesShape: prefs.seriesShape,
     seriesLength: prefs.seriesLength,
-    subjects: profile.subjects.slice(0, 8).map((subject) => subject.name),
+    subjects: uniqueSubjects(
+      profile.subjects.map((subject) => subject.name),
+    ).slice(0, 8),
     askFormat: profile.formats.listened > 0 && profile.formats.read > 0,
     format: prefs.format,
   }

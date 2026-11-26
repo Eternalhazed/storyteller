@@ -278,6 +278,7 @@ export const ENCRYPTED_SETTING_KEYS = [
   "openAiApiKey",
   "deepgramApiKey",
   "xrayAnthropicApiKey",
+  "openRouterApiKey",
   "ctcServerApiKey",
   "hardcoverApiToken",
 ] as const
@@ -355,6 +356,9 @@ export const SettingsSchema = z.object({
   recommendationModel: z.string().trim().min(1),
   recommendationFastModel: z.string().trim().min(1),
   recommendationMonthlyBudgetUsd: z.number().min(0),
+  // Reading Helper dictation (independent of audiobook transcription)
+  openRouterApiKey: z.string().nullable(),
+  speechModel: z.string().trim().min(1),
   // Narration sync
   syncNarrationAutomatically: z.boolean(),
   hardcoverApiToken: z.string().nullable().optional(),
@@ -484,6 +488,9 @@ export const SETTINGS_DEFAULTS = {
   recommendationModel: "claude-sonnet-5-5",
   recommendationFastModel: "claude-haiku-5-5",
   recommendationMonthlyBudgetUsd: 5,
+  // Match the defaults seeded by migration 133_helper.sql.
+  openRouterApiKey: null,
+  speechModel: "microsoft/mai-transcribe-2",
   syncNarrationAutomatically: false,
 } satisfies Settings
 

@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto"
 
+import { NextRequest } from "next/server"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { type TestDbContext, setupTestDb } from "@/__tests__/harness/testDb"
+import { GET as getInterview } from "@/app/api/v2/recommendations/interview/route"
+import { PUT as putPreferences } from "@/app/api/v2/recommendations/preferences/route"
 import { setCatalogForTests } from "@/catalog"
 import { createImportJob, getHistoryItems } from "@/database/readingHistory"
 import {
@@ -12,7 +15,6 @@ import {
   getReader,
   getRounds,
   preferencesOf,
-  savePreferences,
 } from "@/database/recommendations"
 import { ask } from "@/recommendations/ask"
 import { setModelCallerForTests } from "@/recommendations/model"
@@ -30,7 +32,7 @@ import {
 } from "@/recommendations/scheduler"
 import { setPickState } from "@/recommendations/state"
 import { bookStatusChanged } from "@/recommendations/triggers"
-import { DEFAULT_PREFERENCES, type PickView } from "@/recommendations/types"
+import { type InterviewView, type PickView } from "@/recommendations/types"
 import { buildRecommendationsView } from "@/recommendations/views"
 import { type UUID } from "@/uuid"
 
@@ -253,11 +255,16 @@ describe("a full round", () => {
     expect(shown).not.toContain("Killer of Men")
   })
 
-  it("keeps a strong shorter series when the reader prefers long ones, labeled", async () => {
-    await savePreferences(reader, {
-      ...DEFAULT_PREFERENCES,
-      seriesLength: "long",
-    })
+  it("loads a legacy single length and labels a shorter series", async () => {
+    await ensureReader(reader)
+    await ctx.db
+      .updateTable("recommendationReader")
+      .set({ prefs: JSON.stringify({ seriesLength: "long" }) })
+      .where("userId", "=", reader)
+      .execute()
+    expect(preferencesOf(await getReader(reader)).seriesLength).toEqual([
+      "long",
+    ])
     model.proposals.push({
       title: "First Watch",
       author: "Jane Harbor",
@@ -270,6 +277,110 @@ describe("a full round", () => {
       .find((each) => each.work.title === "First Watch")
     expect(pick?.label).toBe("Shorter: 3 books")
     expect(pick?.series?.books).toBe(3)
+  })
+
+  it("uses an OR brief for multiple lengths and saves them as the reader's usual", async () => {
+    await startRound(reader, "tune", {
+      answers: { seriesLength: ["medium", "long"], saveAsUsual: true },
+    })
+    await drainRounds()
+    expect(preferencesOf(await getReader(reader)).seriesLength).toEqual([
+      "medium",
+      "long",
+    ])
+    expect(
+      model.prompts.some((prompt) =>
+        prompt.includes(
+          "Preferred series lengths (any of): medium (5–9 books) or long (10+ books)",
+        ),
+      ),
+    ).toBe(true)
+  })
+})
+
+describe("reader recommendation settings", () => {
+  async function authenticatedRequest(
+    userId: UUID,
+    method = "GET",
+    body?: unknown,
+  ) {
+    const sessionToken = randomUUID()
+    await ctx.db
+      .insertInto("session")
+      .values({
+        userId,
+        sessionToken,
+        expires: new Date(Date.now() + 60_000),
+      })
+      .execute()
+    return new NextRequest("http://localhost/api/v2/recommendations", {
+      method,
+      headers: { Authorization: `Bearer ${sessionToken}` },
+      ...(body !== undefined && { body: JSON.stringify(body) }),
+    })
+  }
+
+  it("returns the reader's subjects even before they have finished enough books", async () => {
+    const coldReader = seedReader(ctx, "cold-reader")
+    const book = seedLibraryBook(ctx, {
+      title: "The Caravan",
+      author: "Jay Porter",
+      shelf: privateShelf(ctx, coldReader),
+      reader: coldReader,
+      status: "Reading",
+    })
+    const tag = randomUUID()
+    ctx.sqlite
+      .prepare("INSERT INTO tag (uuid, name) VALUES (?, ?)")
+      .run(tag, "Desert exploration")
+    ctx.sqlite
+      .prepare("INSERT INTO book_to_tag (book_uuid, tag_uuid) VALUES (?, ?)")
+      .run(book, tag)
+
+    const response = await getInterview(
+      await authenticatedRequest(coldReader),
+      { params: Promise.resolve({}) },
+    )
+    expect(response?.status).toBe(200)
+    const body = (await response?.json()) as InterviewView
+    expect(body.coldStart).toBe(true)
+    expect(body.subjects).toEqual(["Desert exploration"])
+
+    const other = await getInterview(await authenticatedRequest(reader), {
+      params: Promise.resolve({}),
+    })
+    expect(other?.status).toBe(200)
+    const otherBody = (await other?.json()) as InterviewView
+    expect(otherBody.subjects).not.toContain("Desert exploration")
+  })
+
+  it("normalizes all lengths to Any and keeps favor and avoid subjects exclusive", async () => {
+    const change = await putPreferences(
+      await authenticatedRequest(reader, "PUT", {
+        seriesLength: ["medium", "short", "long"],
+        favorSubjects: ["  Space   opera", " space OPERA ", "Naval adventure"],
+        avoidSubjects: ["NAVAL Adventure"],
+      }),
+      { params: Promise.resolve({}) },
+    )
+    expect(change?.status).toBe(200)
+    expect(await change?.json()).toMatchObject({
+      seriesLength: [],
+      favorSubjects: ["Space opera"],
+      avoidSubjects: ["NAVAL Adventure"],
+    })
+
+    const moved = await putPreferences(
+      await authenticatedRequest(reader, "PUT", {
+        favorSubjects: ["Naval adventure"],
+      }),
+      { params: Promise.resolve({}) },
+    )
+    expect(moved?.status).toBe(200)
+    expect(preferencesOf(await getReader(reader))).toMatchObject({
+      favorSubjects: ["Naval adventure"],
+      avoidSubjects: [],
+    })
   })
 })
 
@@ -337,12 +448,12 @@ describe("the reader's answers to picks", () => {
 })
 
 describe("rounds and restarts", () => {
-  it("never runs two rounds for one reader; a restart retries an interrupted round once", async () => {
+  it("a second tap returns the running round; a restart retries an interrupted round once", async () => {
     await round()
     const before = titles((await view()).forYou)
     const stuck = await createRound({
       userId: reader,
-      trigger: "weekly",
+      trigger: "refresh",
       kind: "full",
       input: {},
     })
@@ -369,6 +480,24 @@ describe("rounds and restarts", () => {
     expect(
       (await getRounds(reader)).filter((each) => each.status === "running"),
     ).toEqual([])
+  })
+
+  it("starts what the reader asked for while an automatic round runs", async () => {
+    await ensureReader(reader)
+    const weekly = await createRound({
+      userId: reader,
+      trigger: "weekly",
+      kind: "full",
+      input: {},
+    })
+    const asked = await startRound(reader, "wish", { wish: "naval adventure" })
+    expect(asked.uuid).not.toBe(weekly.uuid)
+    expect(asked.trigger).toBe("wish")
+    await drainRounds()
+    expect(
+      (await getRounds(reader)).find((each) => each.uuid === asked.uuid)
+        ?.status,
+    ).toBe("done")
   })
 
   it("keeps the previous picks when a round fails", async () => {

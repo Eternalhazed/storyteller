@@ -1,18 +1,14 @@
 import { authorKey } from "@/catalog/normalize"
 
-import { type SeriesLength, type SeriesShape } from "./types"
-
-export type LengthBucket = "short" | "medium" | "long"
+import { SERIES_LENGTHS, type SeriesLength, type SeriesShape } from "./types"
 
 /** Main books in a series → its length bucket; null for a standalone. */
-export function lengthBucket(books: number | null): LengthBucket | null {
+export function lengthBucket(books: number | null): SeriesLength | null {
   if (books == null || books <= 1) return null
   if (books <= 4) return "short"
   if (books <= 9) return "medium"
   return "long"
 }
-
-const BUCKET_ORDER: LengthBucket[] = ["short", "medium", "long"]
 
 /** Starting penalties; the backtest tunes them. */
 export const PENALTIES = { adjacent: 10, far: 25, shape: 15, format: 20 }
@@ -26,7 +22,7 @@ export type ShapeInput = {
 
 export type ShapePrefs = {
   seriesShape: SeriesShape
-  seriesLength: SeriesLength
+  seriesLength: readonly SeriesLength[]
   /** The reader wants to listen (alone or along with the ebook). */
   needsAudio: boolean
 }
@@ -52,18 +48,30 @@ export function preferencePenalty(
     labels.push(`Part of a series: ${input.seriesBooks} books`)
   }
 
-  if (bucket !== null && prefs.seriesLength !== "any") {
-    const distance = Math.abs(
-      BUCKET_ORDER.indexOf(bucket) - BUCKET_ORDER.indexOf(prefs.seriesLength),
-    )
-    if (distance > 0) {
-      penalty += distance === 1 ? PENALTIES.adjacent : PENALTIES.far
-      const shorter =
-        BUCKET_ORDER.indexOf(bucket) < BUCKET_ORDER.indexOf(prefs.seriesLength)
-      labels.push(
-        `${shorter ? "Shorter" : "Longer"}: ${input.seriesBooks} books`,
-      )
+  if (
+    bucket !== null &&
+    prefs.seriesShape !== "standalone" &&
+    prefs.seriesLength.length &&
+    !prefs.seriesLength.includes(bucket)
+  ) {
+    const rank = SERIES_LENGTHS.indexOf(bucket)
+    let nearest = Infinity
+    let shorter = false
+    let longer = false
+    for (const preferred of prefs.seriesLength) {
+      const difference = rank - SERIES_LENGTHS.indexOf(preferred)
+      nearest = Math.min(nearest, Math.abs(difference))
+      shorter ||= difference < 0
+      longer ||= difference > 0
     }
+    penalty += nearest === 1 ? PENALTIES.adjacent : PENALTIES.far
+    const label =
+      shorter && longer
+        ? "Between preferred lengths"
+        : shorter
+          ? "Shorter"
+          : "Longer"
+    labels.push(`${label}: ${input.seriesBooks} books`)
   }
 
   if (prefs.needsAudio && !input.hasAudio) {
