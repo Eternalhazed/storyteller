@@ -228,7 +228,8 @@ export default function BookDetailsScreen() {
                 </Text>
               )}
             </Stack>
-            <Group className="mb-4 flex-col items-stretch gap-3 self-stretch">
+            {/* Group forces a row; this block stacks status and formats. */}
+            <View className="mb-4 items-stretch gap-3 self-stretch">
               <View className="flex-row flex-wrap items-center gap-3">
                 {book.status && (
                   <Select
@@ -377,7 +378,7 @@ export default function BookDetailsScreen() {
                   </Text>
                 )}
               </Stack>
-            </Group>
+            </View>
             {!!book.series.length && (
               <>
                 <Group className="mb-2 flex-row items-center gap-1">

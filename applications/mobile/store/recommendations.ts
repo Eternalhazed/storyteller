@@ -1,20 +1,30 @@
 import {
+  GENERAL_SUBJECTS,
+  MAX_SUBJECT_PICKS,
+  uniqueSubjects,
+  withoutSubjects,
+} from "@storyteller/web/src/recommendations/subjects"
+import {
   type PickSeries,
   type PickWork,
   type RoundStage,
+  type SeriesLength,
+  normalizeSeriesLengths,
 } from "@storyteller/web/src/recommendations/types"
 
 import { requestPickerHref } from "./requestNavigation"
 import { type UUID } from "@/uuid"
 
-const STAGE_LABELS: Record<RoundStage, string> = {
-  finding: "Finding books…",
-  verifying: "Checking the catalog…",
-  ranking: "Ranking your picks…",
-}
+export const ROUND_PROGRESS_STEPS = [
+  { stage: null, title: "Reading your history" },
+  { stage: "finding", title: "Finding books" },
+  { stage: "verifying", title: "Checking the catalog" },
+  { stage: "ranking", title: "Ranking your picks" },
+] as const
 
 export function stageLabel(stage: RoundStage | null) {
-  return stage ? STAGE_LABELS[stage] : "Starting your picks…"
+  const step = ROUND_PROGRESS_STEPS.find((item) => item.stage === stage)
+  return `${(step ?? ROUND_PROGRESS_STEPS[0]).title}…`
 }
 
 export function recommendationLength({
@@ -81,15 +91,31 @@ export function resolvedWorkHref(
   })
 }
 
-export function subjectList(text: string) {
-  return [
-    ...new Set(
-      text
-        .split(/[,\n]/)
-        .map((part) => part.trim())
-        .filter(Boolean),
-    ),
-  ]
+export function toggleSeriesLength(
+  current: SeriesLength[],
+  length: SeriesLength | "any",
+): SeriesLength[] {
+  if (length === "any") return []
+  return normalizeSeriesLengths(
+    current.includes(length)
+      ? current.filter((value) => value !== length)
+      : [...current, length],
+  )
+}
+
+export function subjectChoices(
+  profile: readonly string[],
+  custom: readonly string[],
+) {
+  return uniqueSubjects([...profile, ...GENERAL_SUBJECTS, ...custom])
+}
+
+export function toggleSubject(current: string[], subject: string): string[] {
+  const [name] = uniqueSubjects([subject])
+  if (!name) return current
+  const remaining = withoutSubjects(current, [name])
+  if (remaining.length < current.length) return remaining
+  return current.length < MAX_SUBJECT_PICKS ? [...current, name] : current
 }
 
 /** One title per line: titles may contain commas ("The Lion, the Witch…"). */

@@ -39,10 +39,12 @@ function Recommendations({
   const offline = configOffline || query.isError
 
   function ask() {
+    const text = askText.trim()
     router.push({
       pathname: "/ask",
-      params: { serverUuid, text: askText.trim(), submit: "true" },
+      params: text ? { serverUuid, text, submit: "true" } : { serverUuid },
     })
+    setAskText("")
   }
 
   async function refresh() {
@@ -65,15 +67,15 @@ function Recommendations({
       <View className="flex-row items-center gap-2">
         <Input
           className="min-w-0 flex-1"
-          accessibilityLabel="Ask for a book, or say what you’re after"
-          placeholder="Ask for a book…"
+          accessibilityLabel="Ask the reading helper for a book, or say what you’re after"
+          placeholder="Ask the reading helper…"
           value={askText}
           onChangeText={setAskText}
-          onSubmitEditing={askText.trim() && !offline ? ask : undefined}
+          onSubmitEditing={!offline ? ask : undefined}
           returnKeyType="go"
         />
-        <Button disabled={!askText.trim() || offline} onPress={ask}>
-          <Text>Ask</Text>
+        <Button disabled={offline} onPress={ask}>
+          <Text numberOfLines={1}>Ask</Text>
         </Button>
       </View>
       <View className="flex-row flex-wrap gap-2">
@@ -82,7 +84,7 @@ function Recommendations({
           asChild
         >
           <Button variant="outline" disabled={offline}>
-            <Text>Tune</Text>
+            <Text numberOfLines={1}>Tune</Text>
           </Button>
         </Link>
         <Link
@@ -93,10 +95,11 @@ function Recommendations({
           asChild
         >
           <Button variant="outline" disabled={offline}>
-            <Text>Preferences</Text>
+            <Text numberOfLines={1}>Preferences</Text>
           </Button>
         </Link>
       </View>
+      {roundStatus && <RoundProgress round={roundStatus} />}
       {data ? (
         <>
           {offline && (
@@ -104,7 +107,6 @@ function Recommendations({
               Server unavailable — showing your last picks.
             </Text>
           )}
-          {roundStatus && <RoundProgress round={roundStatus} />}
           {data.budgetPaused && (
             <Text className="text-muted-foreground">
               Weekly picks paused until next month

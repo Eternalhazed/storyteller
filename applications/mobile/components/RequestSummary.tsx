@@ -1,6 +1,12 @@
 import { type RequestView } from "@storyteller/web/src/requests/http"
 import { Link, useRouter } from "expo-router"
-import { EllipsisVertical } from "lucide-react-native"
+import {
+  BookOpen,
+  Download,
+  EllipsisVertical,
+  Headphones,
+  type LucideIcon,
+} from "lucide-react-native"
 import { useState } from "react"
 import { View } from "react-native"
 
@@ -15,6 +21,8 @@ import {
 import { serverApi } from "@/store/serverApi"
 import { type UUID } from "@/uuid"
 
+import { HomeStripProgress } from "./HomeStripProgress"
+import { homeRequestStatus } from "./homeRequestStatus"
 import { Button } from "./ui/button"
 import { Icon } from "./ui/icon"
 import { Menu } from "./ui/menu"
@@ -25,11 +33,13 @@ export function OpenRequestedBook({
   serverUuid,
   label = "Open book",
   onOpened,
+  compact,
 }: {
   bookUuid: UUID
   serverUuid: UUID
   label?: string
   onOpened?: (() => void) | undefined
+  compact?: { icon: LucideIcon; onError: (message: string | null) => void }
 }) {
   const dispatch = useAppDispatch()
   const router = useRouter()
@@ -39,6 +49,7 @@ export function OpenRequestedBook({
   async function openBook() {
     setOpening(true)
     setError(false)
+    compact?.onError(null)
     try {
       await dispatch(
         serverApi.endpoints.getBook.initiate(
@@ -52,10 +63,26 @@ export function OpenRequestedBook({
       router.push({ pathname: "/book/[uuid]", params: { uuid: bookUuid } })
       onOpened?.()
     } catch {
-      setError(true)
+      if (compact) compact.onError("Could not open the book. Try again.")
+      else setError(true)
     } finally {
       setOpening(false)
     }
+  }
+
+  if (compact) {
+    return (
+      <Button
+        size="icon"
+        className="min-h-11 min-w-11"
+        accessibilityLabel={label}
+        accessibilityState={{ busy: opening }}
+        disabled={opening}
+        onPress={openBook}
+      >
+        <Icon as={compact.icon} size={18} className="text-primary-foreground" />
+      </Button>
+    )
   }
 
   return (
@@ -121,54 +148,113 @@ export function RequestSummary({
     }
   }
 
+  const errorMessage = error ? (
+    <Text className="text-destructive text-sm" accessibilityLiveRegion="polite">
+      {error}
+    </Text>
+  ) : null
+
+  if (home) {
+    const stage = homeRequestStatus(request)
+    return (
+      <View className="border-border bg-card gap-1 rounded-xl border p-2">
+        <View className="flex-row items-center gap-2">
+          <View className="bg-secondary h-16 w-11 shrink-0 items-center justify-center rounded">
+            <Icon as={Download} size={18} className="text-muted-foreground" />
+          </View>
+          <View className="min-w-0 flex-1 gap-1">
+            <Text className="font-semibold" numberOfLines={1}>
+              {request.work.title}
+            </Text>
+            <Text className="text-muted-foreground text-xs" numberOfLines={1}>
+              {stage.label}
+            </Text>
+            {stage.percent !== undefined && (
+              <HomeStripProgress label={stage.label} percent={stage.percent} />
+            )}
+          </View>
+          <View className="shrink-0 flex-row items-center gap-1">
+            {card.primary && (
+              <OpenRequestedBook
+                serverUuid={serverUuid}
+                bookUuid={request.bookUuid}
+                label={card.primary}
+                compact={{
+                  icon: card.primary === "Listen now" ? Headphones : BookOpen,
+                  onError: setError,
+                }}
+                onOpened={
+                  card.dismissOnOpen
+                    ? () => {
+                        void dismiss({ serverUuid, requestUuid })
+                      }
+                    : undefined
+                }
+              />
+            )}
+            <Menu
+              actions={[
+                ...card.pick.map((format) => ({
+                  id: `pick-${format}`,
+                  title: `${request[format].status === "choosing" ? "Pick" : "Pick another"} ${REQUEST_FORMAT_LABEL[format].toLowerCase()}`,
+                  onPress: () =>
+                    router.push(
+                      requestPickerHref(serverUuid, { requestUuid, format }),
+                    ),
+                })),
+                ...(card.retrySync
+                  ? [
+                      {
+                        id: "retry",
+                        title: "Retry narration sync",
+                        attributes: { disabled: retrying },
+                        onPress: retry,
+                      },
+                    ]
+                  : []),
+                {
+                  id: "details",
+                  title: "Request details",
+                  onPress: () =>
+                    router.push(requestDetailHref(serverUuid, requestUuid)),
+                },
+                {
+                  id: "requests",
+                  title: "All requests",
+                  onPress: () => router.push(requestListHref(serverUuid)),
+                },
+                {
+                  id: "dismiss",
+                  title: "Dismiss from Home",
+                  attributes: { disabled: dismissing },
+                  onPress: dismissCard,
+                },
+              ]}
+            >
+              <Button
+                variant="ghost"
+                size="icon"
+                className="min-h-11 min-w-11"
+                accessibilityLabel={`Request options for ${request.work.title}`}
+              >
+                <Icon as={EllipsisVertical} size={22} />
+              </Button>
+            </Menu>
+          </View>
+        </View>
+        {errorMessage}
+      </View>
+    )
+  }
+
   return (
     <View className="border-border bg-card gap-2 rounded-lg border p-4">
-      <View className="flex-row items-center gap-2">
-        <Text className="flex-1 font-semibold">{card.title}</Text>
-        {home && (
-          <Menu
-            actions={[
-              {
-                id: "details",
-                title: "Request details",
-                onPress: () =>
-                  router.push(requestDetailHref(serverUuid, requestUuid)),
-              },
-              {
-                id: "requests",
-                title: "All requests",
-                onPress: () => router.push(requestListHref(serverUuid)),
-              },
-              {
-                id: "dismiss",
-                title: "Dismiss from Home",
-                attributes: { disabled: dismissing },
-                onPress: dismissCard,
-              },
-            ]}
-          >
-            <Button
-              variant="ghost"
-              size="icon"
-              accessibilityLabel={`Request options for ${request.work.title}`}
-            >
-              <Icon as={EllipsisVertical} size={22} />
-            </Button>
-          </Menu>
-        )}
-      </View>
+      <Text className="font-semibold">{card.title}</Text>
       {card.primary && (
         <OpenRequestedBook
           serverUuid={serverUuid}
           bookUuid={request.bookUuid}
           label={card.primary}
-          onOpened={
-            home && card.dismissOnOpen
-              ? () => {
-                  void dismiss({ serverUuid, requestUuid })
-                }
-              : undefined
-          }
         />
       )}
       {!!card.status && (
@@ -183,7 +269,7 @@ export function RequestSummary({
               asChild
             >
               <Button variant="outline" size="flex">
-                <Text>
+                <Text numberOfLines={1}>
                   {request[format].status === "choosing"
                     ? "Pick"
                     : "Pick another"}{" "}
@@ -194,19 +280,14 @@ export function RequestSummary({
           ))}
           {card.retrySync && (
             <Button variant="outline" disabled={retrying} onPress={retry}>
-              <Text>{retrying ? "Retrying…" : "Retry narration sync"}</Text>
+              <Text numberOfLines={1}>
+                {retrying ? "Retrying…" : "Retry narration sync"}
+              </Text>
             </Button>
           )}
         </View>
       )}
-      {error && (
-        <Text
-          className="text-destructive text-sm"
-          accessibilityLiveRegion="polite"
-        >
-          {error}
-        </Text>
-      )}
+      {errorMessage}
     </View>
   )
 }

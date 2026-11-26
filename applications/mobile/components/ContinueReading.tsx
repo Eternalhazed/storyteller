@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router"
-import { BookOpen, Download, Headphones } from "lucide-react-native"
+import { BookOpen, Download, Headphones, RotateCcw } from "lucide-react-native"
 import { useEffect, useState } from "react"
 import { Pressable, View } from "react-native"
 
@@ -11,7 +11,7 @@ import { useDownloadBookMutation, useGetBookQuery } from "@/store/localApi"
 
 import { AudiobookCover } from "./AudiobookCover"
 import { EbookCover } from "./EbookCover"
-import { ProgressBar } from "./ProgressBar"
+import { HomeStripProgress } from "./HomeStripProgress"
 import { getBookDownloadState } from "./bookDownloadState"
 import { Button } from "./ui/button"
 import { Icon } from "./ui/icon"
@@ -50,8 +50,8 @@ export function ContinueReading({
   const chapter = locator?.title?.trim()
   const hasProgress = progress !== undefined && progress >= 0 && progress <= 1
   const details = [
-    chapter && chapter !== book.title ? chapter : null,
     hasProgress ? `${Math.round(progress * 100)}%` : null,
+    chapter && chapter !== book.title ? chapter : null,
   ]
     .filter(Boolean)
     .join(" · ")
@@ -65,6 +65,10 @@ export function ContinueReading({
     : null
   // Open the book once a download started from this card has finished.
   const [openWhenReady, setOpenWhenReady] = useState(false)
+
+  function openDetails() {
+    router.push({ pathname: "/book/[uuid]", params: { uuid: book.uuid } })
+  }
 
   function open(mode: ReadingSession["mode"]) {
     router.push({
@@ -85,20 +89,30 @@ export function ContinueReading({
   const downloading =
     downloadState &&
     ["queued", "downloading", "preparing"].includes(downloadState.status)
+  const canDownload =
+    downloadState?.action === "download" || downloadState?.action === "retry"
+  const showReadingProgress =
+    !needsDownload || downloadState?.status === "download"
+  const stripProgress =
+    showReadingProgress && hasProgress
+      ? progress * 100
+      : (downloadState?.progress ?? null)
+  const status =
+    downloadState && (!showReadingProgress || !details)
+      ? `${downloadState.label}${downloading && openWhenReady ? " — opens when ready" : ""}`
+      : details
 
   return (
-    <View className="border-border bg-card mr-safe-or-4 max-w-3xl flex-row gap-4 rounded-xl border p-4">
+    <View className="border-border bg-card mr-6 max-w-3xl flex-row items-center gap-2 rounded-xl border p-2">
       <Pressable
         accessibilityRole="link"
         accessibilityLabel={`Details for ${book.title}`}
-        onPress={() =>
-          router.push({ pathname: "/book/[uuid]", params: { uuid: book.uuid } })
-        }
-        className="bg-secondary h-40 w-28 items-center justify-center overflow-hidden rounded"
+        onPress={openDetails}
+        className="bg-secondary h-16 w-11 shrink-0 items-center justify-center overflow-hidden rounded"
       >
         <Icon
           as={listening ? Headphones : BookOpen}
-          size={24}
+          size={18}
           className="text-muted-foreground absolute"
         />
         {listening || (!hasTextCover(book) && hasAudioCover(book)) ? (
@@ -107,105 +121,104 @@ export function ContinueReading({
           <EbookCover book={book} />
         )}
       </Pressable>
-      <View className="min-w-0 flex-1 justify-between gap-2">
-        <View className="gap-0.5">
-          <Text className="text-primary text-xs font-semibold tracking-wider uppercase">
-            {listening ? "Continue listening" : "Continue reading"}
-          </Text>
-          <Text className="text-lg font-semibold" numberOfLines={2}>
+      <View className="min-w-0 flex-1 gap-1">
+        <Pressable accessibilityRole="link" onPress={openDetails}>
+          <Text className="font-semibold" numberOfLines={1}>
             {book.title}
           </Text>
           {!!(author || seriesLabel) && (
-            <Text className="text-muted-foreground text-sm" numberOfLines={1}>
+            <Text className="text-muted-foreground text-xs" numberOfLines={1}>
               {[author, seriesLabel].filter(Boolean).join(" · ")}
             </Text>
           )}
-        </View>
-        {hasProgress && (
-          <View className="gap-1">
-            <ProgressBar
-              progress={progress * 100}
-              accessibilityLabel={`${Math.round(progress * 100)}% of ${book.title}`}
-            />
-            {!!details && (
-              <Text className="text-muted-foreground text-sm" numberOfLines={1}>
-                {details}
-              </Text>
-            )}
-          </View>
+        </Pressable>
+        {stripProgress !== null && (
+          <HomeStripProgress
+            percent={stripProgress}
+            label={
+              showReadingProgress ? "Reading progress" : "Download progress"
+            }
+          />
         )}
-        <View className="flex-row flex-wrap gap-2">
-          {needsDownload ? (
-            downloadState?.action !== "download" &&
-            downloadState?.action !== "retry" ? (
-              <Text className="text-muted-foreground py-2 text-sm">
-                {downloadState?.label}
-                {downloading && openWhenReady ? " — opens when ready" : ""}
-              </Text>
-            ) : (
-              <Button
-                accessibilityLabel={`Download and continue ${book.title}`}
-                onPress={() => {
-                  setOpenWhenReady(true)
-                  void downloadBook({
-                    bookUuid: book.uuid,
-                    format: session.format,
-                  })
-                }}
-              >
-                <Icon
-                  as={Download}
-                  size={18}
-                  className="text-primary-foreground"
-                />
-                <Text>Download & continue</Text>
-              </Button>
-            )
-          ) : session.format === "readaloud" ? (
-            <>
-              <Button
-                variant={listening ? "default" : "secondary"}
-                accessibilityLabel={`Listen to ${book.title}`}
-                onPress={() => open("listening")}
-              >
-                <Icon
-                  as={Headphones}
-                  size={18}
-                  className={
-                    listening ? "text-primary-foreground" : "text-foreground"
-                  }
-                />
-                <Text>Listen</Text>
-              </Button>
-              <Button
-                variant={listening ? "secondary" : "default"}
-                accessibilityLabel={`Read along with ${book.title}`}
-                onPress={() => open("reading")}
-              >
-                <Icon
-                  as={BookOpen}
-                  size={18}
-                  className={
-                    listening ? "text-foreground" : "text-primary-foreground"
-                  }
-                />
-                <Text>Read along</Text>
-              </Button>
-            </>
-          ) : (
+        {!!status && (
+          <Text className="text-muted-foreground text-xs" numberOfLines={1}>
+            {status}
+          </Text>
+        )}
+      </View>
+      <View className="shrink-0 flex-row items-center gap-1">
+        {needsDownload ? (
+          canDownload && (
             <Button
-              accessibilityLabel={`${listening ? "Listen to" : "Read"} ${book.title}`}
-              onPress={() => open(session.mode)}
+              size="icon"
+              className="min-h-11 min-w-11"
+              accessibilityLabel={
+                downloadState.action === "retry"
+                  ? `Retry download and continue ${book.title}`
+                  : `Download and continue ${book.title}`
+              }
+              onPress={() => {
+                setOpenWhenReady(true)
+                void downloadBook({
+                  bookUuid: book.uuid,
+                  format: session.format,
+                })
+              }}
             >
               <Icon
-                as={listening ? Headphones : BookOpen}
+                as={downloadState.action === "retry" ? RotateCcw : Download}
                 size={18}
                 className="text-primary-foreground"
               />
-              <Text>{listening ? "Listen" : "Read"}</Text>
             </Button>
-          )}
-        </View>
+          )
+        ) : session.format === "readaloud" ? (
+          <>
+            <Button
+              size="icon"
+              className="min-h-11 min-w-11"
+              variant={listening ? "default" : "secondary"}
+              accessibilityLabel={`Listen to ${book.title}`}
+              onPress={() => open("listening")}
+            >
+              <Icon
+                as={Headphones}
+                size={18}
+                className={
+                  listening ? "text-primary-foreground" : "text-foreground"
+                }
+              />
+            </Button>
+            <Button
+              size="icon"
+              className="min-h-11 min-w-11"
+              variant={listening ? "secondary" : "default"}
+              accessibilityLabel={`Read along with ${book.title}`}
+              onPress={() => open("reading")}
+            >
+              <Icon
+                as={BookOpen}
+                size={18}
+                className={
+                  listening ? "text-foreground" : "text-primary-foreground"
+                }
+              />
+            </Button>
+          </>
+        ) : (
+          <Button
+            size="icon"
+            className="min-h-11 min-w-11"
+            accessibilityLabel={`${listening ? "Listen to" : "Read"} ${book.title}`}
+            onPress={() => open(session.mode)}
+          >
+            <Icon
+              as={listening ? Headphones : BookOpen}
+              size={18}
+              className="text-primary-foreground"
+            />
+          </Button>
+        )}
       </View>
     </View>
   )

@@ -16,7 +16,6 @@ const EMPTY_COLLECTIONS: Collection[] = []
 const SECTION_FOR_TYPE: Record<string, string> = {
   "jump-back-in": "jumpBackIn",
   "nearly-done": "nearlyDone",
-  "new-readalouds": "newReadalouds",
   "to-read": "toRead",
   "recently-added": "recentlyAdded",
   paused: "paused",

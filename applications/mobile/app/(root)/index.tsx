@@ -4,8 +4,8 @@ import { StatusBar } from "expo-status-bar"
 import {
   ChevronRight,
   EllipsisVertical,
-  Flag,
   Library,
+  Sparkles,
 } from "lucide-react-native"
 import { useEffect, useMemo, useRef } from "react"
 import {
@@ -16,6 +16,7 @@ import {
   type ScrollViewInstance,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native"
 
 import { ContinueReading } from "@/components/ContinueReading"
@@ -79,6 +80,9 @@ export default function Home() {
 
   const isFocused = useIsFocused()
   const recommendationServers = useEnabledRecommendationServers(isFocused)
+  const recommendationServer = recommendationServers[0]
+  const { width, fontScale } = useWindowDimensions()
+  const labelWidth = width / Math.max(fontScale, 1)
   const books = isFocused ? liveBooks : staleBooksRef.current
 
   useEffect(() => {
@@ -133,7 +137,7 @@ export default function Home() {
   return (
     <View className="pt-safe flex-1 items-center gap-2 bg-transparent">
       <StatusBar verticalBarBehaviorIOS="disabled" />
-      <Group className="pr-safe-or-2 pl-safe-or-4 items-center gap-2">
+      <Group className="pr-safe-or-2 pl-safe-or-4 w-full items-center gap-1.5">
         <TouchableOpacity
           accessibilityLabel="Scroll to top"
           accessibilityRole="button"
@@ -144,11 +148,15 @@ export default function Home() {
           <Image
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             source={require("../../assets/Storyteller_Logo.png")}
-            className="h-12 w-12"
+            className="h-10 w-10"
           />
         </TouchableOpacity>
         <Link href="/search" asChild>
-          <Pressable className="grow" accessibilityLabel="Search books">
+          <Pressable
+            className="min-w-0 flex-1"
+            accessibilityRole="link"
+            accessibilityLabel="Search books"
+          >
             <Input
               className="min-h-8 text-sm opacity-100"
               editable={false}
@@ -159,17 +167,35 @@ export default function Home() {
           </Pressable>
         </Link>
         <Link href="/series" asChild>
-          <Button variant="ghost" accessibilityLabel="Series">
+          <Button
+            variant="ghost"
+            size={labelWidth >= 520 ? "sm" : "icon"}
+            accessibilityLabel="Series"
+          >
             <Icon as={Library} size={22} className="text-primary" />
-            <Text className="text-primary">Series</Text>
+            {labelWidth >= 520 && (
+              <Text numberOfLines={1} className="text-primary">
+                Series
+              </Text>
+            )}
           </Button>
         </Link>
-        <Link href="/shortlist" asChild>
-          <Button variant="ghost" accessibilityLabel="Shortlist">
-            <Icon as={Flag} size={22} className="text-primary" />
-            <Text className="text-primary">Shortlist</Text>
-          </Button>
-        </Link>
+        {recommendationServer && (
+          <Link href={recommendationsHref(recommendationServer.uuid)} asChild>
+            <Button
+              variant="ghost"
+              size={labelWidth >= 360 ? "sm" : "icon"}
+              accessibilityLabel="Discover"
+            >
+              <Icon as={Sparkles} size={22} className="text-primary" />
+              {labelWidth >= 360 && (
+                <Text numberOfLines={1} className="text-primary">
+                  Discover
+                </Text>
+              )}
+            </Button>
+          </Link>
+        )}
         <Menu
           actions={[
             {
@@ -280,6 +306,11 @@ export default function Home() {
               items={section.items}
               coverSize={home.coverSize}
               href={section.viewAll ?? undefined}
+              emptyMessage={
+                section.id === "shortlist"
+                  ? "Bookmark books to save them here."
+                  : undefined
+              }
             />
           )
         })}

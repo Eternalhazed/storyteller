@@ -21,7 +21,6 @@ function book(
     uuid: `00000000-0000-0000-0000-${String(next).padStart(12, "0")}` as UUID,
     title: `Book ${next}`,
     createdAt: new Date(now - next * DAY).toISOString(),
-    alignedAt: null,
     status: { name: "To read" },
     position:
       progress === undefined
@@ -32,7 +31,6 @@ function book(
           },
     series: [],
     collections: [],
-    readaloud: null,
     ...rest,
   }
 }
@@ -52,7 +50,6 @@ const defaults = {
     "nextInSeries",
     "nearlyDone",
     "startSeries",
-    "newReadalouds",
     "toRead",
     "recentlyAdded",
     "magazines",
@@ -72,7 +69,7 @@ function section(
   )
 }
 
-test("shows each suggested book once, in the first section that claims it", () => {
+test("keeps shortlisted books even when earlier sections already show them", () => {
   const current = book({
     status: { name: "Reading" },
     progress: 0.4,
@@ -88,11 +85,15 @@ test("shows each suggested book once, in the first section that claims it", () =
     ...defaults,
     books: [current, other, flagged],
     continueBookUuid: current.uuid,
-    shortlist: [flagged.uuid],
+    shortlist: [other.uuid, current.uuid, flagged.uuid],
   })
   assert.deepEqual(section(sections, "continue"), [current.title])
   assert.deepEqual(section(sections, "jumpBackIn"), [other.title])
-  assert.deepEqual(section(sections, "shortlist"), [flagged.title])
+  assert.deepEqual(section(sections, "shortlist"), [
+    other.title,
+    current.title,
+    flagged.title,
+  ])
   assert.deepEqual(section(sections, "recentlyAdded"), [])
 })
 
@@ -144,30 +145,18 @@ test("to read leaves series books to the series sections", () => {
   assert.deepEqual(section(sections, "toRead"), [standalone.title])
 })
 
-test("new read-alongs are recently synced books not yet started", () => {
-  const ready = book({
-    readaloud: { status: "ALIGNED" },
-    alignedAt: new Date(now - 3 * DAY).toISOString(),
-  })
-  const old = book({
-    readaloud: { status: "ALIGNED" },
-    alignedAt: new Date(now - 45 * DAY).toISOString(),
-  })
-  const started = book({
-    readaloud: { status: "ALIGNED" },
-    alignedAt: new Date(now - DAY).toISOString(),
-    progress: 0.2,
-  })
+test("saved orders can still mention the removed New read-alongs section", () => {
   const sections = buildHomeSections({
     ...defaults,
-    dedupe: false,
-    books: [ready, old, started],
+    books: [],
+    order: ["continue", "newReadalouds", "shortlist"],
+    hidden: ["newReadalouds"],
   })
-  assert.deepEqual(section(sections, "newReadalouds"), [ready.title])
-  assert.equal(
-    sections.find((s) => s.id === "newReadalouds")?.items[0]?.reason,
-    "Ready 3 days ago",
+  assert.deepEqual(
+    sections.slice(0, 2).map(({ id }) => id),
+    ["continue", "shortlist"],
   )
+  assert.ok(!sections.some(({ id }) => id === "newReadalouds"))
 })
 
 test("magazines stay off the reading sections and get their own row", () => {
@@ -188,7 +177,7 @@ test("magazines stay off the reading sections and get their own row", () => {
 })
 
 test("hidden sections are left out and collections are hidden unless enabled", () => {
-  const mine = { uuid: "c", name: "David" }
+  const mine = { uuid: "c", name: "My books" }
   const owned = book({ collections: [mine] })
   const sections = buildHomeSections({
     ...defaults,

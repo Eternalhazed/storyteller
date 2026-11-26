@@ -1,4 +1,4 @@
-import { Flag } from "lucide-react-native"
+import { Bookmark, BookmarkCheck } from "lucide-react-native"
 import { Alert } from "react-native"
 
 import { type BookWithRelations } from "@/database/books"
@@ -33,9 +33,11 @@ export function ShortlistToggle({
         })
       }}
     >
-      <Icon as={Flag} size={20} fill={selected ? "currentColor" : "none"} />
+      <Icon as={selected ? BookmarkCheck : Bookmark} size={20} />
       {variant === "button" && (
-        <Text>{selected ? "On Shortlist" : "Shortlist"}</Text>
+        <Text numberOfLines={1}>
+          {selected ? "On Shortlist" : "Add to Shortlist"}
+        </Text>
       )}
     </Button>
   )

@@ -1,4 +1,5 @@
 import { skipToken } from "@reduxjs/toolkit/query"
+import { withoutSubjects } from "@storyteller/web/src/recommendations/subjects"
 import { type RecommendationPreferences } from "@storyteller/web/src/recommendations/types"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { useState } from "react"
@@ -8,15 +9,15 @@ import {
   ChoiceChips,
   FORMATS,
   RecommendationToggle,
-  SERIES_LENGTHS,
   SERIES_SHAPES,
+  SeriesLengthChips,
+  SubjectPicker,
 } from "@/components/RecommendationInterview"
 import { RequestError, RequestPage } from "@/components/RequestPage"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Text } from "@/components/ui/text"
 import { useRequestServer } from "@/hooks/useBookRequests"
-import { recommendationsHref, subjectList } from "@/store/recommendations"
+import { recommendationsHref } from "@/store/recommendations"
 import { requestErrorMessage } from "@/store/requestErrors"
 import { serverApi } from "@/store/serverApi"
 import { type UUID } from "@/uuid"
@@ -29,15 +30,15 @@ const TOGGLES = [
 
 function PreferencesForm({
   initial,
+  profileSubjects,
   serverUuid,
 }: {
   initial: RecommendationPreferences
+  profileSubjects: readonly string[]
   serverUuid: UUID
 }) {
   const router = useRouter()
   const [values, setValues] = useState(initial)
-  const [favor, setFavor] = useState(() => initial.favorSubjects.join(", "))
-  const [avoid, setAvoid] = useState(() => initial.avoidSubjects.join(", "))
   const [error, setError] = useState<string | null>(null)
   const [update, { isLoading }] =
     serverApi.useSetRecommendationPreferencesMutation()
@@ -45,12 +46,7 @@ function PreferencesForm({
   async function save() {
     setError(null)
     try {
-      await update({
-        serverUuid,
-        ...values,
-        favorSubjects: subjectList(favor),
-        avoidSubjects: subjectList(avoid),
-      }).unwrap()
+      await update({ serverUuid, ...values }).unwrap()
       if (router.canGoBack()) router.back()
       else router.replace(recommendationsHref(serverUuid))
     } catch (cause) {
@@ -73,13 +69,13 @@ function PreferencesForm({
           choose={(seriesShape) => setValues({ ...values, seriesShape })}
           disabled={isLoading}
         />
-        <Text>Series length</Text>
-        <ChoiceChips
-          options={SERIES_LENGTHS}
-          selected={values.seriesLength}
-          choose={(seriesLength) => setValues({ ...values, seriesLength })}
-          disabled={isLoading}
-        />
+        {values.seriesShape !== "standalone" && (
+          <SeriesLengthChips
+            selected={values.seriesLength}
+            onChange={(seriesLength) => setValues({ ...values, seriesLength })}
+            disabled={isLoading}
+          />
+        )}
       </View>
       <View className="gap-2">
         <Text variant="h4">Format</Text>
@@ -90,24 +86,53 @@ function PreferencesForm({
           disabled={isLoading}
         />
       </View>
-      <View className="gap-2">
-        <Text variant="h4">Subjects</Text>
-        <Text>Favor</Text>
-        <Input
-          accessibilityLabel="Subjects to favor"
-          placeholder="Separate subjects with commas"
-          value={favor}
-          onChangeText={setFavor}
-          editable={!isLoading}
-        />
-        <Text>Avoid</Text>
-        <Input
-          accessibilityLabel="Subjects to avoid"
-          placeholder="Separate subjects with commas"
-          value={avoid}
-          onChangeText={setAvoid}
-          editable={!isLoading}
-        />
+      <View className="gap-4">
+        <View className="gap-1">
+          <Text variant="h4">Subjects</Text>
+          <Text className="text-muted-foreground text-sm">
+            Selecting a subject to favor moves it out of Avoid, and vice versa.
+          </Text>
+        </View>
+        <View className="gap-2">
+          <Text className="font-semibold">Favor</Text>
+          <SubjectPicker
+            profile={profileSubjects}
+            selected={values.favorSubjects}
+            other={values.avoidSubjects}
+            onChange={(favorSubjects) =>
+              setValues((previous) => ({
+                ...previous,
+                favorSubjects,
+                avoidSubjects: withoutSubjects(
+                  previous.avoidSubjects,
+                  favorSubjects,
+                ),
+              }))
+            }
+            inputLabel="Add a custom subject to favor"
+            disabled={isLoading}
+          />
+        </View>
+        <View className="gap-2">
+          <Text className="font-semibold">Avoid</Text>
+          <SubjectPicker
+            profile={profileSubjects}
+            selected={values.avoidSubjects}
+            other={values.favorSubjects}
+            onChange={(avoidSubjects) =>
+              setValues((previous) => ({
+                ...previous,
+                avoidSubjects,
+                favorSubjects: withoutSubjects(
+                  previous.favorSubjects,
+                  avoidSubjects,
+                ),
+              }))
+            }
+            inputLabel="Add a custom subject to avoid"
+            disabled={isLoading}
+          />
+        </View>
       </View>
       <View className="gap-2">
         <Text variant="h4">Reading history and notifications</Text>
@@ -127,7 +152,9 @@ function PreferencesForm({
       </View>
       {error && <RequestError>{error}</RequestError>}
       <Button className="self-start" disabled={isLoading} onPress={save}>
-        <Text>{isLoading ? "Saving…" : "Save preferences"}</Text>
+        <Text numberOfLines={1}>
+          {isLoading ? "Saving…" : "Save preferences"}
+        </Text>
       </Button>
     </>
   )
@@ -139,6 +166,10 @@ export default function RecommendationPreferencesScreen() {
   }>()
   const { serverUuid, isLoading } = useRequestServer(requestedServer)
   const query = serverApi.useGetRecommendationPreferencesQuery(
+    serverUuid ? { serverUuid } : skipToken,
+    { refetchOnMountOrArgChange: true },
+  )
+  const interview = serverApi.useGetRecommendationInterviewQuery(
     serverUuid ? { serverUuid } : skipToken,
     { refetchOnMountOrArgChange: true },
   )
@@ -157,6 +188,7 @@ export default function RecommendationPreferencesScreen() {
         <PreferencesForm
           key={serverUuid}
           initial={query.currentData}
+          profileSubjects={interview.currentData?.subjects ?? []}
           serverUuid={serverUuid}
         />
       ) : (

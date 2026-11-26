@@ -8,12 +8,14 @@ import {
   resolvedWorkHref,
   seriesLine,
   stageLabel,
-  subjectList,
+  subjectChoices,
+  toggleSeriesLength,
+  toggleSubject,
 } from "./recommendations"
 import { parsePickerTarget, parseRequestUuid } from "./requestNavigation"
 
 test("recommendation stages describe the current work", () => {
-  assert.equal(stageLabel(null), "Starting your picks…")
+  assert.equal(stageLabel(null), "Reading your history…")
   assert.equal(stageLabel("finding"), "Finding books…")
   assert.equal(stageLabel("verifying"), "Checking the catalog…")
   assert.equal(stageLabel("ranking"), "Ranking your picks…")
@@ -50,11 +52,33 @@ test("details format optional catalog lengths and series order", () => {
   )
 })
 
-test("subject lists trim, split and deduplicate entries", () => {
-  assert.deepEqual(subjectList(" Naval, , Science fiction\nNaval "), [
-    "Naval",
-    "Science fiction",
+test("series lengths can be combined, cleared, or reset to Any by picking all", () => {
+  assert.deepEqual(toggleSeriesLength(["medium"], "long"), ["medium", "long"])
+  assert.deepEqual(toggleSeriesLength(["medium", "long"], "medium"), ["long"])
+  assert.deepEqual(toggleSeriesLength(["medium", "long"], "short"), [])
+  assert.deepEqual(toggleSeriesLength(["medium", "long"], "any"), [])
+})
+
+test("profile subjects precede the curated list and duplicate custom subjects", () => {
+  const choices = subjectChoices(
+    ["Napoleonic naval warfare", " historical FICTION  "],
+    [" historical fiction", "Cozy", "Sailing voyages", "sailing VOYAGES"],
+  )
+  assert.deepEqual(choices.slice(0, 3), [
+    "Napoleonic naval warfare",
+    "historical FICTION",
+    "Military history",
   ])
+  assert.deepEqual(choices.slice(-2), ["Coming of age", "Sailing voyages"])
+})
+
+test("custom chips sanitize input, enforce a selection limit, and toggle case-insensitively", () => {
+  assert.deepEqual(toggleSubject([], " \n Deep   time \t"), ["Deep time"])
+  assert.deepEqual(toggleSubject([], "x".repeat(50)), ["x".repeat(40)])
+  assert.deepEqual(toggleSubject(["Space opera"], "space OPERA"), [])
+  const full = Array.from({ length: 12 }, (_, index) => `Genre ${index + 1}`)
+  assert.deepEqual(toggleSubject(full, "Another genre"), full)
+  assert.deepEqual(toggleSubject(full, "GENRE 1"), full.slice(1))
 })
 
 test("resolved picks preserve their identifiers and attribution through Expo params", () => {

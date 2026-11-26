@@ -37,6 +37,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ],
       "expo-image",
       "expo-sharing",
+      [
+        "expo-audio",
+        {
+          microphonePermission:
+            "Allow $(PRODUCT_NAME) to record your voice for Reading helper dictation.",
+          enableBackgroundPlayback: false,
+        },
+      ],
       "expo-web-browser",
       [
         "expo-notifications",

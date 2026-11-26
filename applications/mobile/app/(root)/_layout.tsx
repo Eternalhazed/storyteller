@@ -135,18 +135,21 @@ export default function ModalLayout() {
           ...javaScriptBackButton(),
         }}
       />
-      <Stack.Screen name="ask" options={recommendationScreen("Ask")} />
+      <Stack.Screen
+        name="ask"
+        options={recommendationScreen("Reading helper")}
+      />
       <Stack.Screen
         name="recommendations/index"
         options={recommendationScreen("Recommendations")}
       />
       <Stack.Screen
         name="recommendations/tune"
-        options={recommendationScreen("Tune recommendations")}
+        options={recommendationScreen("Tune")}
       />
       <Stack.Screen
         name="recommendations/preferences"
-        options={recommendationScreen("Recommendation preferences")}
+        options={recommendationScreen("Your preferences")}
       />
       <Stack.Screen
         name="recommendations/history"

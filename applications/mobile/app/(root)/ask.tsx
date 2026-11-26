@@ -1,11 +1,22 @@
 import {
+  type HelperMessage,
+  type HelperTurn,
+} from "@storyteller/web/src/recommendations/helper"
+import {
   type AskCard,
   type AskResult,
   type RoundView,
 } from "@storyteller/web/src/recommendations/types"
 import { Link, useLocalSearchParams } from "expo-router"
+import { Mic, Square } from "lucide-react-native"
 import { useEffect, useEffectEvent, useRef, useState } from "react"
-import { View } from "react-native"
+import {
+  Platform,
+  ScrollView,
+  type ScrollViewInstance,
+  View,
+} from "react-native"
+import { KeyboardAvoidingView } from "react-native-keyboard-controller"
 
 import {
   PickCard,
@@ -14,19 +25,22 @@ import {
 } from "@/components/RecommendationCards"
 import { RequestError, RequestPage } from "@/components/RequestPage"
 import { OpenRequestedBook } from "@/components/RequestSummary"
+import { ScreenBackButton } from "@/components/ScreenBackButton"
 import { Button } from "@/components/ui/button"
+import { Icon } from "@/components/ui/icon"
 import { Input } from "@/components/ui/input"
 import { Text } from "@/components/ui/text"
 import { useRequestServer } from "@/hooks/useBookRequests"
+import { useHelperDictation } from "@/hooks/useHelperDictation"
 import { useIsFocused } from "@/hooks/useIsFocused"
 import {
   useRecommendationConfig,
   useRecommendationRound,
 } from "@/hooks/useRecommendations"
+import { usesSystemHeader } from "@/lib/nativeChrome"
 import { useAppDispatch } from "@/store/appState"
 import { useListStatusesQuery, useUpdateStatusMutation } from "@/store/localApi"
 import { resolvedWorkHref, seriesLine } from "@/store/recommendations"
-import { requestErrorMessage } from "@/store/requestErrors"
 import { serverApi } from "@/store/serverApi"
 import { type UUID } from "@/uuid"
 
@@ -196,68 +210,20 @@ function AskAnchor({
   )
 }
 
-function AskForm({
-  serverUuid,
-  initialText,
-  autoSubmit,
-  requestsEnabled,
-  offline,
-}: {
+type ResultProps = {
   serverUuid: UUID
-  initialText: string
-  autoSubmit: boolean
   requestsEnabled: boolean
   offline: boolean
-}) {
-  const [text, setText] = useState(initialText)
+}
+
+function HelperResult({
+  result,
+  ...cardProps
+}: ResultProps & { result: AskResult }) {
   const [choices, setChoices] = useState<Record<number, AskCard>>({})
-  const [ask, { data: result, isLoading, error }] =
-    serverApi.useAskForBooksMutation()
-  const submitted = useRef(false)
-
-  function submit() {
-    if (!text.trim() || offline || isLoading) return
-    setChoices({})
-    void ask({ serverUuid, text: text.trim() })
-  }
-  const submitOnOpen = useEffectEvent(submit)
-  useEffect(() => {
-    if (!autoSubmit || offline || submitted.current) return
-    submitted.current = true
-    submitOnOpen()
-  }, [autoSubmit, offline])
-
-  const cardProps = { serverUuid, requestsEnabled, offline }
+  const { serverUuid, offline } = cardProps
   return (
     <>
-      <View className="gap-2">
-        <Input
-          accessibilityLabel="Ask for a book, or say what you’re after"
-          placeholder="Name a book or series, or say what you’re after…"
-          value={text}
-          onChangeText={setText}
-          onSubmitEditing={submit}
-          returnKeyType="go"
-          editable={!isLoading}
-        />
-        <Button
-          className="self-start"
-          disabled={offline || isLoading || !text.trim()}
-          onPress={submit}
-        >
-          <Text>{isLoading ? "Looking…" : "Ask"}</Text>
-        </Button>
-      </View>
-      {offline && (
-        <Text className="text-muted-foreground">
-          Reconnect to ask for books.
-        </Text>
-      )}
-      {!!error && (
-        <RequestError>
-          {requestErrorMessage(error, "Could not answer right now. Try again.")}
-        </RequestError>
-      )}
       {result?.intent === "get" && (
         <>
           {result.cards.map((card) => (
@@ -322,6 +288,275 @@ function AskForm({
   )
 }
 
+type ConversationEntry =
+  | { role: "reader"; text: string }
+  | { role: "helper"; text: string; turn: HelperTurn }
+
+function HelperBubble({ text }: { text: string }) {
+  return (
+    <View className="bg-card border-border max-w-[90%] self-start rounded-xl rounded-tl-sm border px-4 py-3">
+      <Text>{text}</Text>
+    </View>
+  )
+}
+
+function ReaderBubble({ text }: { text: string }) {
+  return (
+    <View className="bg-secondary max-w-[90%] self-end rounded-xl rounded-tr-sm px-4 py-3">
+      <Text className="text-secondary-foreground">{text}</Text>
+    </View>
+  )
+}
+
+function HelperConversation({
+  initialText,
+  autoSubmit,
+  speechEnabled,
+  ...cardProps
+}: ResultProps & {
+  initialText: string
+  autoSubmit: boolean
+  speechEnabled: boolean
+}) {
+  const { serverUuid, offline } = cardProps
+  const [text, setText] = useState(initialText.slice(0, 1000))
+  const [entries, setEntries] = useState<ConversationEntry[]>([])
+  const [pending, setPending] = useState<string | null>(null)
+  const [sendFailed, setSendFailed] = useState(false)
+  const [send] = serverApi.useSendHelperMessageMutation()
+  const opening = serverApi.useGetHelperOpeningQuery({ serverUuid })
+  const submittedInitially = useRef(false)
+  const sending = useRef(false)
+  const scroll = useRef<ScrollViewInstance>(null)
+  const scrollToLatest = useRef(false)
+  const dictation = useHelperDictation(serverUuid, (transcript) => {
+    setText((draft) =>
+      [draft.trim(), transcript].filter(Boolean).join(" ").slice(0, 1000),
+    )
+  })
+  const recording = dictation.phase === "recording"
+  const dictating = dictation.phase !== "idle"
+  const disabled = offline || pending !== null || dictating
+
+  async function submit(message: string) {
+    const readerText = message.trim().slice(0, 1000)
+    if (!readerText || disabled || sending.current) return
+    sending.current = true
+    scrollToLatest.current = true
+    setSendFailed(false)
+    dictation.clearError()
+    setPending(readerText)
+    const entry = { role: "reader", text: readerText } as const
+    const messages: HelperMessage[] = [...entries, entry]
+      .slice(-20)
+      .map(({ role, text }) => ({ role, text }))
+    try {
+      const turn = await send({ serverUuid, messages }).unwrap()
+      scrollToLatest.current = true
+      setEntries((previous) => [
+        ...previous,
+        entry,
+        { role: "helper", text: turn.reply, turn },
+      ])
+      setText("")
+    } catch {
+      setSendFailed(true)
+      setText((draft) => draft || readerText)
+    } finally {
+      sending.current = false
+      setPending(null)
+    }
+  }
+
+  const submitOnOpen = useEffectEvent(() => {
+    submittedInitially.current = true
+    void submit(initialText)
+  })
+  useEffect(() => {
+    if (
+      autoSubmit &&
+      initialText.trim() &&
+      !submittedInitially.current &&
+      !disabled
+    ) {
+      submitOnOpen()
+    }
+  }, [autoSubmit, disabled, initialText])
+
+  const active = entries.at(-1)
+  const chips =
+    active?.role === "helper" ? active.turn.chips : opening.currentData?.chips
+  const elapsed = `0:${String(dictation.elapsed).padStart(2, "0")}`
+
+  return (
+    <KeyboardAvoidingView
+      className="flex-1"
+      behavior="padding"
+      enabled={Platform.OS === "ios"}
+      automaticOffset
+    >
+      <ScreenBackButton />
+      <ScrollView
+        ref={scroll}
+        className="flex-1"
+        contentContainerClassName="px-safe-or-4 items-center py-4"
+        contentInsetAdjustmentBehavior={
+          usesSystemHeader ? "automatic" : "never"
+        }
+        keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => {
+          if (!scrollToLatest.current) return
+          scrollToLatest.current = false
+          scroll.current?.scrollToEnd({ animated: false })
+        }}
+      >
+        <View className="w-full max-w-2xl gap-3">
+          {(entries.length > 0 || pending !== null) && (
+            <Button
+              className="self-end"
+              variant="ghost"
+              disabled={pending !== null || dictating}
+              onPress={() => {
+                scrollToLatest.current = false
+                setEntries([])
+                setText("")
+                setSendFailed(false)
+                dictation.clearError()
+                scroll.current?.scrollTo({ y: 0, animated: false })
+              }}
+            >
+              <Text>Start over</Text>
+            </Button>
+          )}
+          {opening.currentData ? (
+            <HelperBubble text={opening.currentData.reply} />
+          ) : opening.isError && entries.length === 0 && !offline ? (
+            <View className="items-start gap-2">
+              <RequestError>
+                Couldn’t load suggestions. You can still write a message.
+              </RequestError>
+              <Button variant="outline" onPress={() => void opening.refetch()}>
+                <Text>Reload suggestions</Text>
+              </Button>
+            </View>
+          ) : opening.isLoading && entries.length === 0 && !pending ? (
+            <Text className="text-muted-foreground">Loading suggestions…</Text>
+          ) : null}
+          {entries.map((entry, index) =>
+            entry.role === "reader" ? (
+              <ReaderBubble key={index} text={entry.text} />
+            ) : (
+              <View key={index} className="gap-3">
+                <HelperBubble text={entry.text} />
+                {entry.turn.result && (
+                  <HelperResult result={entry.turn.result} {...cardProps} />
+                )}
+              </View>
+            ),
+          )}
+          {pending !== null && (
+            <>
+              <ReaderBubble text={pending} />
+              <Text
+                className="text-muted-foreground"
+                accessibilityLiveRegion="polite"
+              >
+                Thinking…
+              </Text>
+            </>
+          )}
+          {pending === null && !!chips?.length && (
+            <View className="flex-row flex-wrap gap-2">
+              {chips.map((chip) => (
+                <Button
+                  key={chip}
+                  variant="outline"
+                  size="flex"
+                  className="max-w-full"
+                  accessibilityLabel={chip}
+                  disabled={disabled}
+                  onPress={() => void submit(chip)}
+                >
+                  <Text className="shrink" numberOfLines={1}>
+                    {chip}
+                  </Text>
+                </Button>
+              ))}
+            </View>
+          )}
+        </View>
+      </ScrollView>
+      <View className="border-border bg-background px-safe-or-4 pb-safe-or-3 items-center border-t pt-3">
+        <View className="w-full max-w-2xl gap-2">
+          {offline && (
+            <Text className="text-muted-foreground">
+              Reconnect to use Reading helper.
+            </Text>
+          )}
+          {sendFailed && (
+            <RequestError>
+              Couldn’t get a reply. Your message is ready to send again.
+            </RequestError>
+          )}
+          {dictation.error && <RequestError>{dictation.error}</RequestError>}
+          {recording ? (
+            <Text
+              className="text-destructive text-sm"
+              accessibilityLabel={`Recording, ${dictation.elapsed} seconds elapsed`}
+            >
+              Recording · {elapsed}
+            </Text>
+          ) : dictation.phase === "transcribing" ? (
+            <Text
+              className="text-muted-foreground text-sm"
+              accessibilityLiveRegion="polite"
+            >
+              Transcribing…
+            </Text>
+          ) : null}
+          <View className="flex-row items-end gap-2">
+            <Input
+              className="max-h-28 w-auto flex-1"
+              accessibilityLabel="Message to Reading helper"
+              placeholder="Tell me what you’re after…"
+              value={text}
+              onChangeText={setText}
+              maxLength={1000}
+              editable={pending === null && !dictating}
+              multiline
+            />
+            {(speechEnabled || dictating) && (
+              <Button
+                variant={recording ? "destructive" : "outline"}
+                size="icon"
+                className="h-11 w-11"
+                accessibilityLabel={
+                  recording ? "Stop recording" : "Record a message"
+                }
+                disabled={!recording && disabled}
+                onPress={() => void dictation.toggle()}
+              >
+                <Icon
+                  as={recording ? Square : Mic}
+                  className={recording ? "text-white" : ""}
+                  size={18}
+                />
+              </Button>
+            )}
+            <Button
+              className="h-11"
+              disabled={disabled || !text.trim()}
+              onPress={() => void submit(text)}
+            >
+              <Text>Send</Text>
+            </Button>
+          </View>
+        </View>
+      </View>
+    </KeyboardAvoidingView>
+  )
+}
+
 export default function AskScreen() {
   const {
     serverUuid: requestedServer,
@@ -335,21 +570,25 @@ export default function AskScreen() {
   const { serverUuid, isLoading } = useRequestServer(requestedServer)
   const focused = useIsFocused()
   const query = useRecommendationConfig(serverUuid, focused)
+  if (serverUuid && query.config?.helperEnabled) {
+    return (
+      <HelperConversation
+        key={serverUuid}
+        serverUuid={serverUuid}
+        initialText={text ?? ""}
+        autoSubmit={submit === "true"}
+        requestsEnabled={query.config.requestsEnabled}
+        speechEnabled={query.config.speechEnabled}
+        offline={query.isError}
+      />
+    )
+  }
   return (
     <RequestPage>
-      {serverUuid && query.config?.enabled ? (
-        <AskForm
-          key={serverUuid}
-          serverUuid={serverUuid}
-          initialText={text ?? ""}
-          autoSubmit={submit === "true"}
-          requestsEnabled={query.config.requestsEnabled}
-          offline={query.isError}
-        />
-      ) : isLoading || query.isLoading ? (
+      {isLoading || query.isLoading ? (
         <Text>Loading…</Text>
       ) : (
-        <Text>Ask isn’t available on this account.</Text>
+        <Text>Reading helper isn’t available on this account.</Text>
       )}
     </RequestPage>
   )

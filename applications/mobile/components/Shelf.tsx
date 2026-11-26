@@ -34,6 +34,7 @@ interface Props {
   coverSize?: HomePreferences["coverSize"]
   /** The full count for "View all", when the row shows fewer. */
   total?: number
+  emptyMessage?: string | undefined
 }
 
 export function Shelf({
@@ -42,11 +43,12 @@ export function Shelf({
   items,
   coverSize = "medium",
   total,
+  emptyMessage,
 }: Props) {
   const router = useRouter()
   const { width } = useWindowDimensions()
 
-  if (!items.length) return null
+  if (!items.length && !emptyMessage) return null
 
   const coverWidth = shelfCoverWidth(coverSize, width)
 
@@ -77,15 +79,21 @@ export function Shelf({
         )}
       </View>
 
-      <FlatList
-        horizontal
-        data={items.slice(0, 25)}
-        keyExtractor={({ book }) => book.uuid}
-        contentContainerClassName="gap-4"
-        renderItem={({ item: { book, reason } }) => (
-          <BookThumbnail book={book} width={coverWidth} caption={reason} />
-        )}
-      />
+      {items.length > 0 ? (
+        <FlatList
+          horizontal
+          data={items.slice(0, 25)}
+          keyExtractor={({ book }) => book.uuid}
+          contentContainerClassName="gap-4"
+          renderItem={({ item: { book, reason } }) => (
+            <BookThumbnail book={book} width={coverWidth} caption={reason} />
+          )}
+        />
+      ) : (
+        <Text className="text-muted-foreground mr-6 text-sm">
+          {emptyMessage}
+        </Text>
+      )}
     </Stack>
   )
 }

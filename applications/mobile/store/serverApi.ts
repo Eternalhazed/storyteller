@@ -9,13 +9,17 @@ import { type BookWithRelations } from "@storyteller/web/src/database/books"
 import { type Position } from "@storyteller/web/src/database/positions"
 import { type Status } from "@storyteller/web/src/database/statuses"
 import {
+  type HelperConfig,
+  type HelperMessage,
+  type HelperTurn,
+} from "@storyteller/web/src/recommendations/helper"
+import {
   type AskResult,
   type InterviewView,
   type PickView,
   type ReaderPickState,
   type RecommendationHistoryView,
   type RecommendationPreferences,
-  type RecommendationsConfig,
   type RecommendationsView,
   type RoundView,
   type StartRoundInput,
@@ -156,16 +160,14 @@ export const serverApi = createApi({
     return makeRequest(args, baseQueryApi, extraOptions ?? {})
   },
   endpoints: (build) => ({
-    getRecommendationsConfig: build.query<RecommendationsConfig, RequestServer>(
-      {
-        query: ({ serverUuid }) => ({
-          url: "/recommendations/config",
-          serverUuid,
-          timeout: 5_000,
-        }),
-        keepUnusedDataFor: 3600,
-      },
-    ),
+    getRecommendationsConfig: build.query<HelperConfig, RequestServer>({
+      query: ({ serverUuid }) => ({
+        url: "/recommendations/config",
+        serverUuid,
+        timeout: 5_000,
+      }),
+      keepUnusedDataFor: 3600,
+    }),
     getRecommendations: build.query<RecommendationsView, RequestServer>({
       query: ({ serverUuid }) => ({
         url: "/recommendations",
@@ -300,6 +302,41 @@ export const serverApi = createApi({
         result?.intent === "next" || result?.intent === "wish"
           ? [recommendationTag(serverUuid)]
           : [],
+    }),
+    getHelperOpening: build.query<HelperTurn, RequestServer>({
+      query: ({ serverUuid }) => ({
+        url: "/helper",
+        serverUuid,
+        timeout: 5_000,
+      }),
+      keepUnusedDataFor: 0,
+    }),
+    sendHelperMessage: build.mutation<
+      HelperTurn,
+      RequestServer & { messages: HelperMessage[] }
+    >({
+      query: ({ serverUuid, messages }) => ({
+        url: "/helper",
+        serverUuid,
+        method: "POST",
+        body: { messages },
+      }),
+      invalidatesTags: (turn, _error, { serverUuid }) =>
+        turn?.result?.intent === "next" || turn?.result?.intent === "wish"
+          ? [recommendationTag(serverUuid)]
+          : [],
+    }),
+    transcribeHelperAudio: build.mutation<
+      { text: string },
+      RequestServer & { audio: FormData }
+    >({
+      query: ({ serverUuid, audio }) => ({
+        url: "/helper/transcribe",
+        serverUuid,
+        method: "POST",
+        body: audio,
+        timeout: 95_000,
+      }),
     }),
     getRequestConfig: build.query<RequestConfig, RequestServer>({
       query: ({ serverUuid }) => ({ url: "/requests/config", serverUuid }),

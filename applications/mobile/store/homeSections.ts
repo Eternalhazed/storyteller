@@ -11,13 +11,11 @@ export const JUMP_BACK_IN_LIMIT = 6
 export const PAUSED_DAYS = 60
 export const NEARLY_DONE_FROM = 0.5
 export const NEARLY_DONE_IDLE_DAYS = 14
-export const NEW_READALOUD_DAYS = 30
 
 export type HomeBook = {
   uuid: UUID
   title: string
   createdAt: string
-  alignedAt: string | null
   status: { name: string } | null
   position: {
     timestamp: number
@@ -25,7 +23,6 @@ export type HomeBook = {
   } | null
   series: readonly { uuid: string; position: number | null }[]
   collections: readonly { uuid: string; name: string }[]
-  readaloud: { status?: string } | null
 }
 
 export type HomeItem<Book> = { book: Book; reason: string | null }
@@ -55,11 +52,11 @@ export type HomeInputs<Book extends HomeBook> = {
   collections: readonly { uuid: string; name: string }[]
   order: readonly string[]
   hidden: readonly string[]
-  /** Show each book once, in the first section that claims it. */
+  /** Show suggested books only in the first row that claims them. */
   dedupe: boolean
 }
 
-/** Sections whose books are suggestions, so a book appears in only one. */
+/** These sections claim their books, including the reader-curated Shortlist. */
 const DEDUPED: Record<string, true> = {
   continue: true,
   jumpBackIn: true,
@@ -67,7 +64,6 @@ const DEDUPED: Record<string, true> = {
   nextInSeries: true,
   nearlyDone: true,
   startSeries: true,
-  newReadalouds: true,
   toRead: true,
   recentlyAdded: true,
 }
@@ -118,8 +114,8 @@ export function isPaused(book: HomeBook, now: number) {
 
 /**
  * Every Home section for these inputs, in the reader's order, without the
- * hidden ones. With `dedupe`, a book shown by an earlier suggestion section
- * is left out of later ones; collections and web shelves are never deduped.
+ * hidden ones. With `dedupe`, suggested books are left out of later
+ * suggestion rows. The Shortlist, collections and web shelves stay intact.
  */
 export function buildHomeSections<Book extends HomeBook>(
   inputs: HomeInputs<Book>,
@@ -248,33 +244,6 @@ export function buildHomeSections<Book extends HomeBook>(
         viewAll: { pathname: "/series", params: { filter: "notStarted" } },
       },
     ],
-    newReadalouds: () => [
-      {
-        id: "newReadalouds",
-        preferenceId: "newReadalouds",
-        title: "New read-alongs",
-        items: reading
-          .filter((book) => {
-            if (book.readaloud?.status !== "ALIGNED") return false
-            if (isInProgress(book) || isFinished(book)) return false
-            const ready = new Date(book.alignedAt ?? book.createdAt).valueOf()
-            return now - ready <= NEW_READALOUD_DAYS * DAY
-          })
-          .sort(
-            (a, b) =>
-              new Date(b.alignedAt ?? b.createdAt).valueOf() -
-              new Date(a.alignedAt ?? a.createdAt).valueOf(),
-          )
-          .map((book) => ({
-            book,
-            reason: `Ready ${timeAgo(new Date(book.alignedAt ?? book.createdAt).valueOf(), now)}`,
-          })),
-        viewAll: {
-          pathname: "/shelf/[type]",
-          params: { type: "new-readalouds" },
-        },
-      },
-    ],
     toRead: () => [
       {
         id: "toRead",
@@ -376,7 +345,10 @@ export function buildHomeSections<Book extends HomeBook>(
     .flatMap((id) => build[id]?.() ?? [])
     .map((section) => {
       if (!inputs.dedupe || !DEDUPED[section.preferenceId]) return section
-      const items = section.items.filter(({ book }) => !claimed.has(book.uuid))
+      const items =
+        section.preferenceId === "shortlist"
+          ? section.items
+          : section.items.filter(({ book }) => !claimed.has(book.uuid))
       const limit =
         section.preferenceId === "jumpBackIn" ? JUMP_BACK_IN_LIMIT : Infinity
       const shown = items.slice(0, limit)

@@ -1,5 +1,5 @@
 import { Link, useRouter } from "expo-router"
-import { BookOpen, Flag, Headphones } from "lucide-react-native"
+import { BookOpen, BookmarkCheck, Headphones } from "lucide-react-native"
 import { Pressable, View, type ViewStyle } from "react-native"
 
 import { type BookWithRelations } from "@/database/books"
@@ -196,11 +196,13 @@ export function BookThumbnail({
         />
         {shortlisted && (
           <View
-            className="bg-primary absolute top-1 left-1 z-50 rounded-full p-1"
+            // Covers sit at the bottom of the box (square audiobook art is
+            // shorter than it), so anchor the badge there, not at the top.
+            className="bg-primary absolute bottom-1 left-1 z-50 rounded-full p-1"
             accessibilityLabel="On your Shortlist"
           >
             <Icon
-              as={Flag}
+              as={BookmarkCheck}
               size={Math.max(12, Math.round(width / 10))}
               className="text-primary-foreground"
             />

@@ -4,10 +4,12 @@ import {
 } from "@storyteller/web/src/recommendations/types"
 import { Image } from "expo-image"
 import { Link } from "expo-router"
-import { Pressable, View } from "react-native"
+import { ActivityIndicator, Pressable, View } from "react-native"
 
+import { useColorTheme } from "@/hooks/useColorTheme"
 import { cn } from "@/lib/utils"
 import {
+  ROUND_PROGRESS_STEPS,
   recommendationPickHref,
   resolvedWorkHref,
   stageLabel,
@@ -129,15 +131,75 @@ export function PickCard({
 }
 
 export function RoundProgress({ round }: { round: RoundView }) {
+  const { foreground } = useColorTheme()
   if (round.status === "done") return null
+  const failed = round.status === "failed"
   return (
-    <Text
-      className="text-muted-foreground text-sm"
-      accessibilityLiveRegion="polite"
+    <View
+      className={cn(
+        "bg-card w-full max-w-lg items-center gap-3 self-center rounded-xl border p-4 sm:p-6",
+        failed ? "border-destructive/50" : "border-primary/40",
+      )}
     >
-      {round.status === "running"
-        ? stageLabel(round.stage)
-        : (round.error ?? "Could not finish this round. Try again.")}
-    </Text>
+      {failed ? (
+        <>
+          <Text variant="h4" className="text-destructive text-center">
+            Couldn’t finish your picks
+          </Text>
+          <Text className="text-center" accessibilityLiveRegion="polite">
+            {round.error ?? "Something went wrong while finding your books."}
+          </Text>
+          <Text className="text-muted-foreground text-center text-sm">
+            Try again when you’re ready.
+          </Text>
+        </>
+      ) : (
+        <>
+          <View className="bg-primary/10 size-14 items-center justify-center rounded-full">
+            <ActivityIndicator
+              size="large"
+              color={foreground}
+              accessible={false}
+            />
+          </View>
+          <Text
+            variant="h4"
+            className="text-center"
+            accessibilityLiveRegion="polite"
+          >
+            {stageLabel(round.stage)}
+          </Text>
+          <View className="w-full flex-row gap-2">
+            {ROUND_PROGRESS_STEPS.map(({ stage, title }) => {
+              const current = round.stage === stage
+              return (
+                <View key={title} className="min-w-0 flex-1 gap-1.5">
+                  <View
+                    className={cn(
+                      "h-1 rounded-full",
+                      current ? "bg-primary" : "bg-muted",
+                    )}
+                  />
+                  <Text
+                    className={cn(
+                      "text-center text-xs leading-tight",
+                      current
+                        ? "text-primary font-bold"
+                        : "text-muted-foreground",
+                    )}
+                    accessibilityState={{ selected: current }}
+                  >
+                    {title}
+                  </Text>
+                </View>
+              )
+            })}
+          </View>
+          <Text className="text-muted-foreground text-center text-sm">
+            Usually under a minute
+          </Text>
+        </>
+      )}
+    </View>
   )
 }

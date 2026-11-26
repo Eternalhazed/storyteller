@@ -1,5 +1,11 @@
 import { skipToken } from "@reduxjs/toolkit/query"
 import {
+  MAX_SUBJECT_LENGTH,
+  MAX_SUBJECT_PICKS,
+  cleanSubject,
+  subjectKey,
+} from "@storyteller/web/src/recommendations/subjects"
+import {
   type FormatPreference,
   type InterviewAnswers,
   type InterviewGoal,
@@ -11,7 +17,12 @@ import { useState } from "react"
 import { View } from "react-native"
 
 import { requestErrorMessage } from "@/store/requestErrors"
-import { titleList } from "@/store/recommendations"
+import {
+  subjectChoices,
+  titleList,
+  toggleSeriesLength,
+  toggleSubject,
+} from "@/store/recommendations"
 import { serverApi } from "@/store/serverApi"
 import { type UUID } from "@/uuid"
 
@@ -28,11 +39,11 @@ export const SERIES_SHAPES: readonly Option<SeriesShape>[] = [
   ["standalone", "Standalone"],
   ["either", "Either"],
 ]
-export const SERIES_LENGTHS: readonly Option<SeriesLength>[] = [
+const LENGTH_OPTIONS: readonly Option<SeriesLength | "any">[] = [
+  ["any", "Any length"],
   ["short", "Short (2–4)"],
   ["medium", "Medium (5–9)"],
   ["long", "Long (10+)"],
-  ["any", "Any"],
 ]
 export const FORMATS: readonly Option<FormatPreference>[] = [
   ["read", "Read"],
@@ -56,7 +67,7 @@ export function ChoiceChips<Value extends string>({
   options: readonly Option<Value>[]
   selected: Value | readonly Value[] | null
   choose: (value: Value) => void
-  disabled?: boolean | undefined
+  disabled?: boolean | ((value: Value) => boolean) | undefined
 }) {
   return (
     <View className="flex-row flex-wrap gap-2">
@@ -70,14 +81,140 @@ export function ChoiceChips<Value extends string>({
             key={value}
             variant={active ? "default" : "outline"}
             size="flex"
-            disabled={disabled}
+            className="max-w-full"
+            disabled={
+              typeof disabled === "function" ? disabled(value) : disabled
+            }
+            accessibilityLabel={label}
             accessibilityState={{ selected: active }}
             onPress={() => choose(value)}
           >
-            <Text>{label}</Text>
+            <Text className="shrink" numberOfLines={1}>
+              {label}
+            </Text>
           </Button>
         )
       })}
+    </View>
+  )
+}
+
+export function SeriesLengthChips({
+  selected,
+  onChange,
+  disabled,
+}: {
+  selected: SeriesLength[]
+  onChange: (lengths: SeriesLength[]) => void
+  disabled: boolean
+}) {
+  return (
+    <View className="gap-2">
+      <Text>Series length (choose any that fit)</Text>
+      <ChoiceChips
+        options={LENGTH_OPTIONS}
+        selected={selected.length ? selected : "any"}
+        choose={(value) => onChange(toggleSeriesLength(selected, value))}
+        disabled={disabled}
+      />
+    </View>
+  )
+}
+
+export function SubjectPicker({
+  profile,
+  selected,
+  other = [],
+  onChange,
+  inputLabel,
+  disabled,
+}: {
+  profile: readonly string[]
+  selected: string[]
+  other?: readonly string[]
+  onChange: (subjects: string[]) => void
+  inputLabel: string
+  disabled: boolean
+}) {
+  const [draft, setDraft] = useState("")
+  const [custom, setCustom] = useState<string[]>([])
+  const [expanded, setExpanded] = useState(false)
+  const subjects = subjectChoices(profile, [...selected, ...other, ...custom])
+  const options = subjects.map((name) => [subjectKey(name), name] as const)
+  const selectedKeys = selected.map(subjectKey)
+  // The reader's own subjects and a few general ones first; the rest of the
+  // general list behind "More subjects", so the screen stays short.
+  const collapsedCount = Math.max(10, profile.length + 6)
+  const shown = expanded
+    ? options
+    : options.filter(
+        ([optionKey], index) =>
+          index < collapsedCount || selectedKeys.includes(optionKey),
+      )
+  const hiddenCount = options.length - shown.length
+  const atLimit = selected.length >= MAX_SUBJECT_PICKS
+  const name = cleanSubject(draft)
+  const key = subjectKey(name)
+  const canAdd = !disabled && !atLimit && !!key && !selectedKeys.includes(key)
+
+  function add() {
+    if (!canAdd) return
+    const existing = subjects.find((subject) => subjectKey(subject) === key)
+    if (!existing) setCustom([...custom, name])
+    onChange(toggleSubject(selected, existing ?? name))
+    setDraft("")
+  }
+
+  return (
+    <View className="gap-2">
+      <ChoiceChips
+        options={shown}
+        selected={selectedKeys}
+        choose={(value) => {
+          const option = options.find(([optionKey]) => optionKey === value)
+          if (option) onChange(toggleSubject(selected, option[1]))
+        }}
+        disabled={(value) =>
+          disabled || (atLimit && !selectedKeys.includes(value))
+        }
+      />
+      {(hiddenCount > 0 || expanded) && (
+        <Button
+          variant="ghost"
+          className="self-start"
+          accessibilityState={{ expanded }}
+          onPress={() => setExpanded(!expanded)}
+        >
+          <Text numberOfLines={1} className="text-primary">
+            {expanded ? "Fewer subjects" : `More subjects (${hiddenCount})`}
+          </Text>
+        </Button>
+      )}
+      {atLimit && (
+        <Text
+          className="text-muted-foreground text-sm"
+          accessibilityLiveRegion="polite"
+        >
+          Up to {MAX_SUBJECT_PICKS} subjects. Tap a selected subject to remove
+          it.
+        </Text>
+      )}
+      <View className="flex-row items-center gap-2">
+        <Input
+          className="min-w-0 flex-1"
+          accessibilityLabel={inputLabel}
+          placeholder="Add your own"
+          value={draft}
+          maxLength={MAX_SUBJECT_LENGTH}
+          onChangeText={setDraft}
+          onSubmitEditing={add}
+          returnKeyType="done"
+          editable={!disabled && !atLimit}
+        />
+        <Button variant="outline" disabled={!canAdd} onPress={add}>
+          <Text numberOfLines={1}>Add</Text>
+        </Button>
+      </View>
     </View>
   )
 }
@@ -120,22 +257,10 @@ function InterviewForm({
   const [length, setLength] = useState(initial.seriesLength)
   const [format, setFormat] = useState(initial.format)
   const [subjects, setSubjects] = useState<string[]>([])
-  const [freeText, setFreeText] = useState("")
   const [liked, setLiked] = useState("")
   const [asUsual, setAsUsual] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [start, { isLoading }] = serverApi.useStartRecommendationRoundMutation()
-  const subjectOptions = [
-    ...new Set([...initial.subjects, "Something new"]),
-  ].map((subject) => [subject, subject] as const)
-
-  function toggleSubject(subject: string) {
-    setSubjects((previous) =>
-      previous.includes(subject)
-        ? previous.filter((value) => value !== subject)
-        : [...previous, subject],
-    )
-  }
 
   async function submit(skip: boolean) {
     setError(null)
@@ -149,7 +274,6 @@ function InterviewForm({
           seriesShape: shape,
           seriesLength: length,
           subjects,
-          freeText: freeText.trim() || null,
           ...(initial.askFormat ? { format } : {}),
           saveAsUsual: asUsual,
         }
@@ -199,31 +323,21 @@ function InterviewForm({
           disabled={isLoading}
         />
         {shape !== "standalone" && (
-          <>
-            <Text>Series length</Text>
-            <ChoiceChips
-              options={SERIES_LENGTHS}
-              selected={length}
-              choose={setLength}
-              disabled={isLoading}
-            />
-          </>
+          <SeriesLengthChips
+            selected={length}
+            onChange={setLength}
+            disabled={isLoading}
+          />
         )}
       </View>
       <View className="gap-2">
         <Text variant="h4">Mood or subject</Text>
-        <ChoiceChips
-          options={subjectOptions}
+        <SubjectPicker
+          profile={initial.subjects}
           selected={subjects}
-          choose={toggleSubject}
+          onChange={setSubjects}
+          inputLabel="Add a custom mood or subject"
           disabled={isLoading}
-        />
-        <Input
-          accessibilityLabel="Other subjects"
-          placeholder="Anything else you’re in the mood for"
-          value={freeText}
-          onChangeText={setFreeText}
-          editable={!isLoading}
         />
       </View>
       {initial.askFormat && (
