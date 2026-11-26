@@ -63,38 +63,44 @@ again**.
 
 ## Home
 
-Home is built from sections, each shown only when it has books. A book appears
-in one section at most, and suggested books carry a short line saying why
-they're there.
+Home is built from sections, each shown only when it has books. A suggested book
+appears in one section at most and carries a short line saying why it's there.
+Requests you've made show at the top with their live progress (downloading,
+syncing narration, ready to read).
 
-- **Continue reading** or **Continue listening** — the book you last had open,
-  in the same format, with your chapter and progress. A read-along offers both
-  **Listen** and **Read along**. If you were reading it on another device and it
-  isn't downloaded here, tap **Download & continue**; it opens once the download
-  finishes.
+- **Continue reading** or **Continue listening** — a slim strip for the book you
+  last had open, in the same format, with your progress. A read-along offers
+  both **Listen** and **Read along**. If you were reading it on another device
+  and it isn't downloaded here, tap the download button; it opens once the
+  download finishes.
 - **Jump back in** — other books you've opened in the last two weeks.
-- **Shortlist** — books you've flagged to read soon, in your order.
+- **Shortlist** — books you've bookmarked to read soon, in your order. It shows
+  every bookmarked book, even one already in another row.
 - **Next in your series** — for each series you've started, the next book after
   the furthest one you've finished.
+- **For you** — recommendations, with **Ask the reading helper** (see
+  [Ask and recommendations](../managing/recommendations.md)). **Discover** in
+  the Home header opens the full Recommendations screen.
 - **Nearly done** — books more than half read that you haven't opened for two
   weeks.
 - **Start a new series** — the first book you own of each series you haven't
   started.
-- **New read-alongs** — books that finished syncing in the last month.
 - **To read** — unstarted books that aren't part of a series.
 - **Recently added**, then **Magazines**.
 
-Books you haven't touched for two months move to **Paused**, a link at the end
-of Home. To hide, show or reorder sections, change the cover size, or show a row
+Books you started but haven't opened for two months move to **Paused**, a link
+at the end of Home, so they don't crowd your other rows. To hide, show or
+reorder sections (hold and drag a section), change the cover size, or show a row
 for each of your collections, open the Home menu and choose **Customize home**.
 Shelves you build in the web app appear as Home sections too.
 
 ## Shortlist
 
-Flag a book for your Shortlist from its long-press menu, the **Shortlist**
-button on its page, or by choosing **Shortlist** in its status picker. Flagged
-books show a small flag on their cover. Open the Shortlist from the top of Home
-to see it in full and use **Edit order** to rearrange it.
+Bookmark a book for your Shortlist from its long-press menu, the **Add to
+Shortlist** button on its page, or by choosing **Shortlist** in its status
+picker. Bookmarked books show a small bookmark on their cover. Open the
+Shortlist from its Home row to see it in full and use **Edit order** to
+rearrange it.
 
 A book leaves the Shortlist when you start it, or when you finish it if you
 change that in **Settings → Shortlist**. The Shortlist belongs to your account,

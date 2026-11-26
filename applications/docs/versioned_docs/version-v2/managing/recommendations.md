@@ -15,12 +15,14 @@ is hidden.
 
 ## Setting it up
 
-| Setting                             | Meaning                                                                               |
-| ----------------------------------- | ------------------------------------------------------------------------------------- |
-| Anthropic API key                   | Shared with X-Ray.                                                                    |
-| Recommendation model                | Picks and ranks books and writes the reasons. Default `claude-sonnet-5-5`.            |
-| Fast recommendation model           | Reads what readers type and helps match imported history. Default `claude-haiku-5-5`. |
-| Monthly recommendation budget (USD) | Weekly and automatic picks stop for the month once spent. Default 5.                  |
+| Setting                             | Meaning                                                                                     |
+| ----------------------------------- | ------------------------------------------------------------------------------------------- |
+| Anthropic API key                   | Shared with X-Ray.                                                                          |
+| Recommendation model                | Picks and ranks books and writes the reasons. Default `claude-sonnet-5-5`.                  |
+| Fast recommendation model           | Reads what readers type and helps match imported history. Default `claude-haiku-5-5`.       |
+| Monthly recommendation budget (USD) | Weekly and automatic picks and the reading helper stop for the month once spent. Default 5. |
+| OpenRouter API key                  | Optional. Turns on dictation (the microphone) in the reading helper.                        |
+| Speech model                        | The OpenRouter transcription model for dictation. Default `microsoft/mai-transcribe-2`.     |
 
 Book data comes from public catalogs (Audible's catalog for audiobooks, series
 and similar titles; Open Library for ISBNs and books without an audiobook). No
@@ -32,21 +34,34 @@ spent.
 
 ## What readers see
 
-- **Ask**, from the app's Recommendations screen or from Search when nothing in
-  the library matches. Named books come back as cards that say what is already
-  true: on your shelf, on your To read, in the library (never whose), or Get. A
-  title that could mean several books asks which one; a title the catalog does
-  not know says so instead of guessing.
+- **Reading helper**, from Home ("Ask the reading helper…" under For you), the
+  Discover button in the Home header, the Recommendations screen, or Search when
+  nothing in the library matches. It opens with a few starting points drawn from
+  the reader's own history ("Next in Aubrey-Maturin", "More like Master and
+  Commander", "Start a new series", "I just finished…"), asks at most a short
+  question at a time with tap-to-answer choices, and then acts: it looks up
+  named books, finds picks for what the reader described, or finds what to read
+  after a finished book. It only talks about books and never requests anything
+  by itself. Named books come back as cards that say what is already true: on
+  your shelf, on your To read, in the library (never whose), or Get. A title
+  that could mean several books asks which one; a title the catalog does not
+  know says so instead of guessing.
+- **Dictation**: with an OpenRouter key set, the helper shows a microphone. The
+  reader records up to a minute; the server converts it and sends it to the
+  speech model, and the text lands in the message box to edit or send.
+  Recordings are not stored.
 - **For you** on Home: six to eight picks, hideable in Customize home.
 - **Recommendations**: picks in three sections (Missing from your series, From
   your lists, Discover), plus "For what you asked" after the reader steers the
   picks and "Because you finished …" after they finish a book. Each pick has a
   short reason and the facts it rests on. Readers can Get, Save, mark it already
-  read, put it off for eight weeks, or turn it down for good.
-- **Tune**: a few questions (what they are after, series or standalone, series
-  length, subjects, format) that steer one set of picks, optionally saved as
-  their usual preferences. Series length is a preference, never a filter: a
-  strong shorter series still shows, labeled.
+  read, put it off for eight weeks, or turn it down for good. While picks are
+  being found, a progress card shows each step.
+- **Tune**: a few questions (what they are after, series or standalone, one or
+  more series lengths, subjects, format) that steer one set of picks, optionally
+  saved as their usual preferences. Subjects list the reader's own first, then
+  common genres and moods, and readers can add their own. Series length is a
+  preference, never a filter: a strong shorter series still shows, labeled.
 
 ## When picks refresh
 
