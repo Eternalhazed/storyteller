@@ -7,7 +7,7 @@ import { findLibraryCopies, findWorkInLibrary } from "@/requests/library"
 import { type UUID } from "@/uuid"
 
 import { type AiConfig } from "./ai"
-import { entryPoint, isReleased, readableLanguage } from "./candidates"
+import { isReleased, nextInSeries, readableLanguage } from "./candidates"
 import { type AskParse, parseAsk } from "./model"
 import { loadReaderData } from "./reader"
 import { startRound, toPickWork } from "./rounds"
@@ -110,33 +110,52 @@ async function seriesBook(
   const catalog = getCatalog()
   const asked =
     number == null ? `the next ${series} book` : `${series} #${number}`
+  const data = await loadReaderData(
+    userId,
+    preferencesOf(await getReader(userId)),
+  )
   const hits = [
     ...(await catalog.search({ title: series, author, limit: 10 })),
     ...(author ? await catalog.worksByAuthor(author, 50) : []),
   ]
   // "Frontlines" is the series of that name, not "Frontlines: Evolution".
-  const pick = (refs: CatalogWork["series"]) =>
-    refs.find((each) => normalizeText(each.name) === normalizeText(series)) ??
-    refs.find((each) => sameSeriesName(each.name, series))
-  let ref = pick(hits.flatMap((work) => work.series))
+  const named = (refs: CatalogWork["series"]) => [
+    ...refs.filter(
+      (each) => normalizeText(each.name) === normalizeText(series),
+    ),
+    ...refs.filter((each) => sameSeriesName(each.name, series)),
+  ]
+  // The listing the reader's own books sit in comes first. A catalog can hold
+  // several listings under one name (box sets, other editions), some empty.
+  const keys = [
+    ...data.books.flatMap((book) =>
+      book.series?.key && sameSeriesName(book.series.name, series)
+        ? [book.series.key]
+        : [],
+    ),
+    ...named(hits.flatMap((work) => work.series)).map((ref) => ref.key),
+  ]
   // Ebook-only matches carry no series: look a few of them up again.
-  for (const hit of hits.filter((work) => !work.series.length).slice(0, 3)) {
-    if (ref) break
-    const resolved = await catalog.resolve({
-      title: hit.title,
-      authors: hit.authors,
-    })
-    ref = pick(resolved?.work.series ?? [])
+  if (!keys.length) {
+    for (const hit of hits.filter((work) => !work.series.length).slice(0, 3)) {
+      const resolved = await catalog.resolve({
+        title: hit.title,
+        authors: hit.authors,
+      })
+      keys.push(...named(resolved?.work.series ?? []).map((ref) => ref.key))
+      if (keys.length) break
+    }
   }
-  if (!ref) return { kind: "missing", asked }
-  const found = (await catalog.getSeries([ref.key])).get(ref.key)
+  const unique = [...new Set(keys)].slice(0, 6)
+  if (!unique.length) return { kind: "missing", asked }
+  const listings = await catalog.getSeries(unique)
+  const found = unique
+    .map((key) => listings.get(key))
+    .find((listing) => !!listing?.books.length)
   if (!found) return { kind: "missing", asked }
   const entry =
     number == null
-      ? entryPoint(
-          found,
-          await loadReaderData(userId, preferencesOf(await getReader(userId))),
-        )
+      ? nextInSeries(found, data)
       : (found.books.find((book) => book.position === number) ?? null)
   if (!entry || !usable(entry.work)) return { kind: "missing", asked }
   return {

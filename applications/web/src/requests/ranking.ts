@@ -1,4 +1,4 @@
-import { mergeInitials } from "@/catalog/normalize"
+import { mergeInitials, titleWithoutSubtitle } from "@/catalog/normalize"
 
 import { type ChosenWork, type Release, type RequestFormat } from "./types"
 
@@ -56,13 +56,19 @@ function namesMatch(a: string, b: string): boolean {
   return normalize(a) === normalize(b)
 }
 
-/** The release names the confirmed work, or one of its other titles. */
+/**
+ * The release names the confirmed work, or one of its other titles. A catalog
+ * title often carries a subtitle or edition ("Moby-Dick: Annotated Edition")
+ * that release names leave out, so the title before it counts too.
+ */
 function matchesWork(release: Release, work: ChosenWork): boolean {
-  const title = normalize(release.title)
-  return [work.title, ...(work.altTitles ?? [])].some((name) => {
-    const wanted = normalize(name)
-    return !!wanted && title.includes(wanted)
-  })
+  const title = ` ${normalize(release.title)} `
+  return [work.title, ...(work.altTitles ?? [])]
+    .flatMap((name) => [name, titleWithoutSubtitle(name)])
+    .some((name) => {
+      const wanted = normalize(name)
+      return !!wanted && title.includes(` ${wanted} `)
+    })
 }
 
 function hasFileType(release: Release, type: string): boolean | null {

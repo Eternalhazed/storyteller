@@ -56,6 +56,7 @@ import {
   type RoundKind,
   type RoundTrigger,
   type Section,
+  ROUND_REPLACED,
   normalizeSeriesLengths,
 } from "./types"
 import {
@@ -140,7 +141,9 @@ export async function drainRounds(): Promise<void> {
  * Start a round for a reader. A repeat of a request that is still running
  * (a second tap) returns that round; an automatic round returns whatever is
  * running. A different request from the reader queues its own round, ahead
- * of automatic ones, so they see picks for what they asked.
+ * of automatic ones, so they see picks for what they asked. A wish or tune
+ * that has not started yet is dropped when the reader refines it, so an older
+ * wish never finishes after, and replaces, the newer one.
  */
 export async function startRound(
   userId: UUID,
@@ -160,6 +163,7 @@ export async function startRound(
     )
     if (same) return same
   }
+  if (REFINES.includes(trigger)) await dropQueuedWishes(userId)
   const round = await createRound({
     userId,
     trigger,
@@ -168,6 +172,22 @@ export async function startRound(
   })
   void enqueue(round.uuid, onDemand)
   return round
+}
+
+const REFINES: RoundTrigger[] = ["tune", "wish"]
+
+/** A reader's tune and wish rounds still waiting in the queue, not yet run. */
+async function dropQueuedWishes(userId: UUID): Promise<void> {
+  const state = queue()
+  for (const uuid of [...state.pending]) {
+    const round = await getRound(uuid)
+    if (!round || round.userId !== userId || !REFINES.includes(round.trigger))
+      continue
+    const at = state.pending.indexOf(uuid)
+    if (at === -1) continue
+    state.pending.splice(at, 1)
+    await failRound(uuid, ROUND_REPLACED)
+  }
 }
 
 const ON_DEMAND: RoundTrigger[] = [

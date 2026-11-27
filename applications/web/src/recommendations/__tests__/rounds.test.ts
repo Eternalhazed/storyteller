@@ -500,6 +500,23 @@ describe("rounds and restarts", () => {
     ).toBe("done")
   })
 
+  it("drops a queued wish the reader refined, so the newest wish lands last", async () => {
+    await ensureReader(reader)
+    const first = await startRound(reader, "wish", { wish: "sea stories" })
+    const middle = await startRound(reader, "wish", { wish: "sea, standalone" })
+    const last = await startRound(reader, "wish", {
+      wish: "sea, standalone, short",
+    })
+    await drainRounds()
+    const rounds = await getRounds(reader)
+    const status = (uuid: UUID) =>
+      rounds.find((each) => each.uuid === uuid)?.status
+    // the first had already started; it is never cut off
+    expect(status(first.uuid)).toBe("done")
+    expect(status(middle.uuid)).toBe("failed")
+    expect(status(last.uuid)).toBe("done")
+  })
+
   it("keeps the previous picks when a round fails", async () => {
     await round()
     const before = titles((await view()).forYou)

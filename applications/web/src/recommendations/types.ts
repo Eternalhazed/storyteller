@@ -25,6 +25,9 @@ export const SECTION_TITLES: Record<Section, string> = {
   discover: "Discover",
 }
 
+/** Why a reader's queued wish or tune round stopped: they asked again. */
+export const ROUND_REPLACED = "Replaced by a newer request"
+
 export const PICK_STATES = [
   "new",
   "requested",

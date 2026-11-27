@@ -21,9 +21,11 @@ import { type UUID } from "@/uuid"
 import {
   FakeCatalog,
   FakeModel,
+  fakeUniverse,
   privateShelf,
   seedLibraryBook,
   seedReader,
+  work,
 } from "./fixtures"
 
 const AI = {
@@ -221,6 +223,80 @@ describe("Reading helper", () => {
       intent: "next",
       anchor: { title: LOVED_TITLE, read: true },
       round: { trigger: "finished" },
+    })
+  })
+
+  describe("the next book of a named series", () => {
+    const AUBREY = "Aubrey/Maturin"
+    const nextAubrey = () =>
+      act({
+        kind: "find_books",
+        books: [{ title: AUBREY, author: null, series: AUBREY, number: null }],
+      })
+
+    function readAubrey(positions: number[]) {
+      const titles = [
+        "Master and Commander",
+        "Post Captain",
+        "HMS Surprise",
+        "The Mauritius Command",
+      ]
+      const shelf = privateShelf(ctx, reader)
+      for (const position of positions) {
+        seedLibraryBook(ctx, {
+          title: titles[position - 1]!,
+          author: "Patrick O'Brian",
+          shelf,
+          reader,
+          status: "Read",
+          series: { name: AUBREY, position },
+        })
+      }
+    }
+
+    it("skips a listing under the same name that holds no books", async () => {
+      const universe = fakeUniverse()
+      const decoy = work(
+        "audible:BOX",
+        "Aubrey/Maturin Box Set",
+        "Patrick O'Brian",
+        {
+          series: [{ key: "audible:AMX", name: AUBREY, position: 9 }],
+        },
+      )
+      const catalog = new FakeCatalog({
+        ...universe,
+        works: [decoy, ...universe.works],
+        series: [
+          {
+            key: "audible:AMX",
+            name: AUBREY,
+            authors: [],
+            books: [],
+            latestReleaseDate: null,
+          },
+          ...universe.series,
+        ],
+      })
+      setCatalogForTests(catalog)
+      readAubrey([1, 2])
+      output = { reply: "I’ll look it up.", chips: [], action: nextAubrey() }
+      const turn = await send(`Next in ${AUBREY}`)
+      expect(turn.result).toMatchObject({
+        intent: "get",
+        cards: [{ work: { title: "HMS Surprise" }, series: { position: 3 } }],
+        notFound: [],
+      })
+    })
+
+    it("continues after the furthest book read, not an earlier one skipped", async () => {
+      readAubrey([3])
+      output = { reply: "I’ll look it up.", chips: [], action: nextAubrey() }
+      const turn = await send(`Next in ${AUBREY}`)
+      expect(turn.result).toMatchObject({
+        intent: "get",
+        cards: [{ work: { title: "The Mauritius Command" } }],
+      })
     })
   })
 

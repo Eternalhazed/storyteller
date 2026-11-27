@@ -141,6 +141,27 @@ export function entryPoint(
   )
 }
 
+/**
+ * "The next book" of a series the reader named: the first released one after
+ * the furthest they have read (Lonesome Dove read, so Streets of Laredo, not
+ * the prequel numbered #1). With nothing after it, the first one they missed.
+ */
+export function nextInSeries(
+  series: CatalogSeries,
+  data: ReaderData,
+): { position: number; work: CatalogWork } | null {
+  const read = readPositions(series, data)
+  const furthest = Math.max(0, ...read)
+  return (
+    series.books.find(
+      (entry) =>
+        entry.position > furthest &&
+        !read.has(entry.position) &&
+        isReleased(entry.work),
+    ) ?? entryPoint(series, data)
+  )
+}
+
 /** Attach series data and move a mid-series pick to the reader's entry point. */
 export async function placeInSeries(
   candidates: Candidate[],

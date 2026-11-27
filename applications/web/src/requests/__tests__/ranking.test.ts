@@ -94,4 +94,17 @@ describe("ranking recorded search results", () => {
     assert.strictEqual(pair.audio, null)
     assert.strictEqual(pair.ebook, null)
   })
+
+  it("matches a release named by the main title of a subtitled catalog work", () => {
+    const [epub] = releases.filter((release) => release.id === "e-epub")
+    const rank = (releaseTitle: string, workTitle: string) =>
+      rankReleases([{ ...epub!, title: releaseTitle }], "ebook", {
+        ...context,
+        work: { ...context.work, title: workTitle, altTitles: [] },
+      })[0]?.flags.includes("title-differs")
+    assert.strictEqual(rank("Moby Dick", "Moby-Dick: Annotated Edition"), false)
+    assert.strictEqual(rank("Moby Dick (2003)", "Moby-Dick"), false)
+    // a title inside another word is not a match
+    assert.strictEqual(rank("Itinerary", "It"), true)
+  })
 })
