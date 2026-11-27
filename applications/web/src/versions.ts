@@ -29,8 +29,11 @@ export function releaseChannelTags(version: string): string[] {
 }
 
 export function compareVersions(version1: string, version2: string) {
-  const [_, v1Version, beta1] = version1.match(/(.*?)(?:-(\w*\.\d+))?$/) ?? []
-  const [__, v2Version, beta2] = version2.match(/(.*?)(?:-(\w*\.\d+))?$/) ?? []
+  // Build metadata ("+fork.abc123") never affects precedence (SemVer 10)
+  const [_, v1Version, beta1] =
+    version1.replace(/\+.*$/, "").match(/(.*?)(?:-(\w*\.\d+))?$/) ?? []
+  const [__, v2Version, beta2] =
+    version2.replace(/\+.*$/, "").match(/(.*?)(?:-(\w*\.\d+))?$/) ?? []
   const [beta1Tag, beta1Version] = beta1?.split(".") ?? []
   const [beta2Tag, beta2Version] = beta2?.split(".") ?? []
 
