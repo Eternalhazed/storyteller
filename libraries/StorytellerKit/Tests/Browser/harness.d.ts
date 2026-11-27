@@ -108,6 +108,16 @@ interface ReaderHarness {
     width?: number
   }): Promise<void>
   turnPage(direction?: "next" | "prev"): Promise<unknown>
+  // A touch that lifts before any scroll, optionally followed by momentum.
+  flick(
+    direction: number,
+    options?: {
+      delay?: number
+      travel?: number
+      scroll?: boolean
+      touch?: boolean
+    },
+  ): Promise<void>
   snapshot(): ReaderSnapshot
 }
 declare global {
