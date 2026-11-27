@@ -1,5 +1,6 @@
 import {
   type PickView,
+  ROUND_REPLACED,
   type RoundView,
 } from "@storyteller/web/src/recommendations/types"
 import { Image } from "expo-image"
@@ -62,6 +63,17 @@ export function PickBadges({ pick }: { pick: PickView }) {
   )
 }
 
+/** "Patrick O'Brian · Aubrey/Maturin #5" */
+function byline(pick: PickView): string {
+  const series = pick.series ?? pick.work.series
+  return [
+    pick.work.authors[0],
+    series && `${series.name}${series.position ? ` #${series.position}` : ""}`,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
 export function PickCard({
   pick,
   serverUuid,
@@ -103,6 +115,11 @@ export function PickCard({
             >
               {pick.work.title}
             </Text>
+            {!horizontal && !!byline(pick) && (
+              <Text numberOfLines={1} className="text-muted-foreground text-xs">
+                {byline(pick)}
+              </Text>
+            )}
             <Text
               numberOfLines={horizontal ? 1 : 2}
               className="text-muted-foreground text-sm"
@@ -133,6 +150,13 @@ export function PickCard({
 export function RoundProgress({ round }: { round: RoundView }) {
   const { foreground } = useColorTheme()
   if (round.status === "done") return null
+  if (round.status === "failed" && round.error === ROUND_REPLACED) {
+    return (
+      <Text className="text-muted-foreground text-sm">
+        Replaced by your newer request.
+      </Text>
+    )
+  }
   const failed = round.status === "failed"
   return (
     <View

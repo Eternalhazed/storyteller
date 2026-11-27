@@ -307,7 +307,7 @@ export default function Home() {
               coverSize={home.coverSize}
               href={section.viewAll ?? undefined}
               emptyMessage={
-                section.id === "shortlist"
+                section.id === "shortlist" && books.length > 0
                   ? "Bookmark books to save them here."
                   : undefined
               }

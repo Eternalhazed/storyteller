@@ -588,7 +588,9 @@ function Picker({
           ))}
           {!config.collections.length && (
             <Text className="text-muted-foreground">
-              There are no private shelves available on this account.
+              Requested books go on a shelf only you can see, and this account
+              doesn’t have one yet. Ask whoever runs this server to add a
+              collection shared only with you; it will show up here.
             </Text>
           )}
           {savingShelf && (

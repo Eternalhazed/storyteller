@@ -92,7 +92,7 @@ function ServerHomeRequests({
   }
 
   return (
-    <View className="mr-6 max-w-3xl gap-3">
+    <View className="mr-3 gap-3">
       {requests.map((request) => (
         <RequestSummary
           key={request.uuid}

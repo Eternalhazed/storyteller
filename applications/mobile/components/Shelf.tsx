@@ -65,7 +65,7 @@ export function Shelf({
           {label}
         </Text>
 
-        {href && (
+        {href && items.length > 0 && (
           <TouchableOpacity
             accessibilityLabel={`View all ${label} books`}
             accessibilityRole="button"

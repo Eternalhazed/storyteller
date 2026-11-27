@@ -43,9 +43,12 @@ spent.
   named books, finds picks for what the reader described, or finds what to read
   after a finished book. It only talks about books and never requests anything
   by itself. Named books come back as cards that say what is already true: on
-  your shelf, on your To read, in the library (never whose), or Get. A title
-  that could mean several books asks which one; a title the catalog does not
-  know says so instead of guessing.
+  your shelf, on your To read, in the library (never whose), requested (with its
+  progress), or Get. "The next book" of a series is the one after the furthest
+  the reader has read. A title that could mean several books asks which one; a
+  title the catalog does not know says so instead of guessing. Follow-ups such
+  as "the second one in that series" work from the cards already shown, and
+  every answer ends with a few next steps to tap.
 - **Dictation**: with an OpenRouter key set, the helper shows a microphone. The
   reader records up to a minute; the server converts it and sends it to the
   speech model, and the text lands in the message box to edit or send.

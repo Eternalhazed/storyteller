@@ -25,7 +25,7 @@ export function HomeRecommendations({
   if (!feed) return null
   return (
     <View className="gap-2">
-      <View className="mr-safe-or-4 flex-row items-baseline justify-between gap-3">
+      <View className="flex-row items-baseline justify-between gap-3 pr-3">
         <View className="min-w-0 flex-1">
           {/* Same heading as the other Home rows (see Shelf). */}
           <Text
@@ -42,7 +42,7 @@ export function HomeRecommendations({
         </View>
         <Link href={recommendationsHref(serverUuid)} asChild>
           <Pressable accessibilityRole="button" hitSlop={8}>
-            <Text className="text-primary text-sm">See all</Text>
+            <Text className="text-primary text-sm">View all</Text>
           </Pressable>
         </Link>
       </View>
@@ -50,7 +50,7 @@ export function HomeRecommendations({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Ask the reading helper"
-          className="border-border bg-card mr-safe-or-4 max-w-3xl flex-row items-center gap-3 rounded-full border px-4 py-3"
+          className="border-border bg-card mr-3 flex-row items-center gap-3 rounded-full border px-4 py-3"
         >
           <Icon as={Sparkles} size={20} className="text-primary" />
           <Text numberOfLines={1} className="text-muted-foreground flex-1">
@@ -59,7 +59,7 @@ export function HomeRecommendations({
         </Pressable>
       </Link>
       {feed.running && (
-        <View className="bg-muted mr-safe-or-4 flex-row items-center gap-2 self-start rounded-md px-3 py-2">
+        <View className="bg-muted mr-3 flex-row items-center gap-2 self-start rounded-md px-3 py-2">
           <ActivityIndicator
             size="small"
             color={foreground}

@@ -1,7 +1,13 @@
 import { useRouter } from "expo-router"
-import { BookOpen, Download, Headphones, RotateCcw } from "lucide-react-native"
+import {
+  BookOpen,
+  Download,
+  Headphones,
+  type LucideIcon,
+  RotateCcw,
+} from "lucide-react-native"
 import { useEffect, useState } from "react"
-import { Pressable, View } from "react-native"
+import { Pressable, View, useWindowDimensions } from "react-native"
 
 import { type BookWithRelations } from "@/database/books"
 import { useEffectEvent } from "@/hooks/useEffectEvent"
@@ -57,6 +63,9 @@ export function ContinueReading({
     .join(" · ")
   const listening = session.mode === "listening"
   const author = book.authors[0]?.name
+  // Tablets have room to name each button; phones keep icons.
+  const labelled = useWindowDimensions().width >= 600
+  const hasCover = hasTextCover(book) || hasAudioCover(book)
 
   const [downloadBook] = useDownloadBookMutation()
   const activity = useAppSelector((state) => state.transferFeedback.download)
@@ -103,23 +112,26 @@ export function ContinueReading({
       : details
 
   return (
-    <View className="border-border bg-card mr-6 max-w-3xl flex-row items-center gap-2 rounded-xl border p-2">
+    <View className="border-border bg-card mr-3 flex-row items-center gap-3 rounded-xl border p-2">
       <Pressable
         accessibilityRole="link"
         accessibilityLabel={`Details for ${book.title}`}
         onPress={openDetails}
         className="bg-secondary h-16 w-11 shrink-0 items-center justify-center overflow-hidden rounded"
       >
-        <Icon
-          as={listening ? Headphones : BookOpen}
-          size={18}
-          className="text-muted-foreground absolute"
-        />
-        {listening || (!hasTextCover(book) && hasAudioCover(book)) ? (
-          <AudiobookCover book={book} />
-        ) : (
-          <EbookCover book={book} />
+        {!hasCover && (
+          <Icon
+            as={listening ? Headphones : BookOpen}
+            size={18}
+            className="text-muted-foreground"
+          />
         )}
+        {hasCover &&
+          (listening || (!hasTextCover(book) && hasAudioCover(book)) ? (
+            <AudiobookCover book={book} />
+          ) : (
+            <EbookCover book={book} />
+          ))}
       </Pressable>
       <View className="min-w-0 flex-1 gap-1">
         <Pressable accessibilityRole="link" onPress={openDetails}>
@@ -146,17 +158,19 @@ export function ContinueReading({
           </Text>
         )}
       </View>
-      <View className="shrink-0 flex-row items-center gap-1">
+      <View className="shrink-0 flex-row items-center gap-2">
         {needsDownload ? (
           canDownload && (
-            <Button
-              size="icon"
-              className="min-h-11 min-w-11"
+            <StripButton
+              icon={downloadState.action === "retry" ? RotateCcw : Download}
+              label={downloadState.action === "retry" ? "Retry" : "Download"}
               accessibilityLabel={
                 downloadState.action === "retry"
                   ? `Retry download and continue ${book.title}`
                   : `Download and continue ${book.title}`
               }
+              labelled={labelled}
+              primary
               onPress={() => {
                 setOpenWhenReady(true)
                 void downloadBook({
@@ -164,62 +178,68 @@ export function ContinueReading({
                   format: session.format,
                 })
               }}
-            >
-              <Icon
-                as={downloadState.action === "retry" ? RotateCcw : Download}
-                size={18}
-                className="text-primary-foreground"
-              />
-            </Button>
+            />
           )
         ) : session.format === "readaloud" ? (
           <>
-            <Button
-              size="icon"
-              className="min-h-11 min-w-11"
-              variant={listening ? "default" : "secondary"}
+            <StripButton
+              icon={Headphones}
+              label="Listen"
               accessibilityLabel={`Listen to ${book.title}`}
+              labelled={labelled}
+              primary={listening}
               onPress={() => open("listening")}
-            >
-              <Icon
-                as={Headphones}
-                size={18}
-                className={
-                  listening ? "text-primary-foreground" : "text-foreground"
-                }
-              />
-            </Button>
-            <Button
-              size="icon"
-              className="min-h-11 min-w-11"
-              variant={listening ? "secondary" : "default"}
+            />
+            <StripButton
+              icon={BookOpen}
+              label="Read along"
               accessibilityLabel={`Read along with ${book.title}`}
+              labelled={labelled}
+              primary={!listening}
               onPress={() => open("reading")}
-            >
-              <Icon
-                as={BookOpen}
-                size={18}
-                className={
-                  listening ? "text-foreground" : "text-primary-foreground"
-                }
-              />
-            </Button>
+            />
           </>
         ) : (
-          <Button
-            size="icon"
-            className="min-h-11 min-w-11"
+          <StripButton
+            icon={listening ? Headphones : BookOpen}
+            label={listening ? "Listen" : "Read"}
             accessibilityLabel={`${listening ? "Listen to" : "Read"} ${book.title}`}
+            labelled={labelled}
+            primary
             onPress={() => open(session.mode)}
-          >
-            <Icon
-              as={listening ? Headphones : BookOpen}
-              size={18}
-              className="text-primary-foreground"
-            />
-          </Button>
+          />
         )}
       </View>
     </View>
+  )
+}
+
+function StripButton({
+  icon,
+  label,
+  accessibilityLabel,
+  labelled,
+  primary = false,
+  onPress,
+}: {
+  icon: LucideIcon
+  label: string
+  accessibilityLabel: string
+  labelled: boolean
+  primary?: boolean
+  onPress: () => void
+}) {
+  const tint = primary ? "text-primary-foreground" : "text-foreground"
+  return (
+    <Button
+      size={labelled ? "default" : "icon"}
+      variant={primary ? "default" : "secondary"}
+      className={labelled ? "min-h-11 gap-2 px-4" : "min-h-11 min-w-11"}
+      accessibilityLabel={accessibilityLabel}
+      onPress={onPress}
+    >
+      <Icon as={icon} size={18} className={tint} />
+      {labelled && <Text className={tint}>{label}</Text>}
+    </Button>
   )
 }

@@ -170,11 +170,18 @@ export default function BookDetailsScreen() {
               height={352}
               width={232}
             />
-            <Text className="font-youngserif mt-4 mb-1 text-2xl" variant="h1">
+            {/* Full width: measured to their own width, Android cut the last
+                word of a wrapping title or subtitle after a re-render. */}
+            <Text
+              className="font-youngserif mt-4 mb-1 self-stretch text-2xl"
+              variant="h1"
+            >
               {book.title}
             </Text>
             {book.subtitle && (
-              <Text className="mb-4 text-base italic">{book.subtitle}</Text>
+              <Text className="mb-4 self-stretch text-base italic">
+                {book.subtitle}
+              </Text>
             )}
             <Stack className="mb-4 gap-1 pl-0">
               <Group>

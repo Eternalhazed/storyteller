@@ -1,21 +1,15 @@
-import {
-  type HelperMessage,
-  type HelperTurn,
-} from "@storyteller/web/src/recommendations/helper"
+import { skipToken } from "@reduxjs/toolkit/query"
+import { type HelperTurn } from "@storyteller/web/src/recommendations/helper"
 import {
   type AskCard,
   type AskResult,
   type RoundView,
 } from "@storyteller/web/src/recommendations/types"
 import { Link, useLocalSearchParams } from "expo-router"
+import { useHeaderHeight } from "expo-router/react-navigation"
 import { Mic, Square } from "lucide-react-native"
 import { useEffect, useEffectEvent, useRef, useState } from "react"
-import {
-  Platform,
-  ScrollView,
-  type ScrollViewInstance,
-  View,
-} from "react-native"
+import { ScrollView, type ScrollViewInstance, View } from "react-native"
 import { KeyboardAvoidingView } from "react-native-keyboard-controller"
 
 import {
@@ -39,10 +33,32 @@ import {
 } from "@/hooks/useRecommendations"
 import { usesSystemHeader } from "@/lib/nativeChrome"
 import { useAppDispatch } from "@/store/appState"
+import { helperHistory } from "@/store/helperTranscript"
 import { useListStatusesQuery, useUpdateStatusMutation } from "@/store/localApi"
+import { getRequestCard } from "@/store/requestCard"
 import { resolvedWorkHref, seriesLine } from "@/store/recommendations"
 import { serverApi } from "@/store/serverApi"
 import { type UUID } from "@/uuid"
+
+/** The reader's open request for this work, once they have tapped Get. */
+function useOpenRequest(
+  serverUuid: UUID,
+  work: AskCard["work"],
+  enabled: boolean,
+) {
+  const { currentData: requests } = serverApi.useListRequestsQuery(
+    enabled ? { serverUuid, open: true } : skipToken,
+  )
+  const key = (title: string, author: string | undefined) =>
+    `${title}|${author ?? ""}`.toLowerCase().replace(/[^\p{L}\p{N}|]+/gu, "")
+  const wanted = key(work.title, work.authors[0])
+  const asin = work.ids?.["asin"]
+  return requests?.find(
+    (request) =>
+      (!!asin && request.work.ids?.["asin"] === asin) ||
+      key(request.work.title, request.work.authors[0]) === wanted,
+  )
+}
 
 function AskBookCard({
   card,
@@ -56,6 +72,11 @@ function AskBookCard({
   offline: boolean
 }) {
   const { work, series, bookUuid, state } = card
+  const request = useOpenRequest(
+    serverUuid,
+    work,
+    requestsEnabled && (state === "get" || state === "household"),
+  )
   return (
     <View className="border-border bg-card flex-row items-start gap-3 rounded-lg border p-3">
       <RecommendationCover url={work.coverUrl} />
@@ -79,6 +100,14 @@ function AskBookCard({
                 : "On your To read"
             }
           />
+        ) : request ? (
+          <View className="bg-secondary self-start rounded-md px-3 py-1.5">
+            <Text className="text-secondary-foreground text-sm">
+              {["Requested", getRequestCard(request).status]
+                .filter(Boolean)
+                .join(" · ")}
+            </Text>
+          </View>
         ) : (state === "household" || state === "get") && requestsEnabled ? (
           <Link href={resolvedWorkHref(serverUuid, work)} asChild>
             <Button className="self-start" size="flex" disabled={offline}>
@@ -347,9 +376,7 @@ function HelperConversation({
     dictation.clearError()
     setPending(readerText)
     const entry = { role: "reader", text: readerText } as const
-    const messages: HelperMessage[] = [...entries, entry]
-      .slice(-20)
-      .map(({ role, text }) => ({ role, text }))
+    const messages = helperHistory([...entries, entry])
     try {
       const turn = await send({ serverUuid, messages }).unwrap()
       scrollToLatest.current = true
@@ -388,12 +415,14 @@ function HelperConversation({
     active?.role === "helper" ? active.turn.chips : opening.currentData?.chips
   const elapsed = `0:${String(dictation.elapsed).padStart(2, "0")}`
 
+  const headerHeight = useHeaderHeight()
   return (
     <KeyboardAvoidingView
-      className="flex-1"
+      style={{ flex: 1 }}
       behavior="padding"
-      enabled={Platform.OS === "ios"}
-      automaticOffset
+      // The screen sits below the navigation header, which the keyboard's
+      // window coordinates count.
+      keyboardVerticalOffset={headerHeight}
     >
       <ScreenBackButton />
       <ScrollView
@@ -524,6 +553,9 @@ function HelperConversation({
               maxLength={1000}
               editable={pending === null && !dictating}
               multiline
+              returnKeyType="send"
+              submitBehavior="submit"
+              onSubmitEditing={() => void submit(text)}
             />
             {(speechEnabled || dictating) && (
               <Button

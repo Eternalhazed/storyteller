@@ -1,3 +1,4 @@
+import { skipToken } from "@reduxjs/toolkit/query"
 import { type RequestView } from "@storyteller/web/src/requests/http"
 import { Link, useRouter } from "expo-router"
 import {
@@ -8,9 +9,10 @@ import {
   type LucideIcon,
 } from "lucide-react-native"
 import { useState } from "react"
-import { View } from "react-native"
+import { View, useWindowDimensions } from "react-native"
 
 import { useAppDispatch } from "@/store/appState"
+import { useGetBookQuery } from "@/store/localApi"
 import { getRequestCard, REQUEST_FORMAT_LABEL } from "@/store/requestCard"
 import { requestErrorMessage } from "@/store/requestErrors"
 import {
@@ -21,6 +23,8 @@ import {
 import { serverApi } from "@/store/serverApi"
 import { type UUID } from "@/uuid"
 
+import { AudiobookCover } from "./AudiobookCover"
+import { EbookCover } from "./EbookCover"
 import { HomeStripProgress } from "./HomeStripProgress"
 import { homeRequestStatus } from "./homeRequestStatus"
 import { Button } from "./ui/button"
@@ -39,7 +43,12 @@ export function OpenRequestedBook({
   serverUuid: UUID
   label?: string
   onOpened?: (() => void) | undefined
-  compact?: { icon: LucideIcon; onError: (message: string | null) => void }
+  compact?: {
+    icon: LucideIcon
+    onError: (message: string | null) => void
+    /** Shown next to the icon where there is room (tablets). */
+    shortLabel?: string | undefined
+  }
 }) {
   const dispatch = useAppDispatch()
   const router = useRouter()
@@ -73,14 +82,19 @@ export function OpenRequestedBook({
   if (compact) {
     return (
       <Button
-        size="icon"
-        className="min-h-11 min-w-11"
+        size={compact.shortLabel ? "default" : "icon"}
+        className={
+          compact.shortLabel ? "min-h-11 gap-2 px-4" : "min-h-11 min-w-11"
+        }
         accessibilityLabel={label}
         accessibilityState={{ busy: opening }}
         disabled={opening}
         onPress={openBook}
       >
         <Icon as={compact.icon} size={18} className="text-primary-foreground" />
+        {compact.shortLabel && (
+          <Text className="text-primary-foreground">{compact.shortLabel}</Text>
+        )}
       </Button>
     )
   }
@@ -102,6 +116,12 @@ export function OpenRequestedBook({
   )
 }
 
+const SHORT_LABEL: Record<string, string> = {
+  "Open read-along": "Read along",
+  "Read ebook now": "Read",
+  "Listen now": "Listen",
+}
+
 export function RequestSummary({
   request,
   serverUuid,
@@ -119,6 +139,11 @@ export function RequestSummary({
     serverApi.useDismissRequestMutation()
   const [error, setError] = useState<string | null>(null)
   const requestUuid = request.uuid
+  // Once imported and synced to this device, the strip shows the real cover.
+  const { currentData: localBook } = useGetBookQuery(
+    home ? { uuid: request.bookUuid } : skipToken,
+  )
+  const labelled = useWindowDimensions().width >= 600
 
   async function retry() {
     setError(null)
@@ -159,8 +184,15 @@ export function RequestSummary({
     return (
       <View className="border-border bg-card gap-1 rounded-xl border p-2">
         <View className="flex-row items-center gap-2">
-          <View className="bg-secondary h-16 w-11 shrink-0 items-center justify-center rounded">
-            <Icon as={Download} size={18} className="text-muted-foreground" />
+          <View className="bg-secondary h-16 w-11 shrink-0 items-center justify-center overflow-hidden rounded">
+            {(localBook?.ebookCoverUrl ?? localBook?.textCoverSha256) ? (
+              <EbookCover book={localBook} />
+            ) : (localBook?.audiobookCoverUrl ??
+              localBook?.audioCoverSha256) ? (
+              <AudiobookCover book={localBook} />
+            ) : (
+              <Icon as={Download} size={18} className="text-muted-foreground" />
+            )}
           </View>
           <View className="min-w-0 flex-1 gap-1">
             <Text className="font-semibold" numberOfLines={1}>
@@ -182,6 +214,7 @@ export function RequestSummary({
                 compact={{
                   icon: card.primary === "Listen now" ? Headphones : BookOpen,
                   onError: setError,
+                  shortLabel: labelled ? SHORT_LABEL[card.primary] : undefined,
                 }}
                 onOpened={
                   card.dismissOnOpen
